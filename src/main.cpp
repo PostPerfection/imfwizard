@@ -1,6 +1,7 @@
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cinttypes>
 #include <filesystem>
 #include <string>
@@ -88,10 +89,11 @@ int main(int argc, char* argv[])
   create_cmd->add_option("-t,--title", title, "Content title")->required();
   create_cmd->add_option("-i,--issuer", issuer, "Issuer name")->default_val("IMF Wizard");
   create_cmd->add_option("-k,--kind", content_kind, "Content kind")->default_val("feature");
-  create_cmd->add_option("-v,--video", video_dir, "Directory of J2K codestreams")
+  create_cmd->add_option("-v,--video", video_dir, "Video file or image sequence directory")
       ->required()
-      ->check(CLI::ExistingDirectory);
-  create_cmd->add_option("-a,--audio", audio_file, "WAV audio file")->check(CLI::ExistingFile);
+      ->check(CLI::ExistingPath);
+  create_cmd->add_option("-a,--audio", audio_file, "WAV audio file (auto-extracted from video if omitted)")
+      ->check(CLI::ExistingFile);
   create_cmd->add_option("-o,--output", output_dir, "Output IMP directory")->required();
   create_cmd->add_option("--fps-num", fps_num, "Edit rate numerator")->default_val(24);
   create_cmd->add_option("--fps-den", fps_den, "Edit rate denominator")->default_val(1);
@@ -1021,12 +1023,59 @@ int main(int argc, char* argv[])
 
   if(create_cmd->parsed())
   {
+    namespace fs = std::filesystem;
+
+    // Auto-detect video file (MP4, MOV, etc.) and transcode
+    std::string effective_video = video_dir;
+    std::string effective_audio = audio_file;
+
+    if(fs::is_regular_file(video_dir))
+    {
+      auto ext = fs::path(video_dir).extension().string();
+      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+      if(ext == ".mp4" || ext == ".mov" || ext == ".mkv" || ext == ".mxf" ||
+         ext == ".avi" || ext == ".ts" || ext == ".m2ts")
+      {
+        spdlog::info("Input is a video file — transcoding to image sequence...");
+        fs::create_directories(output_dir);
+        auto transcode_dir = fs::path(output_dir) / "transcode_tmp";
+
+        imfwizard::TranscodeOptions tc;
+        tc.input_file = video_dir;
+        tc.output_dir = transcode_dir;
+        tc.bit_depth = 16;
+
+        auto tc_result = imfwizard::transcode_to_sequence(tc);
+        if(!tc_result.success)
+        {
+          spdlog::error("Transcode failed: {}", tc_result.error);
+          return 1;
+        }
+
+        effective_video = tc_result.output_dir.string();
+
+        // Extract audio if not explicitly provided
+        if(effective_audio.empty())
+        {
+          auto wav_path = transcode_dir / "audio.wav";
+          std::string acmd = "ffmpeg -y -i \"" + video_dir +
+                             "\" -vn -acodec pcm_s24le -ar 48000 \"" +
+                             wav_path.string() + "\" 2>/dev/null";
+          if(system(acmd.c_str()) == 0 && fs::exists(wav_path))
+          {
+            effective_audio = wav_path.string();
+            spdlog::info("Using extracted audio: {}", effective_audio);
+          }
+        }
+      }
+    }
+
     imfwizard::ImpOptions opts;
     opts.title = title;
     opts.issuer = issuer;
     opts.content_kind = content_kind;
-    opts.video_dir = video_dir;
-    opts.audio_file = audio_file;
+    opts.video_dir = effective_video;
+    opts.audio_file = effective_audio;
     opts.subtitle_file = subtitle_file;
     opts.output_dir = output_dir;
     opts.edit_rate_num = fps_num;

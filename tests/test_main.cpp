@@ -439,6 +439,101 @@ void test_supplemental_nonexistent()
   ASSERT(!result.success);
 }
 
+// --- Transcode & video file tests ---
+
+void test_ffmpeg_available()
+{
+  ASSERT(imfwizard::ffmpeg_available());
+}
+
+void test_ffprobe_available()
+{
+  ASSERT(imfwizard::ffprobe_available());
+}
+
+void test_transcode_result_defaults()
+{
+  imfwizard::TranscodeResult result;
+  ASSERT(result.frame_count == 0);
+  ASSERT(result.width == 0);
+  ASSERT(result.height == 0);
+  ASSERT(result.fps == 0.0);
+  ASSERT(!result.success);
+  ASSERT(result.error.empty());
+}
+
+void test_transcode_options_defaults()
+{
+  imfwizard::TranscodeOptions opts;
+  ASSERT(opts.output_format == "tiff");
+  ASSERT(opts.bit_depth == 16);
+  ASSERT(opts.start_frame == 0);
+  ASSERT(opts.end_frame == 0);
+  ASSERT(opts.threads == 0);
+}
+
+void test_detect_format_j2k()
+{
+  ASSERT(imfwizard::detect_format("/tmp/test.j2c") == imfwizard::ImageFormat::J2K);
+  ASSERT(imfwizard::detect_format("/tmp/test.j2k") == imfwizard::ImageFormat::J2K);
+  ASSERT(imfwizard::detect_format("/tmp/test.jp2") == imfwizard::ImageFormat::J2K);
+}
+
+void test_detect_format_image_types()
+{
+  ASSERT(imfwizard::detect_format("/tmp/test.dpx") == imfwizard::ImageFormat::DPX);
+  ASSERT(imfwizard::detect_format("/tmp/test.tif") == imfwizard::ImageFormat::TIFF);
+  ASSERT(imfwizard::detect_format("/tmp/test.tiff") == imfwizard::ImageFormat::TIFF);
+  ASSERT(imfwizard::detect_format("/tmp/test.exr") == imfwizard::ImageFormat::EXR);
+  ASSERT(imfwizard::detect_format("/tmp/test.png") == imfwizard::ImageFormat::PNG);
+  ASSERT(imfwizard::detect_format("/tmp/test.bmp") == imfwizard::ImageFormat::BMP);
+}
+
+void test_detect_format_unknown()
+{
+  ASSERT(imfwizard::detect_format("/tmp/test.mp4") == imfwizard::ImageFormat::Unknown);
+  ASSERT(imfwizard::detect_format("/tmp/test.txt") == imfwizard::ImageFormat::Unknown);
+}
+
+void test_detect_sequence_empty_dir()
+{
+  auto tmp = fs::temp_directory_path() / "imfwiz_test_empty_seq";
+  fs::create_directories(tmp);
+  ASSERT(imfwizard::detect_sequence_format(tmp) == imfwizard::ImageFormat::Unknown);
+  fs::remove_all(tmp);
+}
+
+void test_count_frames_empty()
+{
+  auto tmp = fs::temp_directory_path() / "imfwiz_test_count_empty";
+  fs::create_directories(tmp);
+  ASSERT(imfwizard::count_frames(tmp) == 0);
+  fs::remove_all(tmp);
+}
+
+void test_count_frames_with_files()
+{
+  auto tmp = fs::temp_directory_path() / "imfwiz_test_count_frames";
+  fs::create_directories(tmp);
+  { std::ofstream f(tmp / "frame_001.tiff"); f << "fake"; }
+  { std::ofstream f(tmp / "frame_002.tiff"); f << "fake"; }
+  { std::ofstream f(tmp / "frame_003.tiff"); f << "fake"; }
+  { std::ofstream f(tmp / "readme.txt"); f << "not a frame"; }
+  ASSERT(imfwizard::count_frames(tmp) == 3);
+  fs::remove_all(tmp);
+}
+
+void test_imp_create_invalid_video()
+{
+  imfwizard::ImpOptions opts;
+  opts.title = "Test";
+  opts.video_dir = "/nonexistent_video_dir_xyz123";
+  opts.output_dir = "/tmp/imfwiz_test_fail";
+  auto result = imfwizard::create_ov_imp(opts);
+  ASSERT(!result.success);
+  ASSERT(!result.error.empty());
+}
+
 int main()
 {
   spdlog::info("IMF Wizard Tests");
@@ -515,6 +610,19 @@ int main()
 
   spdlog::info("Supplemental:");
   TEST(test_supplemental_nonexistent);
+
+  spdlog::info("Transcode & Video:");
+  TEST(test_ffmpeg_available);
+  TEST(test_ffprobe_available);
+  TEST(test_transcode_result_defaults);
+  TEST(test_transcode_options_defaults);
+  TEST(test_detect_format_j2k);
+  TEST(test_detect_format_image_types);
+  TEST(test_detect_format_unknown);
+  TEST(test_detect_sequence_empty_dir);
+  TEST(test_count_frames_empty);
+  TEST(test_count_frames_with_files);
+  TEST(test_imp_create_invalid_video);
 
   spdlog::info("{}/{} tests passed", tests_passed, tests_run);
   return (tests_passed == tests_run) ? 0 : 1;
