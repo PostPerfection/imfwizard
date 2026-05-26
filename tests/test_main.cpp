@@ -443,12 +443,20 @@ void test_supplemental_nonexistent()
 
 void test_ffmpeg_available()
 {
-  ASSERT(imfwizard::ffmpeg_available());
+  bool avail = imfwizard::ffmpeg_available();
+  if (system("which ffmpeg >/dev/null 2>&1") == 0)
+    ASSERT(avail);
+  else
+    ASSERT(!avail);
 }
 
 void test_ffprobe_available()
 {
-  ASSERT(imfwizard::ffprobe_available());
+  bool avail = imfwizard::ffprobe_available();
+  if (system("which ffprobe >/dev/null 2>&1") == 0)
+    ASSERT(avail);
+  else
+    ASSERT(!avail);
 }
 
 void test_transcode_result_defaults()
