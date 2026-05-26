@@ -85,7 +85,7 @@ bool sign_xml(const std::filesystem::path& xml_path, const SignOptions& opts)
   xml_in.close();
 
   // Load private key
-  FILE* key_fp = fopen(opts.key_file.c_str(), "r");
+  FILE* key_fp = fopen(opts.key_file.string().c_str(), "r");
   if (!key_fp)
   {
     spdlog::error("Cannot open key file");
@@ -100,7 +100,7 @@ bool sign_xml(const std::filesystem::path& xml_path, const SignOptions& opts)
   }
 
   // Load certificate for X509Data
-  FILE* cert_fp = fopen(opts.cert_file.c_str(), "r");
+  FILE* cert_fp = fopen(opts.cert_file.string().c_str(), "r");
   X509* cert = nullptr;
   if (cert_fp)
   {
