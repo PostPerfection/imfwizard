@@ -1,0 +1,31 @@
+Source: imfwizard
+Section: video
+Priority: optional
+Maintainer: Post Perfection <dev@postperfection.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc (>= 1.75),
+               cmake,
+               pkg-config,
+               libxml2-dev,
+               libssl-dev,
+               libxerces-c-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/PostPerfection/imfwizard
+Vcs-Git: https://github.com/PostPerfection/imfwizard.git
+Vcs-Browser: https://github.com/PostPerfection/imfwizard
+Rules-Requires-Root: no
+
+Package: imfwizard
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: ffmpeg, mpv
+Description: Interoperable Master Format (IMF) package creator
+ IMF Wizard creates valid IMF packages (Interoperable Master Packages)
+ from video sources, image sequences, and WAV audio, conforming to
+ SMPTE ST 2067 (App#2E).
+ .
+ Features include JPEG 2000 encoding, HDR/Dolby Vision support,
+ multi-language audio with MCA labels, subtitle packaging,
+ platform-specific delivery presets (Netflix, Disney+, Amazon, Apple),
+ and integrated quality control.

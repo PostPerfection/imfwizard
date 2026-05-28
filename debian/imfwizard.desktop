@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=IMF Wizard
+Comment=Interoperable Master Format (IMF) package creator
+Exec=imfwizard-gui
+Icon=imfwizard
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;
+Keywords=IMF;Cinema;JPEG2000;MXF;Mastering;

@@ -1,0 +1,10 @@
+imfwizard (1.0.0-1) unstable; urgency=medium
+
+  * Initial release.
+  * Full IMF package creation (SMPTE ST 2067 App#2E)
+  * JPEG 2000 encoding via OpenJPEG (CPU) and Grok (GPU)
+  * HDR/Dolby Vision/HDR10+ support
+  * Platform delivery presets (Netflix, Disney+, Amazon, Apple)
+  * CLI and desktop GUI (Tauri 2)
+
+ -- Post Perfection <dev@postperfection.com>  Mon, 20 Jan 2025 00:00:00 +0000
