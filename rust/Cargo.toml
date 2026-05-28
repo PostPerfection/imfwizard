@@ -5,12 +5,12 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "GPL-3.0-or-later"
-version = "0.5.0"
+version = "1.0.0"
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
-dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", tag = "v0.5.0" }
+dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", tag = "v1.0.0" }
 postkit = { path = "../extern/postkit" }
 quick-xml = "0.37"
 serde = { version = "1", features = ["derive"] }
