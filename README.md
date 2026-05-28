@@ -131,40 +131,81 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Content version tracker** — SQLite database tracking version history and delivery destinations
 - **Accessibility compliance** — verify AD/HI/SL tracks against CVAA, EAA, AODA, Ofcom standards
 
-## Building
+## Installation
+
+### Pre-built binaries (recommended)
+
+Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/releases/latest) page:
+
+| Platform | CLI | Desktop GUI |
+|----------|-----|-------------|
+| **Linux** (x86_64) | `imfwizard-linux-x86_64.tar.gz` | `.deb`, `.AppImage` |
+| **macOS** (Apple Silicon) | `imfwizard-macos-aarch64.tar.gz` | `.dmg` |
+| **Windows** (x86_64) | `imfwizard-windows-x86_64.zip` | `.msi` |
+
+The CLI binary is fully self-contained (all dependencies statically linked). Extract and run.
+
+### Install from source
+
+#### Linux (Ubuntu/Debian)
 
 ```bash
+sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev
+# For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
 cd rust
 cargo build --release
-cargo test
+# Binary at rust/target/release/imfwizard
 ```
 
-The Rust workspace uses [postkit](https://github.com/PostPerfection/postkit) and [dcpdoctor-core](https://github.com/PostPerfection/dcpdoctor) as git dependencies. MXF wrapping uses [asdcplib-rs](https://github.com/PostPerfection/asdcplib-rs) FFI bindings.
+#### macOS
+
+```bash
+brew install cmake pkg-config libxml2 openssl@3 xerces-c
+
+export OPENSSL_DIR=$(brew --prefix openssl@3)
+export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig"
+export CMAKE_PREFIX_PATH="$(brew --prefix libxml2);$(brew --prefix xerces-c)"
+
+cd rust
+cargo build --release
+```
+
+#### Windows
+
+```powershell
+# Using vcpkg (recommended)
+vcpkg install libxml2 openssl xerces-c --triplet x64-windows
+
+$env:VCPKG_ROOT = "$env:VCPKG_INSTALLATION_ROOT"
+$env:CMAKE_TOOLCHAIN_FILE = "$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+cd rust
+cargo build --release
+```
 
 ### Optional runtime dependencies
 
-- **grok** — for image→J2K encoding and decoding (GPU and CPU)
-- **ffmpeg** / **ffprobe** — for transcoding, loudness, channel remapping, quality metrics
-- **dovi_tool** — for Dolby Vision RPU injection
-- **hdr10plus_tool** — for HDR10+ dynamic metadata injection
-- **Java** + **Netflix Photon** — for IMF validation
-- **AWS CLI** — for S3 upload
+| Dependency | Purpose | Install |
+|-----------|---------|---------|
+| `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
+| `mpv` | GUI preview player | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
+| `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
+| `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
+| Java + Photon | IMF validation via Netflix Photon | `apt install default-jre` / `brew install openjdk` |
+| AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 
-### GUI (Tauri 2)
+### Docker
+
+```bash
+docker build -t imfwizard .
+docker run -v /path/to/media:/data imfwizard create \
+    --title "My Film" --video /data/j2k --audio /data/audio.wav --output /data/imp
+```
+
+### Desktop GUI (Tauri 2)
 
 The desktop app uses a single-window layout with sidebar navigation, inspired by professional NLEs.
-
-**GUI features:**
-- Drag & drop file import (video, audio, timed text)
-- Keyboard shortcuts (Ctrl+N/O/B/P/I, Ctrl+Shift+S for supplement, Ctrl+1–7 for views)
-- Recent projects quick-access list
-- Right-click context menus on assets (Preview, Remove, Show in Files)
-- Asset filter / search
-- Auto-detect framerate from imported video (via ffprobe)
-- Progress in title bar (visible in taskbar during builds)
-- Desktop notifications on build complete/fail
-- Conditional button enabling (Build/Preview disabled until ready)
-- Built-in mpv preview player (space = play/pause, arrows = seek)
 
 ```bash
 cd gui
