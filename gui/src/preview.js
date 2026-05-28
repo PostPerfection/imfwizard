@@ -2,76 +2,29 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 
-let lastBrowsePath = null;
-
 export function initPreview() {
-  // Preview source video (button next to browse-video)
-  const previewSourceBtn = document.getElementById('preview-source');
-  previewSourceBtn?.addEventListener('click', () => {
-    const path = document.getElementById('video-path')?.textContent;
-    if (path && !path.startsWith('No ')) {
-      invoke('preview_load', { filePath: path }).catch((e) => {
-        console.error('[preview] Failed to load source:', e);
-      });
-    }
-  });
-
-  const selectBtn = document.getElementById('prev-select');
-  const selectDirBtn = document.getElementById('prev-select-dir');
-  selectBtn?.addEventListener('click', async () => {
-    const path = await open({
-      directory: false,
-      multiple: false,
-      defaultPath: lastBrowsePath || undefined,
-      filters: [
-        { name: 'Video', extensions: ['mp4', 'mkv', 'mov', 'avi', 'mxf', 'webm', 'ogg'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    });
-    if (path) {
-      lastBrowsePath = path.replace(/[/\\][^/\\]*$/, '');
-      document.getElementById('prev-path').textContent = path;
-      invoke('preview_load', { filePath: path }).catch((e) => {
-        console.error('[preview] Failed to load:', e);
-        document.getElementById('prev-time').textContent = 'Error: ' + e;
-      });
-    }
-  });
-
-  selectDirBtn?.addEventListener('click', async () => {
-    const path = await open({ directory: true, multiple: false, defaultPath: lastBrowsePath || undefined });
-    if (path) {
-      lastBrowsePath = path;
-      document.getElementById('prev-path').textContent = path;
-      invoke('preview_load', { filePath: path }).catch((e) => {
-        console.error('[preview] Failed to load:', e);
-        document.getElementById('prev-time').textContent = 'Error: ' + e;
-      });
-    }
-  });
-
-  // DCP/IMP replay
-  const replayDcpBtn = document.getElementById('prev-replay-dcp');
-  replayDcpBtn?.addEventListener('click', async () => {
-    const path = await open({ directory: true, multiple: false, defaultPath: lastBrowsePath || undefined });
-    if (path) {
-      lastBrowsePath = path;
-      document.getElementById('prev-dcp-path').textContent = path;
-      invoke('preview_load_dcp', { dirPath: path }).catch((e) => {
-        console.error('[preview] Failed to load DCP/IMP:', e);
-        document.getElementById('prev-time').textContent = 'Error: ' + e;
-      });
-    }
-  });
-
-  // Keyboard shortcuts
+  // Keyboard shortcuts for preview (space=play/pause, arrows=seek)
   document.addEventListener('keydown', (e) => {
-    if (document.getElementById('create-page')?.classList.contains('active')) {
-      if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
-        e.preventDefault(); invoke('preview_play_pause');
-      }
-      if (e.key === 'ArrowLeft') invoke('preview_seek', { seconds: -5.0 });
-      if (e.key === 'ArrowRight') invoke('preview_seek', { seconds: 5.0 });
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === ' ') {
+      e.preventDefault();
+      invoke('preview_play_pause').catch(() => {});
     }
+    if (e.key === 'ArrowLeft') invoke('preview_seek', { seconds: -5.0 }).catch(() => {});
+    if (e.key === 'ArrowRight') invoke('preview_seek', { seconds: 5.0 }).catch(() => {});
+  });
+}
+
+/// Load a file into the preview player
+export function previewFile(filePath) {
+  invoke('preview_load', { filePath }).catch((e) => {
+    console.error('[preview] Failed to load:', e);
+  });
+}
+
+/// Load a DCP directory into the preview player
+export function previewDcp(dirPath) {
+  invoke('preview_load_dcp', { dirPath }).catch((e) => {
+    console.error('[preview] Failed to load DCP:', e);
   });
 }

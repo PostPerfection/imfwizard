@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open } from "@tauri-apps/plugin-dialog";
 import { documentDir, join } from "@tauri-apps/api/path";
-import { initPreview } from "./preview.js";
+import { initPreview, previewFile, previewDcp } from "./preview.js";
 
 // === Browse wrapper ===
 let lastBrowseDir = null;
@@ -245,6 +245,13 @@ document.getElementById("btn-open-project")?.addEventListener("click", async () 
     document.getElementById("prop-title").value = name;
     setStatus(`Opened: ${dir}`);
   }
+});
+
+// === Preview ===
+document.getElementById("btn-preview")?.addEventListener("click", () => {
+  const seg = project.segments[0];
+  if (seg?.picture) { previewFile(seg.picture.path); }
+  else { alert("Import a video asset first"); }
 });
 
 // === Build IMP ===
