@@ -28,6 +28,14 @@ enum Commands {
         #[arg(short, long)]
         title: String,
 
+        /// Video file (mp4/mov/mkv) or J2K directory
+        #[arg(long)]
+        video: Option<String>,
+
+        /// Audio WAV file (auto-demuxed from video if not provided)
+        #[arg(long)]
+        audio: Option<String>,
+
         /// Content kind (feature, trailer, etc.)
         #[arg(short, long, default_value = "feature")]
         kind: String,
@@ -163,16 +171,136 @@ fn main() {
         Commands::Create {
             output,
             title,
+            video,
+            audio,
             kind,
             fps_num,
             fps_den,
         } => {
+            let _ = std::fs::create_dir_all(&output);
+
+            // If video is a file, run encode pipeline
+            let (j2k_dir, audio_files) = if let Some(ref vid) = video {
+                let video_path = PathBuf::from(vid);
+                let is_video_file = video_path.is_file()
+                    && video_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| {
+                            matches!(
+                                e.to_lowercase().as_str(),
+                                "mp4" | "mov" | "mkv" | "avi" | "mxf" | "ts" | "m2ts" | "webm"
+                            )
+                        })
+                        .unwrap_or(false);
+
+                if is_video_file {
+                    use postkit::encode::{StreamEncodeOptions, find_compressor, stream_encode};
+                    use std::sync::Arc;
+                    use std::sync::atomic::AtomicBool;
+
+                    let (compressor_path, lib_dir) = match find_compressor() {
+                        Some(c) => c,
+                        None => {
+                            eprintln!(
+                                "Error: grk_compress not found (required for video encoding)"
+                            );
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let j2k_out = output.join("j2k");
+                    let _ = std::fs::create_dir_all(&j2k_out);
+
+                    tracing::info!("Detected video file — encoding to J2K");
+                    tracing::info!("Compressor: {}", compressor_path.display());
+
+                    let opts = StreamEncodeOptions {
+                        input: video_path.clone(),
+                        output_dir: j2k_out.clone(),
+                        compression_ratio: 10.0,
+                        num_resolutions: 6,
+                        codeblock_size: 32,
+                        progression: "CPRL".to_string(),
+                        fps: fps_num,
+                        compressor_path,
+                        lib_dir,
+                    };
+
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    let pause = Arc::new(AtomicBool::new(false));
+                    let cancel_clone = cancel.clone();
+                    let _ = ctrlc::set_handler(move || {
+                        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                    });
+
+                    let result = stream_encode(&opts, &cancel, &pause, |p| {
+                        let percent = if p.total_frames > 0 {
+                            (p.frame as f64 / p.total_frames as f64) * 100.0
+                        } else {
+                            0.0
+                        };
+                        eprint!(
+                            "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+                            p.frame, p.total_frames, percent, p.fps
+                        );
+                    });
+                    eprintln!();
+
+                    if !result.success {
+                        eprintln!("Error: Encode failed: {}", result.error);
+                        std::process::exit(1);
+                    }
+                    tracing::info!("Encoded {} frames", result.frames_encoded);
+
+                    // Auto-demux audio
+                    let audio_files = if let Some(a) = audio {
+                        vec![PathBuf::from(a)]
+                    } else {
+                        let wav_out = output.join("audio_demux.wav");
+                        let demux = std::process::Command::new("ffmpeg")
+                            .arg("-y")
+                            .arg("-i")
+                            .arg(&video_path)
+                            .arg("-vn")
+                            .arg("-acodec")
+                            .arg("pcm_s24le")
+                            .arg("-ar")
+                            .arg("48000")
+                            .arg(&wav_out)
+                            .output();
+                        match demux {
+                            Ok(o) if o.status.success() => {
+                                tracing::info!("Demuxed audio: {}", wav_out.display());
+                                vec![wav_out]
+                            }
+                            _ => vec![],
+                        }
+                    };
+
+                    (Some(j2k_out), audio_files)
+                } else {
+                    // Assume it's a J2K directory
+                    (
+                        Some(video_path),
+                        audio.map(|a| vec![PathBuf::from(a)]).unwrap_or_default(),
+                    )
+                }
+            } else {
+                (
+                    None,
+                    audio.map(|a| vec![PathBuf::from(a)]).unwrap_or_default(),
+                )
+            };
+
             let opts = imfwizard_core::imp::ImpOptions {
                 output_dir: output,
                 title,
                 content_kind: kind,
                 fps_num,
                 fps_den,
+                j2k_dir,
+                audio_files,
                 ..Default::default()
             };
             let result = imfwizard_core::imp::create_imp(&opts);

@@ -47,27 +47,50 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
     // 2. Wrap J2K codestreams into MXF track file
     let mut track_files = Vec::new();
-    if let Some(j2k_dir) = &opts.j2k_dir {
-        if j2k_dir.is_dir() {
-            let video_uuid = uuid::Uuid::new_v4().to_string();
-            let mxf_path = opts.output_dir.join(format!("VIDEO_{video_uuid}.mxf"));
-            let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
-                input_dir: j2k_dir.clone(),
-                output_file: mxf_path,
-                essence_type: crate::EssenceType::J2k,
-                edit_rate_num: opts.fps_num,
-                edit_rate_den: opts.fps_den,
-                duration: opts.duration,
+    if let Some(j2k_dir) = &opts.j2k_dir
+        && j2k_dir.is_dir()
+    {
+        let video_uuid = uuid::Uuid::new_v4().to_string();
+        let mxf_path = opts.output_dir.join(format!("VIDEO_{video_uuid}.mxf"));
+        let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
+            input_dir: j2k_dir.clone(),
+            output_file: mxf_path,
+            essence_type: crate::EssenceType::J2k,
+            edit_rate_num: opts.fps_num,
+            edit_rate_den: opts.fps_den,
+            duration: opts.duration,
+        };
+        let wrap_result = crate::mxf_wrap::wrap_mxf(&wrap_opts);
+        if !wrap_result.success {
+            return ImpResult {
+                success: false,
+                error: format!("MXF wrapping failed: {}", wrap_result.error),
+                ..Default::default()
             };
-            let wrap_result = crate::mxf_wrap::wrap_mxf(&wrap_opts);
-            if !wrap_result.success {
-                return ImpResult {
-                    success: false,
-                    error: format!("MXF wrapping failed: {}", wrap_result.error),
-                    ..Default::default()
-                };
-            }
+        }
+        track_files.push(wrap_result.track_file);
+    }
+
+    // 2b. Wrap audio files into MXF track files
+    for audio_path in &opts.audio_files {
+        if !audio_path.exists() {
+            continue;
+        }
+        let audio_uuid = uuid::Uuid::new_v4().to_string();
+        let mxf_path = opts.output_dir.join(format!("AUDIO_{audio_uuid}.mxf"));
+        let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
+            input_dir: audio_path.clone(),
+            output_file: mxf_path,
+            essence_type: crate::EssenceType::Wav,
+            edit_rate_num: opts.fps_num,
+            edit_rate_den: opts.fps_den,
+            duration: opts.duration,
+        };
+        let wrap_result = crate::mxf_wrap::wrap_mxf(&wrap_opts);
+        if wrap_result.success {
             track_files.push(wrap_result.track_file);
+        } else {
+            tracing::warn!("Audio wrap failed: {}", wrap_result.error);
         }
     }
 
