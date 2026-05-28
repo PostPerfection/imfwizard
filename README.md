@@ -152,17 +152,25 @@ The Rust workspace uses [postkit](https://github.com/PostPerfection/postkit) and
 
 ### GUI (Tauri 2)
 
+The desktop app uses a single-window layout with sidebar navigation, inspired by professional NLEs.
+
+**GUI features:**
+- Drag & drop file import (video, audio, timed text)
+- Keyboard shortcuts (Ctrl+N/O/B/P/I, Ctrl+Shift+S for supplement, Ctrl+1–7 for views)
+- Recent projects quick-access list
+- Right-click context menus on assets (Preview, Remove, Show in Files)
+- Asset filter / search
+- Auto-detect framerate from imported video (via ffprobe)
+- Progress in title bar (visible in taskbar during builds)
+- Desktop notifications on build complete/fail
+- Conditional button enabling (Build/Preview disabled until ready)
+- Built-in mpv preview player (space = play/pause, arrows = seek)
+
 ```bash
 cd gui
 npm install
-npm run tauri dev
-```
-
-To build a release binary:
-
-```bash
-cd gui
-npm run tauri build
+npm run tauri dev      # development mode
+npm run tauri build    # production build
 ```
 
 The built app will be in `gui/src-tauri/target/release/bundle/`.
