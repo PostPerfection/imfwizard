@@ -100,7 +100,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
     // 4. Write CPL
     let cpl_path = opts.output_dir.join(format!("CPL_{cpl_uuid}.xml"));
-    if let Err(e) = crate::cpl::write_cpl(&cpl_path, &cpl_uuid, opts) {
+    if let Err(e) = crate::cpl::write_cpl(&cpl_path, &cpl_uuid, opts, &track_files) {
         return ImpResult {
             success: false,
             error: format!("Failed to write CPL: {e}"),

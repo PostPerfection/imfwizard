@@ -215,6 +215,22 @@ fn main() {
                     tracing::info!("Detected video file — encoding to J2K");
                     tracing::info!("Compressor: {}", compressor_path.display());
 
+                    // Probe for actual frame rate
+                    let probed = imfwizard_core::probe::probe_video(&video_path);
+                    let actual_fps = probed
+                        .as_ref()
+                        .map(|v| v.fps_num / v.fps_den.max(1))
+                        .unwrap_or(fps_num);
+                    if let Some(ref info) = probed {
+                        tracing::info!(
+                            "Input: {}x{} @ {}/{} fps",
+                            info.width,
+                            info.height,
+                            info.fps_num,
+                            info.fps_den
+                        );
+                    }
+
                     let opts = StreamEncodeOptions {
                         input: video_path.clone(),
                         output_dir: j2k_out.clone(),
@@ -222,7 +238,7 @@ fn main() {
                         num_resolutions: 6,
                         codeblock_size: 32,
                         progression: "CPRL".to_string(),
-                        fps: fps_num,
+                        fps: actual_fps,
                         compressor_path,
                         lib_dir,
                     };

@@ -7,6 +7,7 @@ pub mod pkl;
 
 // Encoding/transcoding
 pub mod encode;
+pub mod probe;
 pub mod transcode;
 
 // HDR/Color
