@@ -36,6 +36,41 @@ document.getElementById("theme-toggle")?.addEventListener("click", () => {
   btn.textContent = document.body.classList.contains("light") ? "☀️" : "🌙";
 });
 
+// === Keyboard shortcuts ===
+function switchView(viewName) {
+  document.querySelectorAll(".sidebar-btn").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+  const btn = document.querySelector(`.sidebar-btn[data-view="${viewName}"]`);
+  if (btn) btn.classList.add("active");
+  const view = document.getElementById(`view-${viewName}`);
+  if (view) view.classList.add("active");
+  if (viewName === "jobs") { refreshJobs(); startJobsPolling(); } else { stopJobsPolling(); }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+
+  const ctrl = e.ctrlKey || e.metaKey;
+  const shift = e.shiftKey;
+
+  if (ctrl && e.key === "n") { e.preventDefault(); document.getElementById("btn-new-project")?.click(); }
+  else if (ctrl && e.key === "o") { e.preventDefault(); document.getElementById("btn-open-project")?.click(); }
+  else if (ctrl && e.key === "b") { e.preventDefault(); document.getElementById("btn-build")?.click(); }
+  else if (ctrl && e.key === "p") { e.preventDefault(); document.getElementById("btn-preview")?.click(); }
+  else if (ctrl && e.key === "i") { e.preventDefault(); document.getElementById("import-video")?.click(); }
+  else if (ctrl && shift && e.key === "S") { e.preventDefault(); document.getElementById("btn-supplement")?.click(); }
+  // View switching: Ctrl+1-7
+  else if (ctrl && e.key === "1") { e.preventDefault(); switchView("project"); }
+  else if (ctrl && e.key === "2") { e.preventDefault(); switchView("timeline"); }
+  else if (ctrl && e.key === "3") { e.preventDefault(); switchView("validate"); }
+  else if (ctrl && e.key === "4") { e.preventDefault(); switchView("tools"); }
+  else if (ctrl && e.key === "5") { e.preventDefault(); switchView("deliver"); }
+  else if (ctrl && e.key === "6") { e.preventDefault(); switchView("jobs"); }
+  else if (ctrl && e.key === "7") { e.preventDefault(); switchView("settings"); }
+  // Theme toggle
+  else if (ctrl && shift && e.key === "T") { e.preventDefault(); document.getElementById("theme-toggle")?.click(); }
+});
+
 // === Preferences ===
 const PREFS_KEY = "imfwizard-preferences";
 const PREFS_VERSION = 2;
