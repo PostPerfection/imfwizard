@@ -19,6 +19,7 @@ pub mod hdr;
 // Audio
 pub mod audio;
 pub mod channel_map;
+pub mod mca;
 
 // Subtitles/Captions
 pub mod burnin;
