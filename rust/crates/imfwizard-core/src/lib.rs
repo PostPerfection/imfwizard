@@ -34,6 +34,7 @@ pub mod profiles;
 
 // Tools
 pub mod analytics;
+pub mod imp_diff;
 pub mod report;
 pub mod timecode;
 
