@@ -696,11 +696,13 @@ document.getElementById("btn-new-project")?.addEventListener("click", () => {
   project.segments = [{ id: 1, picture: null, sound: null, subtitle: null }];
   nextAssetId = 1;
   document.getElementById("prop-title").value = "";
+  document.getElementById("prop-output") && (document.getElementById("prop-output").value = "");
   document.getElementById("project-name").textContent = "Untitled IMP";
+  switchView("project");
   renderAssets();
   renderSegments();
   updateStatusStats();
-  setStatus("New project");
+  setStatus("New project created");
 });
 
 // === Status Bar Stats ===
