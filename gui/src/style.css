@@ -775,3 +775,88 @@ body {
   align-items: center;
   gap: 4px;
 }
+
+/* Context menu */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  min-width: 150px;
+}
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 14px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.context-menu button:hover {
+  background: var(--surface-hover);
+}
+
+/* Recent projects */
+.recent-panel {
+  margin-bottom: 8px;
+}
+.recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+}
+.recent-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  cursor: pointer;
+  min-width: 180px;
+  transition: background 0.15s;
+}
+.recent-item:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.recent-title {
+  display: block;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.recent-path {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+/* Asset filter */
+.asset-filter {
+  width: 120px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+.asset-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Status stats */
+.status-stats {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-left: 12px;
+}

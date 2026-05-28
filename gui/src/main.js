@@ -185,7 +185,7 @@ document.getElementById("import-subtitle")?.addEventListener("click", async () =
 
 function importAssetFromPath(path, type) {
   const name = path.split(/[/\\]/).pop();
-  const asset = { id: nextAssetId++, type, path, name };
+  const asset = { id: nextAssetId++, type, path, name, meta: '' };
   project.assets.push(asset);
 
   const seg = project.segments[0];
@@ -195,7 +195,29 @@ function importAssetFromPath(path, type) {
 
   renderAssets();
   renderSegments();
+  updateStatusStats();
   setStatus(`Imported: ${name}`);
+
+  // Auto-detect video properties
+  if (type === 'video') {
+    probeVideo(path).then(info => {
+      if (!info) return;
+      asset.meta = `${info.width}×${info.height} ${info.fps}`;
+      if (project.assets.filter(a => a.type === 'video').length === 1) {
+        const fpsMatch = info.fps?.match(/^(\d+)\/1$/);
+        if (fpsMatch) {
+          const fpsEl = document.getElementById("prop-framerate");
+          if (fpsEl) {
+            const fps = parseInt(fpsMatch[1]);
+            for (const opt of fpsEl.options) {
+              if (parseInt(opt.value) === fps) { fpsEl.value = opt.value; break; }
+            }
+          }
+        }
+      }
+      renderAssets();
+    });
+  }
 }
 
 function renderAssets() {
@@ -210,12 +232,21 @@ function renderAssets() {
     <div class="asset-item" data-asset-id="${a.id}" draggable="true">
       <span class="asset-icon">${icons[a.type]}</span>
       <span class="asset-name" title="${a.path}">${a.name}</span>
-      <span class="asset-meta">${a.type}</span>
+      <span class="asset-meta">${a.meta || a.type}</span>
     </div>
   `).join('');
   list.querySelectorAll('.asset-item').forEach(el => {
     el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.assetId); });
+    el.addEventListener('contextmenu', (e) => { showContextMenu(e, parseInt(el.dataset.assetId)); });
   });
+  // Re-apply filter
+  const q = document.getElementById("asset-filter")?.value?.toLowerCase() || "";
+  if (q) {
+    list.querySelectorAll('.asset-item').forEach(el => {
+      const name = el.querySelector(".asset-name")?.textContent?.toLowerCase() || "";
+      el.style.display = name.includes(q) ? "" : "none";
+    });
+  }
 }
 
 function renderSegments() {
@@ -278,6 +309,7 @@ document.getElementById("btn-open-project")?.addEventListener("click", async () 
     document.getElementById("project-name").textContent = name;
     project.title = name;
     document.getElementById("prop-title").value = name;
+    addRecentProject(dir, name);
     setStatus(`Opened: ${dir}`);
   }
 });
@@ -322,14 +354,23 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     if (currentJobId && p.job_id !== currentJobId) return;
     progressBar.value = p.percent;
     stageEl.textContent = p.stage.charAt(0).toUpperCase() + p.stage.slice(1);
+    setTitleProgress(p.percent, p.stage);
     const elapsed = formatTime(p.elapsed_secs);
     let eta = "";
     if (p.percent > 0 && p.percent < 100) {
       eta = ` ETA ${formatTime((p.elapsed_secs / p.percent) * (100 - p.percent))}`;
     }
     statsEl.textContent = `${elapsed}${p.fps > 0 ? ` ${p.fps.toFixed(1)}fps` : ''}${eta}`;
-    if (p.stage === "done" || p.stage === "error") {
-      setStatus(p.stage === "done" ? "Build complete" : "Build failed");
+    if (p.stage === "done") {
+      setStatus("Build complete");
+      setTitleProgress(-1);
+      notifyBuildComplete(true, title);
+      addRecentProject(output, title);
+      unlisten();
+    } else if (p.stage === "error") {
+      setStatus("Build failed");
+      setTitleProgress(-1);
+      notifyBuildComplete(false, title);
       unlisten();
     }
   });
@@ -588,8 +629,178 @@ document.getElementById("prop-title")?.addEventListener("input", (e) => {
   project.title = title;
 });
 
+// === Recent Projects ===
+const RECENT_KEY = "imfwizard-recent-projects";
+const MAX_RECENT = 8;
+
+function getRecentProjects() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+}
+
+function addRecentProject(path, title) {
+  let recent = getRecentProjects().filter(r => r.path !== path);
+  recent.unshift({ path, title, time: Date.now() });
+  if (recent.length > MAX_RECENT) recent = recent.slice(0, MAX_RECENT);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  renderRecentProjects();
+}
+
+function renderRecentProjects() {
+  const section = document.getElementById("recent-projects");
+  const list = document.getElementById("recent-list");
+  if (!section || !list) return;
+  const recent = getRecentProjects();
+  if (recent.length === 0) { section.hidden = true; return; }
+  section.hidden = false;
+  list.innerHTML = recent.map(r => `
+    <div class="recent-item" data-path="${r.path}" title="${r.path}">
+      <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
+      <span class="recent-path">${r.path}</span>
+    </div>
+  `).join('');
+  list.querySelectorAll('.recent-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const dir = el.dataset.path;
+      const name = dir.split(/[/\\]/).pop();
+      document.getElementById("project-name").textContent = name;
+      project.title = name;
+      document.getElementById("prop-title").value = name;
+      setStatus(`Opened: ${dir}`);
+    });
+  });
+}
+
+// === Desktop Notifications ===
+function notifyBuildComplete(success, title) {
+  if (Notification.permission === "granted") {
+    new Notification(success ? "Build Complete" : "Build Failed", {
+      body: success ? `"${title}" built successfully` : `"${title}" build failed`,
+    });
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission();
+  }
+}
+
+if ("Notification" in window && Notification.permission === "default") {
+  Notification.requestPermission();
+}
+
+// === Confirmation Dialogs ===
+document.getElementById("btn-new-project")?.addEventListener("click", () => {
+  if (project.assets.length > 0) {
+    if (!confirm("Clear current project and start new? Unsaved changes will be lost.")) return;
+  }
+  project.title = "";
+  project.assets = [];
+  project.segments = [{ id: 1, picture: null, sound: null, subtitle: null }];
+  nextAssetId = 1;
+  document.getElementById("prop-title").value = "";
+  document.getElementById("project-name").textContent = "Untitled IMP";
+  renderAssets();
+  renderSegments();
+  updateStatusStats();
+  setStatus("New project");
+});
+
+// === Status Bar Stats ===
+function updateStatusStats() {
+  const el = document.getElementById("status-stats");
+  if (!el) return;
+  const n = project.assets.length;
+  const v = project.assets.filter(a => a.type === 'video').length;
+  const a = project.assets.filter(a => a.type === 'audio').length;
+  if (n === 0) { el.textContent = ""; return; }
+  const parts = [];
+  if (v) parts.push(`${v} video`);
+  if (a) parts.push(`${a} audio`);
+  const s = project.assets.filter(a => a.type === 'subtitle').length;
+  if (s) parts.push(`${s} sub`);
+  el.textContent = `${n} assets (${parts.join(', ')})`;
+}
+
+// === Context Menu ===
+const ctxMenu = document.getElementById("context-menu");
+let ctxAssetId = null;
+
+function showContextMenu(e, assetId) {
+  e.preventDefault();
+  ctxAssetId = assetId;
+  ctxMenu.style.left = e.clientX + "px";
+  ctxMenu.style.top = e.clientY + "px";
+  ctxMenu.hidden = false;
+}
+
+document.addEventListener("click", () => { if (ctxMenu) ctxMenu.hidden = true; });
+
+ctxMenu?.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const action = btn.dataset.action;
+    const asset = project.assets.find(a => a.id === ctxAssetId);
+    if (!asset) return;
+    if (action === "preview") {
+      previewFile(asset.path);
+    } else if (action === "remove") {
+      if (!confirm(`Remove "${asset.name}" from project?`)) return;
+      project.assets = project.assets.filter(a => a.id !== ctxAssetId);
+      project.segments.forEach(s => {
+        if (s.picture?.id === ctxAssetId) s.picture = null;
+        if (s.sound?.id === ctxAssetId) s.sound = null;
+        if (s.subtitle?.id === ctxAssetId) s.subtitle = null;
+      });
+      renderAssets();
+      renderSegments();
+      updateStatusStats();
+    } else if (action === "reveal") {
+      invoke("plugin:shell|open", { path: asset.path.replace(/[/\\][^/\\]*$/, '') });
+    }
+    ctxMenu.hidden = true;
+  });
+});
+
+// === Progress in Title Bar ===
+function setTitleProgress(percent, stage) {
+  if (percent >= 0 && percent < 100) {
+    document.title = `IMF Wizard — ${stage} ${Math.round(percent)}%`;
+  } else {
+    document.title = "IMF Wizard";
+  }
+}
+
+// === Asset Filter ===
+document.getElementById("asset-filter")?.addEventListener("input", (e) => {
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll("#asset-list .asset-item").forEach(el => {
+    const name = el.querySelector(".asset-name")?.textContent?.toLowerCase() || "";
+    el.style.display = name.includes(q) ? "" : "none";
+  });
+});
+
+// === Auto-detect Video Properties (ffprobe) ===
+async function probeVideo(path) {
+  try {
+    const cmd = Command.create("ffprobe", [
+      "-v", "quiet", "-print_format", "json",
+      "-show_streams", "-show_format", path
+    ]);
+    const result = await cmd.execute();
+    if (result.code !== 0) return null;
+    const info = JSON.parse(result.stdout);
+    const vs = info.streams?.find(s => s.codec_type === "video");
+    if (!vs) return null;
+    return {
+      width: vs.width,
+      height: vs.height,
+      fps: vs.r_frame_rate,
+      duration: parseFloat(info.format?.duration || vs.duration || "0"),
+    };
+  } catch { return null; }
+}
+
 // === Init ===
 renderAssets();
 renderSegments();
+renderRecentProjects();
+updateStatusStats();
 initPreview();
 setStatus("Ready");

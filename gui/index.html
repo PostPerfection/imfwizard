@@ -14,6 +14,14 @@
     </div>
   </div>
 
+  <!-- Context menu -->
+  <div id="context-menu" class="context-menu" hidden>
+    <button data-action="preview">▶ Preview</button>
+    <button data-action="remove">✕ Remove</button>
+    <button data-action="reveal">📂 Show in Files</button>
+  </div>
+  </div>
+
   <div id="app">
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -71,10 +79,15 @@
           <div class="workspace">
             <!-- Left: Asset browser + segments -->
             <div class="workspace-main">
+              <section id="recent-projects" class="panel recent-panel" hidden>
+                <div class="panel-header"><h2>Recent Projects</h2></div>
+                <div id="recent-list" class="recent-list"></div>
+              </section>
               <section class="panel assets-panel">
                 <div class="panel-header">
                   <h2>Assets</h2>
                   <div class="panel-actions">
+                    <input id="asset-filter" type="text" class="asset-filter" placeholder="Filter assets…" title="Filter assets by name">
                     <button id="import-video" class="btn-sm">+ Video</button>
                     <button id="import-audio" class="btn-sm">+ Audio</button>
                     <button id="import-subtitle" class="btn-sm">+ Subtitle</button>
@@ -631,6 +644,7 @@
         </div>
         <div class="status-section">
           <span id="status-text" class="status-text">Ready</span>
+          <span id="status-stats" class="status-stats"></span>
         </div>
       </footer>
     </div>

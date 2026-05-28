@@ -12,6 +12,11 @@
           "name": "imfwizard",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "ffprobe",
+          "cmd": "ffprobe",
+          "args": true
         }
       ]
     },
@@ -21,6 +26,11 @@
         {
           "name": "imfwizard",
           "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "ffprobe",
+          "cmd": "ffprobe",
           "args": true
         }
       ]
