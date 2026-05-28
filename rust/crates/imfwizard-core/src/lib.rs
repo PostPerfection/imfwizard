@@ -22,6 +22,7 @@ pub mod channel_map;
 pub mod burnin;
 pub mod captions;
 pub mod subtitle_convert;
+pub mod subtitle_retime;
 
 // Infrastructure
 pub mod job_queue;
