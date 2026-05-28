@@ -168,8 +168,7 @@ pub fn save_preferences_to(prefs: &Preferences, path: &PathBuf) -> std::io::Resu
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(prefs)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(prefs).map_err(std::io::Error::other)?;
     fs::write(path, json)
 }
 
