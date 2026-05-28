@@ -714,14 +714,31 @@ function updateStatusStats() {
   const n = project.assets.length;
   const v = project.assets.filter(a => a.type === 'video').length;
   const a = project.assets.filter(a => a.type === 'audio').length;
-  if (n === 0) { el.textContent = ""; return; }
-  const parts = [];
-  if (v) parts.push(`${v} video`);
-  if (a) parts.push(`${a} audio`);
-  const s = project.assets.filter(a => a.type === 'subtitle').length;
-  if (s) parts.push(`${s} sub`);
-  el.textContent = `${n} assets (${parts.join(', ')})`;
+  if (n === 0) { el.textContent = ""; } else {
+    const parts = [];
+    if (v) parts.push(`${v} video`);
+    if (a) parts.push(`${a} audio`);
+    const s = project.assets.filter(a => a.type === 'subtitle').length;
+    if (s) parts.push(`${s} sub`);
+    el.textContent = `${n} assets (${parts.join(', ')})`;
+  }
+  updateToolbarState();
 }
+
+// === Toolbar Button State ===
+function updateToolbarState() {
+  const hasVideo = project.segments.some(s => s.picture);
+  const hasTitle = !!(document.getElementById("prop-title")?.value?.trim());
+  const buildBtn = document.getElementById("btn-build");
+  const previewBtn = document.getElementById("btn-preview");
+  const supBtn = document.getElementById("btn-supplement");
+  if (buildBtn) buildBtn.disabled = !(hasVideo && hasTitle);
+  if (previewBtn) previewBtn.disabled = !hasVideo;
+  if (supBtn) supBtn.disabled = !hasTitle;
+}
+
+// Keep title in sync and update toolbar state
+document.getElementById("prop-title")?.addEventListener("input", () => { updateToolbarState(); });
 
 // === Context Menu ===
 const ctxMenu = document.getElementById("context-menu");

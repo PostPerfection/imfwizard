@@ -189,6 +189,12 @@ body {
   background: transparent;
 }
 
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* Content */
 .content {
   flex: 1;
