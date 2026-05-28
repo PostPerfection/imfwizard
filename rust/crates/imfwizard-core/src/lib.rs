@@ -4,6 +4,7 @@ pub mod cpl;
 pub mod edl_import;
 pub mod imp;
 pub mod mxf_wrap;
+pub mod otioz_import;
 pub mod pkl;
 
 // Encoding/transcoding
