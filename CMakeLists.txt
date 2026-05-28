@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(imfwizard
-    VERSION 0.1.0
+    VERSION 0.5.0
     DESCRIPTION "IMF Wizard — Interoperable Master Format package creator"
     LANGUAGES CXX)
 
