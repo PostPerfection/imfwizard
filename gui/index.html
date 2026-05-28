@@ -13,678 +13,626 @@
       <span>Drop files here to import</span>
     </div>
   </div>
+
   <div id="app">
-    <header>
-      <h1>IMF Wizard</h1>
-      <p class="subtitle">Interoperable Master Format Package Creator</p>
-    </header>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button class="sidebar-btn active" data-view="project" title="Project">
+          <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+        </button>
+        <button class="sidebar-btn" data-view="timeline" title="Timeline">
+          <svg viewBox="0 0 24 24"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+        </button>
+        <button class="sidebar-btn" data-view="validate" title="Validate">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+        </button>
+        <button class="sidebar-btn" data-view="tools" title="Tools">
+          <svg viewBox="0 0 24 24"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+        </button>
+        <button class="sidebar-btn" data-view="deliver" title="Deliver">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        </button>
+        <button class="sidebar-btn" data-view="jobs" title="Jobs">
+          <svg viewBox="0 0 24 24"><path d="M4 6h18V4H4v2zm0 5h18V9H4v2zm0 5h18v-2H4v2zm0 5h18v-2H4v2z"/></svg>
+        </button>
+      </div>
+      <div class="sidebar-bottom">
+        <button class="sidebar-btn" data-view="settings" title="Settings">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </button>
+      </div>
+    </aside>
 
-    <div id="recent-projects" class="recent-bar" style="display:none;">
-      <span class="recent-label">Recent:</span>
-      <div id="recent-list" class="recent-list"></div>
-    </div>
-
-    <nav class="nav-tabs">
-      <button class="active" data-page="create-page">Create</button>
-      <button data-page="supplement-page">Supplement</button>
-      <button data-page="timeline-page">Timeline</button>
-      <button data-page="transcode-page">Transcode</button>
-      <button data-page="burnin-page">Burn-In</button>
-      <button data-page="loudness-page">Loudness</button>
-      <button data-page="metadata-page">Metadata</button>
-      <button data-page="validate-page">Validate</button>
-      <button data-page="analytics-page">Analytics</button>
-      <button data-page="assets-page">Assets</button>
-      <button data-page="deliver-page">Deliver</button>
-      <button data-page="todcp-page">To DCP</button>
-      <button data-page="jobs-page">Jobs</button>
-      <button data-page="preferences-page">Preferences</button>
-      <span class="nav-spacer"></span>
-      <button id="shortcuts-btn" title="Keyboard shortcuts">⌨️</button>
-      <button id="theme-toggle" title="Toggle dark/light theme">🌙</button>
-    </nav>
-
-    <main>
-      <section class="page active" id="create-page">
-      <section class="panel" id="create-panel">
-        <h2>Create Original Version IMP</h2>
-        <form id="create-form">
-          <div class="field">
-            <label for="preset">Delivery Preset</label>
-            <select id="preset">
-              <option value="custom">Custom</option>
-              <option value="netflix">Netflix App#2E</option>
-              <option value="disney">Disney+</option>
-              <option value="amazon">Amazon</option>
-              <option value="apple">Apple TV+</option>
-              <option value="cinema2k">Cinema 2K</option>
-              <option value="cinema4k">Cinema 4K</option>
-              <option value="broadcast">Broadcast</option>
-              <option value="archival">Archival</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="title">Content Title</label>
-            <input type="text" id="title" required />
-          </div>
-          <div class="field">
-            <label for="issuer">Issuer</label>
-            <input type="text" id="issuer" value="IMF Wizard" />
-          </div>
-          <div class="field">
-            <label for="video-dir">Video / Image Sequence</label>
-            <button type="button" id="browse-video">File…</button>
-            <button type="button" id="browse-video-folder">Folder…</button>
-            <button type="button" id="preview-source" class="btn-sm" title="Preview source video">▶</button>
-            <span id="video-path" class="path-display">No file/folder selected</span>
-          </div>
-          <div class="field">
-            <label for="audio-file">Audio (WAV)</label>
-            <button type="button" id="browse-audio">Browse…</button>
-            <span id="audio-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label for="subtitle-file">Subtitle File (TTML/IMSC) — Optional</label>
-            <button type="button" id="select-subtitle">Browse...</button>
-            <span id="subtitle-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label for="output-dir">Output Directory</label>
-            <button type="button" id="browse-output">Browse…</button>
-            <span id="output-path" class="path-display">No folder selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="fps">Frame Rate</label>
-              <select id="fps">
-                <option value="24/1">24 fps</option>
-                <option value="25/1">25 fps</option>
-                <option value="30000/1001">29.97 fps</option>
-                <option value="30/1">30 fps</option>
-                <option value="48/1">48 fps</option>
-                <option value="60000/1001">59.94 fps</option>
-                <option value="60/1">60 fps</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="color-space">Color Space</label>
-              <select id="color-space">
-                <option value="bt709">BT.709 (SDR)</option>
-                <option value="bt2020-pq">BT.2020 PQ (HDR10)</option>
-                <option value="bt2020-hlg">BT.2020 HLG</option>
-                <option value="p3-d65-pq">P3-D65 PQ</option>
-                <option value="aces">ACES (App#5)</option>
-              </select>
-            </div>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label for="encode-bitrate">Encode Bitrate (Mbps)</label>
-              <input type="number" id="encode-bitrate" value="250" min="50" max="1000" />
-            </div>
-            <div class="field">
-              <label for="encode-threads">Encode Threads</label>
-              <input type="number" id="encode-threads" value="0" min="0" placeholder="0 = auto" />
-            </div>
-          </div>
-          <button type="submit" class="btn-primary" id="create-btn" disabled>Create IMP</button>
-          </form>
-          <div id="pipeline-progress" style="display:none; margin-top: 1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">
-              <span id="pipeline-stage"></span>
-              <span id="pipeline-stats"></span>
-              <span>
-                <button type="button" id="pipeline-pause" class="btn-sm" title="Pause">⏸</button>
-                <button type="button" id="pipeline-cancel" class="btn-sm" title="Cancel">✕</button>
-              </span>
-            </div>
-            <progress id="pipeline-bar" max="100" value="0" style="width:100%; height:1.5rem;"></progress>
-            <div id="pipeline-message" style="margin-top:0.25rem; font-size:0.85rem; opacity:0.8;"></div>
-          </div>
-      </section>
-
-      <section class="panel" id="create-preview-panel">
-        <h2>Preview</h2>
-        <div class="field">
-          <label>Video / IMP Directory</label>
-          <button type="button" id="prev-select">File...</button>
-          <button type="button" id="prev-select-dir">Directory...</button>
-          <span id="prev-path" class="path-display">No file selected</span>
+    <!-- Main Content Area -->
+    <div class="main-area">
+      <!-- Toolbar -->
+      <header class="toolbar">
+        <div class="toolbar-left">
+          <h1>IMF Wizard</h1>
+          <span class="toolbar-separator"></span>
+          <span id="project-name" class="project-name">Untitled IMP</span>
         </div>
-        <div class="field">
-          <label>Replay DCP/IMP</label>
-          <button type="button" id="prev-replay-dcp">Select DCP/IMP folder...</button>
-          <span id="prev-dcp-path" class="path-display">No package selected</span>
+        <div class="toolbar-right">
+          <button id="btn-new-project" class="toolbar-btn" title="New IMP">New</button>
+          <button id="btn-open-project" class="toolbar-btn" title="Open IMP">Open</button>
+          <button id="btn-supplement" class="toolbar-btn" title="Create Supplement">+ Supplement</button>
+          <button id="btn-build" class="toolbar-btn primary" title="Create IMP">Build IMP</button>
+          <button id="btn-preview" class="toolbar-btn" title="Preview">▶ Preview</button>
+          <span class="toolbar-separator"></span>
+          <button id="theme-toggle" class="toolbar-btn icon" title="Toggle theme">🌙</button>
         </div>
-        <div id="preview-controls">
-          <span id="prev-time"></span>
+      </header>
+
+      <!-- Content panels -->
+      <div class="content">
+        <!-- PROJECT VIEW -->
+        <div class="view active" id="view-project">
+          <div class="workspace">
+            <!-- Left: Asset browser + segments -->
+            <div class="workspace-main">
+              <section class="panel assets-panel">
+                <div class="panel-header">
+                  <h2>Assets</h2>
+                  <div class="panel-actions">
+                    <button id="import-video" class="btn-sm">+ Video</button>
+                    <button id="import-audio" class="btn-sm">+ Audio</button>
+                    <button id="import-subtitle" class="btn-sm">+ Subtitle</button>
+                  </div>
+                </div>
+                <div id="asset-list" class="asset-list">
+                  <div class="asset-empty">
+                    <p>Drag & drop video/audio files here<br>or use the buttons above</p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel reels-panel">
+                <div class="panel-header">
+                  <h2>Virtual Tracks</h2>
+                  <button id="add-segment" class="btn-sm">+ Segment</button>
+                </div>
+                <div id="track-list" class="reel-list">
+                  <div class="reel" data-segment="1">
+                    <div class="reel-header">
+                      <span class="reel-label">Segment 1</span>
+                      <span class="reel-duration" id="seg-1-duration">--:--:--</span>
+                    </div>
+                    <div class="reel-tracks">
+                      <div class="track track-picture" id="seg-1-picture">
+                        <span class="track-label">Picture</span>
+                        <span class="track-info">Drop video here</span>
+                      </div>
+                      <div class="track track-sound" id="seg-1-sound">
+                        <span class="track-label">Sound</span>
+                        <span class="track-info">Drop audio here</span>
+                      </div>
+                      <div class="track track-subtitle" id="seg-1-subtitle">
+                        <span class="track-label">Timed Text</span>
+                        <span class="track-info">Optional</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- Right: Properties panel -->
+            <aside class="properties-panel" id="properties">
+              <div class="panel-header">
+                <h2>Properties</h2>
+              </div>
+              <div class="properties-content">
+                <fieldset>
+                  <legend>IMP</legend>
+                  <div class="prop-field">
+                    <label for="prop-title">Content Title</label>
+                    <input id="prop-title" type="text" placeholder="My Feature Film">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-issuer">Issuer</label>
+                    <input id="prop-issuer" type="text" value="IMF Wizard">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-preset">Delivery Preset</label>
+                    <select id="prop-preset">
+                      <option value="custom">Custom</option>
+                      <option value="netflix">Netflix App#2E</option>
+                      <option value="disney">Disney+</option>
+                      <option value="amazon">Amazon</option>
+                      <option value="apple">Apple TV+</option>
+                      <option value="cinema2k">Cinema 2K</option>
+                      <option value="cinema4k">Cinema 4K</option>
+                      <option value="broadcast">Broadcast</option>
+                      <option value="archival">Archival</option>
+                    </select>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-content-kind">Content Kind</label>
+                    <select id="prop-content-kind">
+                      <option value="feature">Feature</option>
+                      <option value="short">Short</option>
+                      <option value="trailer">Trailer</option>
+                      <option value="episode">Episode</option>
+                      <option value="advertisement">Advertisement</option>
+                    </select>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Picture</legend>
+                  <div class="prop-field">
+                    <label for="prop-framerate">Frame Rate</label>
+                    <select id="prop-framerate">
+                      <option value="24/1">24 fps</option>
+                      <option value="25/1">25 fps</option>
+                      <option value="30000/1001">29.97 fps</option>
+                      <option value="30/1">30 fps</option>
+                      <option value="48/1">48 fps</option>
+                      <option value="60000/1001">59.94 fps</option>
+                      <option value="60/1">60 fps</option>
+                    </select>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-colour">Color Space</label>
+                    <select id="prop-colour">
+                      <option value="bt709">BT.709 (SDR)</option>
+                      <option value="bt2020-pq">BT.2020 PQ (HDR10)</option>
+                      <option value="bt2020-hlg">BT.2020 HLG</option>
+                      <option value="p3-d65-pq">P3-D65 PQ</option>
+                      <option value="aces">ACES (App#5)</option>
+                    </select>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-bandwidth">Bitrate (Mbps)</label>
+                    <input type="number" id="prop-bandwidth" value="250" min="50" max="1000">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-threads">Encode Threads</label>
+                    <input type="number" id="prop-threads" value="0" min="0" placeholder="0 = auto">
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Audio</legend>
+                  <div class="prop-field">
+                    <label for="prop-channels">Channels</label>
+                    <select id="prop-channels">
+                      <option value="5.1" selected>5.1</option>
+                      <option value="7.1">7.1</option>
+                      <option value="stereo">Stereo</option>
+                      <option value="mono">Mono</option>
+                    </select>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Output</legend>
+                  <div class="prop-field">
+                    <label for="prop-output">Directory</label>
+                    <div class="input-with-btn">
+                      <input id="prop-output" type="text" placeholder="/path/to/output" readonly>
+                      <button id="browse-output" class="btn-sm">…</button>
+                    </div>
+                  </div>
+                </fieldset>
+              </div>
+            </aside>
+          </div>
         </div>
-      </section>
 
-      <section class="panel" id="output-panel" hidden>
-        <h2>Result</h2>
-        <pre id="output-log"></pre>
-      </section>
-      </section>
-
-      <section class="page" id="timeline-page">
-        <!-- Populated by timeline.js -->
-      </section>
-
-      <section class="page" id="supplement-page">
-        <section class="panel">
-          <h2>Create Supplemental IMP</h2>
-          <p class="field-hint">Create a versioned supplement referencing an existing Original Version IMP.</p>
-          <div class="field">
-            <label>Supplemental Title</label>
-            <input type="text" id="sup-title" placeholder="e.g. Version 2 — Director's Cut" />
-          </div>
-          <div class="field">
-            <label>Original Version (OV) IMP Directory</label>
-            <button type="button" id="sup-select-ov">Browse...</button>
-            <span id="sup-ov-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field">
-            <label>Replacement Video Segment (J2K Directory)</label>
-            <button type="button" id="sup-select-video">Browse...</button>
-            <span id="sup-video-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field">
-            <label>Replacement Audio (WAV) — Optional</label>
-            <button type="button" id="sup-select-audio">Browse...</button>
-            <span id="sup-audio-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Entry Point (frame)</label>
-              <input type="number" id="sup-entry-point" value="0" min="0" />
+        <!-- TIMELINE VIEW -->
+        <div class="view" id="view-timeline">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Timeline</h2>
+              <div class="panel-actions">
+                <button id="tl-zoom-in" class="btn-sm">+</button>
+                <button id="tl-zoom-out" class="btn-sm">−</button>
+              </div>
             </div>
-            <div class="field">
-              <label>Duration (frames)</label>
-              <input type="number" id="sup-duration" value="240" min="1" />
+            <div id="timeline-view" class="timeline">
+              <div class="timeline-ruler" id="timeline-ruler"></div>
+              <div class="timeline-tracks" id="timeline-tracks">
+                <div class="timeline-track">
+                  <span class="timeline-track-label">Picture</span>
+                  <div class="timeline-track-content" id="timeline-picture"></div>
+                </div>
+                <div class="timeline-track">
+                  <span class="timeline-track-label">Sound</span>
+                  <div class="timeline-track-content" id="timeline-sound"></div>
+                </div>
+                <div class="timeline-track">
+                  <span class="timeline-track-label">Timed Text</span>
+                  <div class="timeline-track-content" id="timeline-subtitle"></div>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="field">
-            <label>Output Directory</label>
-            <button type="button" id="sup-select-output">Browse...</button>
-            <span id="sup-output-path" class="path-display">No directory selected</span>
-          </div>
-          <button class="btn-primary" id="sup-create" disabled>Create Supplemental IMP</button>
-          <pre id="sup-log" class="output-log-box" style="display:none; margin-top:1rem;"></pre>
-        </section>
-      </section>
-
-      <section class="page" id="loudness-page">
-        <section class="panel">
-          <h2>Loudness Analysis</h2>
-          <p class="field-hint">Measure EBU R128 / ATSC A/85 loudness compliance (requires ffmpeg).</p>
-          <div class="field">
-            <label>Audio File</label>
-            <button type="button" id="loud-select">Browse...</button>
-            <span id="loud-path" class="path-display">No file selected</span>
-          </div>
-          <button class="btn-primary" id="loud-measure" disabled>Measure Loudness</button>
-          <div id="loud-results" class="results-panel" style="display:none; margin-top:1rem;">
-            <div class="result-row"><span class="result-label">Integrated Loudness:</span><span id="loud-integrated">—</span></div>
-            <div class="result-row"><span class="result-label">Loudness Range:</span><span id="loud-range">—</span></div>
-            <div class="result-row"><span class="result-label">True Peak:</span><span id="loud-peak">—</span></div>
-            <div class="result-row"><span class="result-label">EBU R128:</span><span id="loud-r128" class="compliance-badge">—</span></div>
-            <div class="result-row"><span class="result-label">ATSC A/85:</span><span id="loud-atsc" class="compliance-badge">—</span></div>
-          </div>
-        </section>
-      </section>
-
-      <section class="page" id="metadata-page">
-        <section class="panel">
-          <h2>IMP Metadata Editor</h2>
-          <p class="field-hint">Load an existing IMP and edit CPL annotations and metadata.</p>
-          <div class="field">
-            <label>IMP Directory</label>
-            <button type="button" id="meta-select">Browse...</button>
-            <span id="meta-path" class="path-display">No directory selected</span>
-          </div>
-          <button class="btn-secondary" id="meta-load">Load IMP Info</button>
-          <div id="meta-fields" style="display:none; margin-top:1rem;">
-            <div class="field">
-              <label>Content Title</label>
-              <input type="text" id="meta-title" />
+          </section>
+          <!-- Supplement creation inline -->
+          <section class="panel" style="margin-top:16px;">
+            <div class="panel-header">
+              <h2>Supplemental Version</h2>
             </div>
-            <div class="field">
-              <label>Annotation</label>
-              <input type="text" id="meta-annotation" />
+            <div class="prop-field">
+              <label>Original Version (OV) IMP</label>
+              <div class="input-with-btn">
+                <input id="sup-ov" type="text" placeholder="Select OV IMP…" readonly>
+                <button id="sup-browse-ov" class="btn-sm">…</button>
+              </div>
             </div>
-            <div class="field">
-              <label>Issuer</label>
-              <input type="text" id="meta-issuer" />
-            </div>
-            <div class="field">
-              <label>Content Kind</label>
-              <select id="meta-content-kind">
-                <option value="feature">Feature</option>
-                <option value="short">Short</option>
-                <option value="trailer">Trailer</option>
-                <option value="episode">Episode</option>
-                <option value="advertisement">Advertisement</option>
-              </select>
+            <div class="prop-field">
+              <label>Replacement Video Segment</label>
+              <div class="input-with-btn">
+                <input id="sup-video" type="text" placeholder="Select J2K dir…" readonly>
+                <button id="sup-browse-video" class="btn-sm">…</button>
+              </div>
             </div>
             <div class="field-row">
-              <div class="field">
-                <label>Content Version Label</label>
-                <input type="text" id="meta-version-label" placeholder="e.g. 1.0" />
+              <div class="prop-field">
+                <label>Entry Point (frame)</label>
+                <input type="number" id="sup-entry-point" value="0" min="0">
               </div>
-              <div class="field">
-                <label>Locale (RFC 5646)</label>
-                <input type="text" id="meta-locale" placeholder="e.g. en-US" />
-              </div>
-            </div>
-            <div class="field">
-              <label>Track Summary</label>
-              <pre id="meta-tracks" class="info-display"></pre>
-            </div>
-            <button class="btn-primary" id="meta-save" disabled>Save Metadata</button>
-          </div>
-        </section>
-      </section>
-
-      <section class="page" id="transcode-page">
-        <section class="panel">
-          <h2>Transcode Video</h2>
-          <div class="field">
-            <label>Input Video File</label>
-            <button type="button" id="tc-select-input">Browse...</button>
-            <span id="tc-input-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label>Output Directory</label>
-            <button type="button" id="tc-select-output">Browse...</button>
-            <span id="tc-output-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Format</label>
-              <select id="tc-format">
-                <option value="tiff">TIFF</option>
-                <option value="dpx">DPX</option>
-                <option value="exr">EXR</option>
-                <option value="png">PNG</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Bit Depth</label>
-              <select id="tc-bitdepth">
-                <option value="16">16-bit</option>
-                <option value="10">10-bit</option>
-                <option value="8">8-bit</option>
-              </select>
-            </div>
-          </div>
-          <button class="btn-primary" id="tc-start" disabled>Transcode</button>
-          <button class="btn-secondary" id="tc-queue">Add to Queue</button>
-          <pre id="tc-log" style="margin-top:1rem; display:none;"></pre>
-        </section>
-      </section>
-
-      <section class="page" id="validate-page">
-        <section class="panel">
-          <h2>Validate IMP</h2>
-          <div class="field">
-            <label>IMP Directory</label>
-            <button type="button" id="val-select">Browse...</button>
-            <span id="val-path" class="path-display">No directory selected</span>
-          </div>
-          <button class="btn-primary" id="val-start" disabled>Validate</button>
-          <pre id="val-log" style="margin-top:1rem; display:none;"></pre>
-        </section>
-      </section>
-
-      <section class="page" id="jobs-page">
-        <section class="panel">
-          <h2>Job Queue</h2>
-          <div class="jobs-toolbar">
-            <button id="jobs-refresh" class="btn-secondary">Refresh</button>
-            <button id="jobs-start-daemon" class="btn-primary">Start Daemon</button>
-            <span id="jobs-daemon-status" class="status-badge">Unknown</span>
-          </div>
-          <table class="jobs-table" id="jobs-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Type</th>
-                <th>Description</th>
-                <th>State</th>
-                <th>Progress</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="jobs-tbody">
-            </tbody>
-          </table>
-          <div class="field" style="margin-top:1rem">
-            <h3>Submit New Job</h3>
-            <div class="field-row">
-              <div class="field">
-                <label for="job-type">Type</label>
-                <select id="job-type">
-                  <option value="transcode">Transcode</option>
-                  <option value="encode">Encode</option>
-                  <option value="create">Create</option>
-                  <option value="validate">Validate</option>
-                  <option value="loudness">Loudness</option>
-                  <option value="qc">QC</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="job-desc">Description</label>
-                <input type="text" id="job-desc" placeholder="Job description" />
+              <div class="prop-field">
+                <label>Duration (frames)</label>
+                <input type="number" id="sup-duration" value="240" min="1">
               </div>
             </div>
-            <div class="field">
-              <label for="job-args">Arguments</label>
-              <input type="text" id="job-args" placeholder="e.g. transcode -i input.mp4 -o /tmp/out -f tiff" />
-            </div>
-            <button id="job-submit" class="btn-primary">Submit Job</button>
-          </div>
-        </section>
-      </section>
-
-      <section class="page" id="burnin-page">
-        <section class="panel">
-          <h2>Subtitle Burn-In</h2>
-          <p class="field-hint">Burn subtitles permanently into video frames (for festival/preview delivery).</p>
-          <div class="field">
-            <label>Input Video</label>
-            <button type="button" id="bi-select-video">Browse...</button>
-            <span id="bi-video-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label>Subtitle File (SRT / TTML / SCC)</label>
-            <button type="button" id="bi-select-subs">Browse...</button>
-            <span id="bi-subs-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label>Output Video</label>
-            <button type="button" id="bi-select-output">Browse...</button>
-            <span id="bi-output-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Font</label>
-              <input type="text" id="bi-font" value="DejaVu Sans" />
-            </div>
-            <div class="field">
-              <label>Font Size</label>
-              <input type="number" id="bi-fontsize" value="48" min="12" max="120" />
-            </div>
-          </div>
-          <button class="btn-primary" id="bi-start" disabled>Burn In Subtitles</button>
-          <pre id="bi-log" style="margin-top:1rem; display:none;"></pre>
-        </section>
-      </section>
-
-      <section class="page" id="analytics-page">
-        <section class="panel">
-          <h2>Bitrate Analytics</h2>
-          <p class="field-hint">Analyze J2K frame sizes, bitrate distribution, and per-second throughput.</p>
-          <div class="field">
-            <label>J2K Frame Directory or IMP</label>
-            <button type="button" id="an-select">Browse...</button>
-            <span id="an-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Frame Rate</label>
-              <select id="an-fps">
-                <option value="24/1">24 fps</option>
-                <option value="25/1">25 fps</option>
-                <option value="30/1">30 fps</option>
-                <option value="48/1">48 fps</option>
-                <option value="60/1">60 fps</option>
-              </select>
-            </div>
-          </div>
-          <button class="btn-primary" id="an-analyze" disabled>Analyze</button>
-          <div id="an-results" style="display:none; margin-top:1.5rem;">
-            <div class="result-row"><span class="result-label">Total Frames:</span><span id="an-frames">—</span></div>
-            <div class="result-row"><span class="result-label">Duration:</span><span id="an-duration">—</span></div>
-            <div class="result-row"><span class="result-label">Total Size:</span><span id="an-size">—</span></div>
-            <div class="result-row"><span class="result-label">Avg Bitrate:</span><span id="an-avg">—</span></div>
-            <div class="result-row"><span class="result-label">Peak Bitrate:</span><span id="an-peak">—</span></div>
-            <div class="result-row"><span class="result-label">Min Bitrate:</span><span id="an-min">—</span></div>
-            <div class="result-row"><span class="result-label">Std Deviation:</span><span id="an-stddev">—</span></div>
-            <h3 style="margin-top:1.5rem;">Per-Second Bitrate</h3>
-            <canvas id="an-chart" width="800" height="200" style="width:100%; background:var(--bg);border-radius:8px;border:1px solid var(--border);"></canvas>
-            <h3 style="margin-top:1.5rem;">Bitrate Histogram</h3>
-            <canvas id="an-histogram" width="800" height="150" style="width:100%; background:var(--bg);border-radius:8px;border:1px solid var(--border);"></canvas>
-          </div>
-        </section>
-      </section>
-
-      <section class="page" id="deliver-page">
-        <section class="panel">
-          <h2>Batch Delivery</h2>
-          <p class="field-hint">Create IMPs for multiple platforms in a single pass.</p>
-          <div class="field">
-            <label>Video Source (J2K directory)</label>
-            <button type="button" id="del-select-video">Browse...</button>
-            <span id="del-video-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field">
-            <label>Audio File</label>
-            <button type="button" id="del-select-audio">Browse...</button>
-            <span id="del-audio-path" class="path-display">No file selected</span>
-          </div>
-          <div class="field">
-            <label>Content Title</label>
-            <input type="text" id="del-title" required />
-          </div>
-          <div class="field">
-            <label>Output Base Directory</label>
-            <button type="button" id="del-select-output">Browse...</button>
-            <span id="del-output-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field">
-            <label>Delivery Targets</label>
-            <div class="checkbox-group">
-              <label><input type="checkbox" value="netflix" checked /> Netflix</label>
-              <label><input type="checkbox" value="disney" /> Disney+</label>
-              <label><input type="checkbox" value="amazon" /> Amazon</label>
-              <label><input type="checkbox" value="apple" /> Apple TV+</label>
-              <label><input type="checkbox" value="cinema" /> Cinema</label>
-              <label><input type="checkbox" value="broadcast" /> Broadcast</label>
-              <label><input type="checkbox" value="archival" /> Archival</label>
-            </div>
-          </div>
-          <button class="btn-primary" id="del-start" disabled>Start Batch Delivery</button>
-          <pre id="del-log" style="margin-top:1rem; display:none;"></pre>
-        </section>
-      </section>
-
-      <section class="page" id="todcp-page">
-        <section class="panel">
-          <h2>Convert IMF to DCP</h2>
-          <p class="field-hint">Repackage an IMF package as a Digital Cinema Package for theatrical playback.</p>
-          <div class="field">
-            <label>Input IMP Directory</label>
-            <button type="button" id="dcp-select-imp">Browse...</button>
-            <span id="dcp-imp-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field">
-            <label>Output DCP Directory</label>
-            <button type="button" id="dcp-select-output">Browse...</button>
-            <span id="dcp-output-path" class="path-display">No directory selected</span>
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <label>Content Title (optional)</label>
-              <input type="text" id="dcp-title" placeholder="Reuse IMP title if empty" />
-            </div>
-            <div class="field">
-              <label>Content Kind</label>
-              <select id="dcp-kind">
-                <option value="feature">Feature</option>
-                <option value="trailer">Trailer</option>
-                <option value="advertisement">Advertisement</option>
-                <option value="short">Short</option>
-              </select>
-            </div>
-          </div>
-          <button class="btn-primary" id="dcp-convert" disabled>Convert to DCP</button>
-          <pre id="dcp-log" style="margin-top:1rem; display:none;"></pre>
-        </section>
-      </section>
-
-      <!-- Asset Browser -->
-      <section class="page" id="assets-page">
-        <section class="panel">
-          <h2>Asset Browser</h2>
-          <p class="field-hint">Browse and inspect MXF track files in an IMP with thumbnails and metadata.</p>
-          <div class="field">
-            <label>IMP Directory</label>
-            <button type="button" id="asset-select-dir">Browse...</button>
-            <span id="asset-dir-path" class="path-display">No directory selected</span>
-          </div>
-          <button class="btn-primary" id="asset-scan" disabled>Scan Assets</button>
-          <div id="asset-grid" class="asset-grid" style="display:none;"></div>
-          <div id="asset-detail" class="asset-detail" style="display:none;">
-            <h3 id="asset-detail-name"></h3>
-            <div id="asset-detail-info"></div>
-          </div>
-        </section>
-      </section>
-
-      <section class="page" id="preferences-page">
-        <section class="panel">
-          <h2>Preferences</h2>
-          <form id="preferences-form">
-            <fieldset>
-              <legend>General</legend>
-              <div class="field">
-                <label for="pref-profile">Default Application Profile</label>
-                <select id="pref-profile">
-                  <option value="App2">App 2 (2K)</option>
-                  <option value="App2e" selected>App 2e (2K extended)</option>
-                  <option value="App4">App 4 (4K)</option>
-                  <option value="App5">App 5 (HDR)</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="pref-creator">Creator Name</label>
-                <input type="text" id="pref-creator" placeholder="My Studio">
-              </div>
-              <div class="field">
-                <label for="pref-language">Default Language (RFC 5646)</label>
-                <input type="text" id="pref-language" value="en" placeholder="en">
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Encoding</legend>
-              <div class="field">
-                <label for="pref-encoder">Preferred Encoder</label>
-                <select id="pref-encoder">
-                  <option value="grok">grok (GPU + CPU)</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="pref-bandwidth">Default Bandwidth (Mbps)</label>
-                <input type="number" id="pref-bandwidth" value="250" min="50" max="500">
-              </div>
-              <div class="field">
-                <label for="pref-colourspace">Default Colour Space</label>
-                <select id="pref-colourspace">
-                  <option value="Rec.709">Rec.709</option>
-                  <option value="P3-D65">P3-D65</option>
-                  <option value="Rec.2020">Rec.2020</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="pref-hdr">Default HDR Mode</label>
-                <select id="pref-hdr">
-                  <option value="SDR" selected>SDR</option>
-                  <option value="HLG">HLG</option>
-                  <option value="PQ">PQ (Dolby Vision / HDR10)</option>
-                </select>
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Audio</legend>
-              <div class="field">
-                <label for="pref-channels">Default Channel Config</label>
-                <select id="pref-channels">
-                  <option value="stereo">Stereo</option>
-                  <option value="5.1" selected>5.1</option>
-                  <option value="7.1">7.1</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="pref-loudness">Loudness Target (LUFS)</label>
-                <input type="number" id="pref-loudness" value="-24" min="-36" max="-14" step="0.1">
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Signing</legend>
-              <div class="field">
-                <label for="pref-signing-cert">Signing Certificate</label>
-                <input type="text" id="pref-signing-cert" placeholder="/path/to/cert.pem">
-              </div>
-              <div class="field">
-                <label for="pref-signing-key">Signing Key</label>
-                <input type="text" id="pref-signing-key" placeholder="/path/to/key.pem">
-              </div>
-            </fieldset>
-            <fieldset>
-              <legend>Delivery</legend>
-              <div class="field">
-                <label for="pref-output-dir">Default Output Directory</label>
-                <input type="text" id="pref-output-dir" placeholder="/path/to/output">
-              </div>
-            </fieldset>
-            <div class="form-actions">
-              <button type="submit" class="btn-primary">Save Preferences</button>
-              <button type="button" id="pref-reset" class="btn-secondary">Reset to Defaults</button>
-            </div>
-          </form>
-        </section>
-      </section>
-    </main>
-
-    <!-- Keyboard Shortcuts Modal -->
-    <div id="shortcuts-modal" class="modal" hidden>
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2>Keyboard Shortcuts</h2>
-          <button id="shortcuts-close" class="modal-close">&times;</button>
+            <button id="sup-create" class="btn-primary" disabled>Create Supplement</button>
+            <div id="sup-results" class="results-box"></div>
+          </section>
         </div>
-        <div class="shortcuts-grid">
-          <div class="shortcut-group">
-            <h3>Navigation</h3>
-            <div class="shortcut-row"><kbd>1</kbd>-<kbd>9</kbd> <span>Switch tabs</span></div>
-            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>N</kbd> <span>New IMP</span></div>
-            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>O</kbd> <span>Open IMP</span></div>
-            <div class="shortcut-row"><kbd>?</kbd> <span>Show shortcuts</span></div>
+
+        <!-- VALIDATE VIEW -->
+        <div class="view" id="view-validate">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Validate IMP</h2>
+              <div class="panel-actions">
+                <button id="val-browse" class="btn-sm">Select IMP…</button>
+                <button id="val-run" class="btn-sm primary" disabled>Validate</button>
+              </div>
+            </div>
+            <div class="prop-field">
+              <span id="val-path" class="path-display">No IMP selected</span>
+            </div>
+            <div id="val-results" class="results-box"></div>
+          </section>
+          <!-- Metadata editor -->
+          <section class="panel" style="margin-top:16px;">
+            <div class="panel-header">
+              <h2>Metadata</h2>
+              <div class="panel-actions">
+                <button id="meta-browse" class="btn-sm">Load IMP…</button>
+              </div>
+            </div>
+            <div id="meta-fields" style="display:none;">
+              <div class="prop-field">
+                <label>Content Title</label>
+                <input type="text" id="meta-title">
+              </div>
+              <div class="prop-field">
+                <label>Annotation</label>
+                <input type="text" id="meta-annotation">
+              </div>
+              <div class="prop-field">
+                <label>Issuer</label>
+                <input type="text" id="meta-issuer">
+              </div>
+              <div class="prop-field">
+                <label>Content Kind</label>
+                <select id="meta-content-kind">
+                  <option value="feature">Feature</option>
+                  <option value="short">Short</option>
+                  <option value="trailer">Trailer</option>
+                  <option value="episode">Episode</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <div class="prop-field">
+                  <label>Version Label</label>
+                  <input type="text" id="meta-version" placeholder="1.0">
+                </div>
+                <div class="prop-field">
+                  <label>Locale</label>
+                  <input type="text" id="meta-locale" placeholder="en-US">
+                </div>
+              </div>
+              <button id="meta-save" class="btn-primary" disabled>Save Metadata</button>
+            </div>
+          </section>
+        </div>
+
+        <!-- TOOLS VIEW -->
+        <div class="view" id="view-tools">
+          <div class="split-panels">
+            <section class="panel">
+              <h2>Transcode</h2>
+              <div class="prop-field">
+                <label>Input Video</label>
+                <div class="input-with-btn">
+                  <input id="tc-input" type="text" placeholder="Select video…" readonly>
+                  <button id="tc-browse-input" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Output Directory</label>
+                <div class="input-with-btn">
+                  <input id="tc-output" type="text" placeholder="Select output…" readonly>
+                  <button id="tc-browse-output" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="prop-field">
+                  <label>Format</label>
+                  <select id="tc-format">
+                    <option value="tiff">TIFF</option>
+                    <option value="dpx">DPX</option>
+                    <option value="exr">EXR</option>
+                    <option value="png">PNG</option>
+                  </select>
+                </div>
+                <div class="prop-field">
+                  <label>Bit Depth</label>
+                  <select id="tc-bitdepth">
+                    <option value="16">16-bit</option>
+                    <option value="10">10-bit</option>
+                    <option value="8">8-bit</option>
+                  </select>
+                </div>
+              </div>
+              <button id="tc-start" class="btn-primary" disabled>Transcode</button>
+              <div id="tc-results" class="results-box"></div>
+            </section>
+
+            <section class="panel">
+              <h2>Loudness</h2>
+              <div class="prop-field">
+                <label>Audio File</label>
+                <div class="input-with-btn">
+                  <input id="loud-input" type="text" placeholder="Select audio…" readonly>
+                  <button id="loud-browse" class="btn-sm">…</button>
+                </div>
+              </div>
+              <button id="loud-measure" class="btn-primary" disabled>Measure</button>
+              <div id="loud-results" class="results-box"></div>
+            </section>
+
+            <section class="panel">
+              <h2>Burn-In Subtitles</h2>
+              <div class="prop-field">
+                <label>Video</label>
+                <div class="input-with-btn">
+                  <input id="bi-video" type="text" placeholder="Select video…" readonly>
+                  <button id="bi-browse-video" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Subtitle (SRT / TTML)</label>
+                <div class="input-with-btn">
+                  <input id="bi-subs" type="text" placeholder="Select subtitle…" readonly>
+                  <button id="bi-browse-subs" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Output</label>
+                <div class="input-with-btn">
+                  <input id="bi-output" type="text" placeholder="Select output…" readonly>
+                  <button id="bi-browse-output" class="btn-sm">…</button>
+                </div>
+              </div>
+              <button id="bi-start" class="btn-primary" disabled>Burn In</button>
+              <div id="bi-results" class="results-box"></div>
+            </section>
+
+            <section class="panel">
+              <h2>Bitrate Analytics</h2>
+              <div class="prop-field">
+                <label>J2K Directory or IMP</label>
+                <div class="input-with-btn">
+                  <input id="an-input" type="text" placeholder="Select dir…" readonly>
+                  <button id="an-browse" class="btn-sm">…</button>
+                </div>
+              </div>
+              <button id="an-analyze" class="btn-primary" disabled>Analyze</button>
+              <div id="an-results" class="results-box"></div>
+              <canvas id="an-chart" width="800" height="200" style="display:none;width:100%;margin-top:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);"></canvas>
+            </section>
           </div>
-          <div class="shortcut-group">
-            <h3>Preview</h3>
-            <div class="shortcut-row"><kbd>Space</kbd> <span>Play/Pause</span></div>
-            <div class="shortcut-row"><kbd>←</kbd> <span>Previous frame</span></div>
-            <div class="shortcut-row"><kbd>→</kbd> <span>Next frame</span></div>
-            <div class="shortcut-row"><kbd>Home</kbd> <span>First frame</span></div>
-            <div class="shortcut-row"><kbd>End</kbd> <span>Last frame</span></div>
+        </div>
+
+        <!-- DELIVER VIEW -->
+        <div class="view" id="view-deliver">
+          <div class="split-panels">
+            <section class="panel">
+              <h2>Batch Delivery</h2>
+              <p class="field-hint">Create IMPs for multiple platforms in a single pass.</p>
+              <div class="prop-field">
+                <label>Video Source (J2K directory)</label>
+                <div class="input-with-btn">
+                  <input id="del-video" type="text" placeholder="Select dir…" readonly>
+                  <button id="del-browse-video" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Audio File</label>
+                <div class="input-with-btn">
+                  <input id="del-audio" type="text" placeholder="Select audio…" readonly>
+                  <button id="del-browse-audio" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Content Title</label>
+                <input type="text" id="del-title">
+              </div>
+              <div class="prop-field">
+                <label>Output Base Directory</label>
+                <div class="input-with-btn">
+                  <input id="del-output" type="text" placeholder="Select dir…" readonly>
+                  <button id="del-browse-output" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Targets</label>
+                <div class="checkbox-group">
+                  <label><input type="checkbox" value="netflix" checked> Netflix</label>
+                  <label><input type="checkbox" value="disney"> Disney+</label>
+                  <label><input type="checkbox" value="amazon"> Amazon</label>
+                  <label><input type="checkbox" value="apple"> Apple TV+</label>
+                  <label><input type="checkbox" value="cinema"> Cinema</label>
+                  <label><input type="checkbox" value="broadcast"> Broadcast</label>
+                  <label><input type="checkbox" value="archival"> Archival</label>
+                </div>
+              </div>
+              <button id="del-start" class="btn-primary" disabled>Start Delivery</button>
+              <div id="del-results" class="results-box"></div>
+            </section>
+
+            <section class="panel">
+              <h2>Convert to DCP</h2>
+              <p class="field-hint">Repackage an IMF package as a DCP for theatrical playback.</p>
+              <div class="prop-field">
+                <label>Input IMP</label>
+                <div class="input-with-btn">
+                  <input id="dcp-imp" type="text" placeholder="Select IMP…" readonly>
+                  <button id="dcp-browse-imp" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Output DCP Directory</label>
+                <div class="input-with-btn">
+                  <input id="dcp-output" type="text" placeholder="Select dir…" readonly>
+                  <button id="dcp-browse-output" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="prop-field">
+                  <label>Content Title</label>
+                  <input type="text" id="dcp-title" placeholder="Reuse IMP title">
+                </div>
+                <div class="prop-field">
+                  <label>Content Kind</label>
+                  <select id="dcp-kind">
+                    <option value="feature">Feature</option>
+                    <option value="trailer">Trailer</option>
+                    <option value="short">Short</option>
+                  </select>
+                </div>
+              </div>
+              <button id="dcp-convert" class="btn-primary" disabled>Convert to DCP</button>
+              <div id="dcp-results" class="results-box"></div>
+            </section>
           </div>
-          <div class="shortcut-group">
-            <h3>Timeline</h3>
-            <div class="shortcut-row"><kbd>+</kbd> <span>Zoom in</span></div>
-            <div class="shortcut-row"><kbd>-</kbd> <span>Zoom out</span></div>
-            <div class="shortcut-row"><kbd>Del</kbd> <span>Remove segment</span></div>
-            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Z</kbd> <span>Undo</span></div>
-          </div>
-          <div class="shortcut-group">
-            <h3>Jobs</h3>
-            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>J</kbd> <span>View jobs</span></div>
-            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> <span>Run current</span></div>
-            <div class="shortcut-row"><kbd>Escape</kbd> <span>Close modal</span></div>
-          </div>
+        </div>
+
+        <!-- JOBS VIEW -->
+        <div class="view" id="view-jobs">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Jobs</h2>
+              <div class="panel-actions">
+                <button id="jobs-refresh" class="btn-sm">Refresh</button>
+                <span id="jobs-status" class="status-badge">Ready</span>
+              </div>
+            </div>
+            <table class="jobs-table">
+              <thead>
+                <tr><th>ID</th><th>Type</th><th>State</th><th>Progress</th><th></th></tr>
+              </thead>
+              <tbody id="jobs-tbody"></tbody>
+            </table>
+          </section>
+        </div>
+
+        <!-- SETTINGS VIEW -->
+        <div class="view" id="view-settings">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Settings</h2>
+            </div>
+            <form id="settings-form" class="settings-grid">
+              <fieldset>
+                <legend>General</legend>
+                <div class="prop-field">
+                  <label for="set-profile">Application Profile</label>
+                  <select id="set-profile">
+                    <option value="App2">App 2 (2K)</option>
+                    <option value="App2e" selected>App 2e (2K extended)</option>
+                    <option value="App4">App 4 (4K)</option>
+                    <option value="App5">App 5 (HDR)</option>
+                  </select>
+                </div>
+                <div class="prop-field">
+                  <label for="set-creator">Creator Name</label>
+                  <input type="text" id="set-creator" placeholder="My Studio">
+                </div>
+                <div class="prop-field">
+                  <label for="set-language">Default Language</label>
+                  <input type="text" id="set-language" value="en" placeholder="en">
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Encoding</legend>
+                <div class="prop-field">
+                  <label for="set-bandwidth">Bandwidth (Mbps)</label>
+                  <input type="number" id="set-bandwidth" value="250" min="50" max="1000">
+                </div>
+                <div class="prop-field">
+                  <label for="set-colourspace">Colour Space</label>
+                  <select id="set-colourspace">
+                    <option value="Rec.709">Rec.709</option>
+                    <option value="P3-D65">P3-D65</option>
+                    <option value="Rec.2020">Rec.2020</option>
+                  </select>
+                </div>
+                <div class="prop-field">
+                  <label for="set-hdr">HDR Mode</label>
+                  <select id="set-hdr">
+                    <option value="SDR" selected>SDR</option>
+                    <option value="HLG">HLG</option>
+                    <option value="PQ">PQ</option>
+                  </select>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Certificates</legend>
+                <div class="prop-field">
+                  <label for="set-signing-cert">Signing Certificate</label>
+                  <input type="text" id="set-signing-cert" placeholder="/path/to/cert.pem">
+                </div>
+                <div class="prop-field">
+                  <label for="set-signing-key">Signing Key</label>
+                  <input type="text" id="set-signing-key" placeholder="/path/to/key.pem">
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Output</legend>
+                <div class="prop-field">
+                  <label for="set-output-dir">Default Output Directory</label>
+                  <input type="text" id="set-output-dir" placeholder="/path/to/output">
+                </div>
+              </fieldset>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">Save</button>
+                <button type="button" id="set-reset" class="btn-secondary">Reset</button>
+              </div>
+            </form>
+          </section>
         </div>
       </div>
+
+      <!-- Bottom bar -->
+      <footer class="bottom-bar">
+        <div class="progress-section" id="progress-section" style="display:none;">
+          <span id="progress-stage" class="progress-stage"></span>
+          <progress id="progress-bar" max="100" value="0"></progress>
+          <span id="progress-stats" class="progress-stats"></span>
+          <button id="progress-cancel" class="btn-sm" title="Cancel">✕</button>
+        </div>
+        <div class="status-section">
+          <span id="status-text" class="status-text">Ready</span>
+        </div>
+      </footer>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>
