@@ -6,7 +6,7 @@ license.workspace = true
 description = "IMF (Interoperable Master Format) creation and packaging library"
 
 [dependencies]
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", branch = "master" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", tag = "v0.5.0" }
 base64 = "0.22"
 dcpdoctor-core.workspace = true
 postkit.workspace = true
