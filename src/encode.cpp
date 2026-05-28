@@ -132,7 +132,7 @@ EncodeResult encode_to_j2k(const EncodeOptions& opts)
   spdlog::info("Using encoder: {}", encoder);
   fs::create_directories(opts.output_dir);
 
-  // Collect and sort input files
+  // Count input files
   std::vector<fs::path> input_files;
   for(const auto& entry : fs::directory_iterator(opts.input_dir))
   {
@@ -146,40 +146,34 @@ EncodeResult encode_to_j2k(const EncodeOptions& opts)
   result.frame_count = static_cast<uint32_t>(input_files.size());
   spdlog::info("Encoding {} frames ({}) -> J2K", result.frame_count, format_to_input_flag(fmt));
 
-  // Encode each frame
-  uint32_t encoded = 0;
-  for(const auto& input_file : input_files)
+  // Use batch mode for encoding (much faster, and compatible with grok plugin builds)
+  std::string cmd = encoder;
+  if(opts.cinema_profile)
+    cmd += " -cinema2K 24";
+  cmd += " -batch_src " + opts.input_dir.string();
+  cmd += " -a " + opts.output_dir.string();
+  cmd += " -O J2K";
+  if(opts.num_threads > 0)
+    cmd += " -H " + std::to_string(opts.num_threads);
+
+  spdlog::debug("Command: {}", cmd);
+  int ret = system(cmd.c_str());
+  if(ret != 0)
   {
-    // Output filename: frame_NNNNNN.j2c
-    char out_name[64];
-    snprintf(out_name, sizeof(out_name), "frame_%06u.j2c", encoded);
-    fs::path out_path = opts.output_dir / out_name;
-
-    // Build encoder command
-    std::string cmd;
-    cmd = "grk_compress"
-          " -i " +
-          input_file.string() + " -o " + out_path.string() + " -r " +
-          std::to_string(opts.target_bitrate_mbps) + " -n " +
-          std::to_string(opts.num_resolutions) + " -b " + std::to_string(opts.code_block_width) +
-          "," + std::to_string(opts.code_block_height);
-    if(opts.cinema_profile)
-      cmd += " -cinema2K 24"; // will be overridden by actual rate
-    if(opts.num_threads > 0)
-      cmd += " -threads " + std::to_string(opts.num_threads);
-    cmd += " 2>/dev/null";
-
-    int ret = system(cmd.c_str());
-    if(ret != 0)
-    {
-      result.error = "Encoder failed on frame: " + input_file.string();
-      return result;
-    }
-
-    ++encoded;
-    if(encoded % 100 == 0)
-      spdlog::info("  Encoded {}/{} frames", encoded, result.frame_count);
+    result.error = "Batch J2K encoding failed (exit code " + std::to_string(ret) + ")";
+    return result;
   }
+
+  // Verify output count
+  uint32_t encoded = 0;
+  for(const auto& entry : fs::directory_iterator(opts.output_dir))
+  {
+    auto ext = entry.path().extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if(ext == ".j2k" || ext == ".j2c")
+      ++encoded;
+  }
+  spdlog::info("Encoded {} frames", encoded);
 
   result.success = true;
   spdlog::info("Encoding complete: {} frames in {}", encoded, opts.output_dir.string());
