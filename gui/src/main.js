@@ -695,14 +695,16 @@ document.getElementById("btn-new-project")?.addEventListener("click", () => {
   project.assets = [];
   project.segments = [{ id: 1, picture: null, sound: null, subtitle: null }];
   nextAssetId = 1;
-  document.getElementById("prop-title").value = "";
+  const titleEl = document.getElementById("prop-title");
+  if (titleEl) titleEl.value = "";
   document.getElementById("prop-output") && (document.getElementById("prop-output").value = "");
   document.getElementById("project-name").textContent = "Untitled IMP";
   switchView("project");
   renderAssets();
   renderSegments();
   updateStatusStats();
-  setStatus("New project created");
+  setStatus("New project — enter a title to get started");
+  if (titleEl) { titleEl.focus(); titleEl.select(); }
 });
 
 // === Status Bar Stats ===
