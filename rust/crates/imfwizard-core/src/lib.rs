@@ -30,8 +30,11 @@ pub mod subtitle_retime;
 
 // Infrastructure
 pub mod job_queue;
+pub mod plugin;
+pub mod preferences;
 pub mod rest_api;
 pub mod watch;
+pub mod webhook;
 
 // Delivery
 pub mod delivery;
@@ -40,6 +43,7 @@ pub mod profiles;
 // Tools
 pub mod analytics;
 pub mod imp_diff;
+pub mod prores;
 pub mod report;
 pub mod timecode;
 
