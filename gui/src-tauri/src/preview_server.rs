@@ -60,11 +60,14 @@ impl MpvPlayer {
             args.push(format!("--wid={}", wid));
         } else {
             args.push("--force-window=yes".to_string());
-            args.push("--no-ontop".to_string());
+            args.push("--ontop=yes".to_string());
+            args.push("--geometry=640x360+0+0".to_string());
         }
 
         let child = Command::new("mpv")
             .args(&args)
+            // Clear WAYLAND_DISPLAY to force XWayland — makes --ontop work
+            .env_remove("WAYLAND_DISPLAY")
             .spawn()
             .map_err(|e| format!("Failed to start mpv: {e}"))?;
 
@@ -88,14 +91,11 @@ impl MpvPlayer {
     }
 
     fn send_command(&self, cmd: &str) -> Result<String, String> {
-        // Try to send; if it fails, restart mpv and retry once
-        match self.try_send(cmd) {
-            Ok(resp) => Ok(resp),
-            Err(_) => {
-                self.start_mpv()?;
-                self.try_send(cmd)
-            }
+        // Only send if mpv is already running; don't auto-start
+        if !self.is_alive() {
+            return Err("mpv not running".to_string());
         }
+        self.try_send(cmd)
     }
 
     fn try_send(&self, cmd: &str) -> Result<String, String> {
@@ -116,8 +116,15 @@ impl MpvPlayer {
 
 impl Drop for MpvPlayer {
     fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+impl MpvPlayer {
+    pub fn kill(&self) {
         if let Some(mut child) = self.process.lock().unwrap().take() {
             let _ = child.kill();
+            let _ = child.wait();
         }
         let _ = std::fs::remove_file(&self.socket_path);
     }

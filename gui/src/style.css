@@ -586,9 +586,9 @@ body {
   gap: 10px;
   padding: 8px 12px;
   background: var(--surface-alt);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 8px;
+  border-top: 1px solid var(--border);
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .timeline-transport .timecode {

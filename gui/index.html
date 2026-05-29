@@ -254,17 +254,7 @@
                 <button id="tl-zoom-out" class="btn-sm">−</button>
               </div>
             </div>
-            <!-- Scrubber / Transport Controls -->
-            <div class="timeline-transport">
-              <button id="timeline-play-btn" class="btn-sm" title="Play/Pause">▶</button>
-              <span id="timeline-position" class="timecode">00:00:00:00</span>
-              <div id="timeline-scrubber" class="timeline-scrubber">
-                <div class="timeline-scrubber-track">
-                  <div id="timeline-playhead" class="timeline-playhead" style="left: 0%"></div>
-                </div>
-              </div>
-              <span id="timeline-duration" class="timecode" data-raw="0">00:00:00:00</span>
-            </div>
+            <!-- Scrubber moved to global transport bar -->
             <div id="timeline-view" class="timeline">
               <div class="timeline-ruler" id="timeline-ruler"></div>
               <div class="timeline-tracks" id="timeline-tracks">
@@ -704,6 +694,18 @@
             </form>
           </section>
         </div>
+      </div>
+
+      <!-- Global Transport / Scrubber (always visible) -->
+      <div class="timeline-transport" id="global-transport">
+        <button id="timeline-play-btn" class="btn-sm" title="Play/Pause">▶</button>
+        <span id="timeline-position" class="timecode">00:00:00:00</span>
+        <div id="timeline-scrubber" class="timeline-scrubber">
+          <div class="timeline-scrubber-track">
+            <div id="timeline-playhead" class="timeline-playhead" style="left: 0%"></div>
+          </div>
+        </div>
+        <span id="timeline-duration" class="timecode" data-raw="0">00:00:00:00</span>
       </div>
 
       <!-- Bottom bar -->

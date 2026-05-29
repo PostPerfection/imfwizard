@@ -90,6 +90,13 @@ pub fn run() {
         .setup(|_app| {
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(mpv) = window.try_state::<preview_server::MpvPlayer>() {
+                    mpv.kill();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
