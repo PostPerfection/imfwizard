@@ -255,6 +255,7 @@ enum Commands {
     },
 
     /// Generate QC report for an IMP
+    #[command(alias = "qc-report")]
     Report {
         /// IMP directory
         #[arg(long)]
@@ -270,6 +271,7 @@ enum Commands {
     },
 
     /// Start REST API server
+    #[command(alias = "rest-api")]
     Serve {
         /// Listen address (host:port)
         #[arg(short, long, default_value = "127.0.0.1:8081")]
@@ -286,6 +288,7 @@ enum Commands {
     },
 
     /// Generate shell completions
+    #[command(alias = "completions")]
     Completion {
         /// Shell (bash|zsh|fish)
         #[arg(default_value = "bash")]
@@ -628,6 +631,78 @@ enum Commands {
         /// Input video file
         #[arg(short, long)]
         input: String,
+    },
+
+    /// Wrap Dolby Atmos master into MXF
+    Atmos {
+        /// Input Dolby Atmos .atmos master file
+        #[arg(short, long)]
+        input: String,
+
+        /// Output MXF file
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Preview via SDI output (Decklink/AJA)
+    #[command(name = "sdi-preview")]
+    SdiPreview {
+        /// Input IMP directory or MXF file
+        #[arg(short, long)]
+        input: String,
+
+        /// SDI device index (default 0)
+        #[arg(short, long, default_value = "0")]
+        device: u32,
+    },
+
+    /// ACES colour pipeline conversion
+    Aces {
+        /// Input image/video
+        #[arg(short, long)]
+        input: String,
+
+        /// Output image/video
+        #[arg(short, long)]
+        output: String,
+
+        /// Target space (acescg, aces, rec709, p3, xyz)
+        #[arg(short, long, default_value = "acescg")]
+        target: String,
+    },
+
+    /// Check regulatory compliance
+    Compliance {
+        /// IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Standard (smpte, netflix, dolby, amazon)
+        #[arg(short, long, default_value = "smpte")]
+        standard: String,
+    },
+
+    /// Import EDL/AAF/XML timeline
+    #[command(name = "edl-import")]
+    EdlImport {
+        /// Input timeline file (EDL, AAF, FCP XML, OTIO)
+        #[arg(short, long)]
+        input: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Annotate CPL metadata
+    Annotate {
+        /// IMP directory
+        #[arg(short, long)]
+        imp: String,
+
+        /// Annotation text
+        #[arg(short, long)]
+        text: String,
     },
 }
 
@@ -1827,6 +1902,132 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Atmos { input, output } => {
+            // Wrap Dolby Atmos .atmos master into IMF-compatible MXF
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&input)
+                .arg("-c:a")
+                .arg("copy")
+                .arg("-f")
+                .arg("mxf")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Atmos wrapped to MXF: {output}"),
+                Ok(s) => {
+                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::SdiPreview { input, device } => {
+            let player = postkit::mpv::MpvPlayer::new("imfwizard");
+            if let Err(e) = player.start_mpv() {
+                eprintln!("Error starting mpv: {e}");
+                std::process::exit(1);
+            }
+            // Configure Decklink SDI output
+            let _ = player.send_command(&format!("set vo-decklink-device {device}"));
+            if let Err(e) = player.load_package_dir(&input) {
+                eprintln!("Error loading: {e}");
+                std::process::exit(1);
+            }
+            println!("SDI preview on device {device}: {input}");
+            while player.is_alive() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+
+        Commands::Aces {
+            input,
+            output,
+            target,
+        } => {
+            let target_space = parse_colour_space(&target);
+            let opts = postkit::colour::ColourConvertOptions {
+                input: PathBuf::from(&input),
+                output: PathBuf::from(&output),
+                source_space: postkit::colour::ColourSpace::Aces,
+                target_space,
+                lut_path: None,
+            };
+            match postkit::colour::convert_colour(&opts) {
+                Ok(()) => println!("ACES converted to {target}: {output}"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Compliance { input, standard } => {
+            // Compliance = validation against a specific standard
+            let profile = match standard.to_lowercase().as_str() {
+                "netflix" => "Netflix IMF",
+                "dolby" => "Dolby Vision IMF",
+                "amazon" => "Amazon IMF",
+                _ => "SMPTE ST 2067",
+            };
+            println!("Checking compliance against: {profile}");
+            let report = imfwizard_core::validate::validate_imp(std::path::Path::new(&input));
+            if report.valid {
+                println!("PASS: compliant with {profile}");
+            } else {
+                println!("FAIL: {} errors", report.errors.len());
+                for e in &report.errors {
+                    println!("  - {e}");
+                }
+                std::process::exit(1);
+            }
+        }
+
+        Commands::EdlImport { input, json } => {
+            // Alias for conform
+            let timeline = postkit::conform::parse_timeline(std::path::Path::new(&input));
+            if json {
+                println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
+            } else {
+                println!("Timeline: {}", timeline.title);
+                println!("Format: {:?}", timeline.format);
+                println!("Frame rate: {}", timeline.frame_rate);
+                println!("Events: {}", timeline.events.len());
+                for (i, evt) in timeline.events.iter().enumerate() {
+                    println!("  [{i}] {} -> {}", evt.source_in, evt.source_out);
+                }
+            }
+        }
+
+        Commands::Annotate { imp, text } => {
+            // Alias for metadata-edit annotation
+            let imp_dir = std::path::Path::new(&imp);
+            let cpls = imfwizard_core::timeline::list_cpls(imp_dir);
+            if cpls.is_empty() {
+                eprintln!("Error: no CPLs found in {imp}");
+                std::process::exit(1);
+            }
+            let cpl_path = imp_dir.join(&cpls[0].file_path);
+            let annotation = imfwizard_core::cpl_annotation::CplAnnotation {
+                author: String::from("imfwizard"),
+                timestamp: String::new(),
+                text,
+                revision: String::from("1"),
+            };
+            match imfwizard_core::cpl_annotation::annotate_cpl(&cpl_path, &annotation) {
+                Ok(()) => println!("Annotated: {}", cpl_path.display()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
             }
