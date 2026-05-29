@@ -80,6 +80,25 @@ jobs:
         working-directory: gui
         run: npm ci
 
+      - name: Build CLI sidecar (Unix)
+        if: runner.os != 'Windows'
+        working-directory: rust
+        env:
+          OPENSSL_STATIC: "1"
+        run: |
+          cargo build --release -p imfwizard-cli
+          TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
+          cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
+
+      - name: Build CLI sidecar (Windows)
+        if: runner.os == 'Windows'
+        working-directory: rust
+        env:
+          OPENSSL_STATIC: "1"
+        run: |
+          cargo build --release -p imfwizard-cli
+          Copy-Item "target/release/imfwizard.exe" "../gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
