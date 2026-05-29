@@ -138,8 +138,28 @@ loadSettings();
 const project = {
   title: "",
   assets: [],
-  segments: [{ id: 1, picture: null, sound: null, subtitle: null }],
+  compositions: [
+    { id: 1, name: "Main", contentKind: "feature", segments: [{ id: 1, picture: null, sound: null, subtitle: null }] }
+  ],
+  activeComposition: 0,
 };
+
+// Convenience accessor for active composition segments
+function getActiveSegments() {
+  return project.compositions[project.activeComposition]?.segments || [];
+}
+function setActiveSegments(segs) {
+  if (project.compositions[project.activeComposition]) {
+    project.compositions[project.activeComposition].segments = segs;
+  }
+}
+
+// Legacy alias for backward compat
+Object.defineProperty(project, 'segments', {
+  get() { return getActiveSegments(); },
+  set(v) { setActiveSegments(v); },
+  configurable: true,
+});
 let nextAssetId = 1;
 
 // === Drop overlay ===
@@ -294,6 +314,72 @@ document.getElementById("add-segment")?.addEventListener("click", () => {
   project.segments.push({ id: maxId + 1, picture: null, sound: null, subtitle: null });
   renderSegments();
 });
+
+// === Multi-CPL Management ===
+let nextCplId = 2;
+
+function renderCplTabs() {
+  const container = document.getElementById("cpl-tabs");
+  if (!container) return;
+  container.innerHTML = "";
+  project.compositions.forEach((cpl, idx) => {
+    const tab = document.createElement("button");
+    tab.className = "cpl-tab" + (idx === project.activeComposition ? " active" : "");
+    tab.dataset.cpl = idx;
+    tab.textContent = cpl.name;
+    if (project.compositions.length > 1) {
+      const rm = document.createElement("span");
+      rm.className = "cpl-tab-remove";
+      rm.textContent = "\u00d7";
+      rm.addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeCpl(idx);
+      });
+      tab.appendChild(rm);
+    }
+    tab.addEventListener("click", () => switchCpl(idx));
+    container.appendChild(tab);
+  });
+}
+
+function switchCpl(idx) {
+  if (idx < 0 || idx >= project.compositions.length) return;
+  project.activeComposition = idx;
+  renderCplTabs();
+  renderSegments();
+  const cpl = project.compositions[idx];
+  const kindEl = document.getElementById("prop-content-kind");
+  if (kindEl && cpl.contentKind) kindEl.value = cpl.contentKind;
+}
+
+function removeCpl(idx) {
+  if (project.compositions.length <= 1) return;
+  project.compositions.splice(idx, 1);
+  if (project.activeComposition >= project.compositions.length) {
+    project.activeComposition = project.compositions.length - 1;
+  }
+  renderCplTabs();
+  renderSegments();
+}
+
+document.getElementById("add-cpl")?.addEventListener("click", () => {
+  const name = prompt("Composition name:", `CPL ${nextCplId}`);
+  if (!name) return;
+  project.compositions.push({
+    id: nextCplId++,
+    name: name,
+    contentKind: "feature",
+    segments: [{ id: 1, picture: null, sound: null, subtitle: null }],
+  });
+  switchCpl(project.compositions.length - 1);
+});
+
+document.getElementById("prop-content-kind")?.addEventListener("change", (e) => {
+  const cpl = project.compositions[project.activeComposition];
+  if (cpl) cpl.contentKind = e.target.value;
+});
+
+renderCplTabs();
 
 // === Output directory ===
 document.getElementById("browse-output")?.addEventListener("click", async () => {
@@ -693,7 +779,11 @@ document.getElementById("btn-new-project")?.addEventListener("click", () => {
   }
   project.title = "";
   project.assets = [];
-  project.segments = [{ id: 1, picture: null, sound: null, subtitle: null }];
+  project.compositions = [
+    { id: 1, name: "Main", contentKind: "feature", segments: [{ id: 1, picture: null, sound: null, subtitle: null }] }
+  ];
+  project.activeComposition = 0;
+  nextCplId = 2;
   nextAssetId = 1;
   const titleEl = document.getElementById("prop-title");
   if (titleEl) titleEl.value = "";
@@ -701,6 +791,7 @@ document.getElementById("btn-new-project")?.addEventListener("click", () => {
   document.getElementById("project-name").textContent = "Untitled IMP";
   switchView("project");
   renderAssets();
+  renderCplTabs();
   renderSegments();
   updateStatusStats();
   setStatus("New project — enter a title to get started");
@@ -825,3 +916,42 @@ renderRecentProjects();
 updateStatusStats();
 initPreview();
 setStatus("Ready");
+
+// === Target Conversion (Scale/Crop/Letterbox) ===
+document.getElementById("convert-browse-input")?.addEventListener("click", async () => {
+  const path = await open({ filters: [
+    { name: "Video", extensions: ["mp4", "mkv", "mov", "mxf"] },
+    { name: "All", extensions: ["*"] }
+  ]});
+  if (path) {
+    document.getElementById("convert-input").value = path;
+    document.getElementById("convert-start").disabled = false;
+  }
+});
+document.getElementById("convert-browse-output")?.addEventListener("click", async () => {
+  const path = await open({ directory: true });
+  if (path) document.getElementById("convert-output").value = path;
+});
+document.getElementById("convert-start")?.addEventListener("click", async () => {
+  const input = document.getElementById("convert-input").value;
+  const container = document.getElementById("convert-container").value;
+  const method = document.getElementById("convert-method").value;
+  const output = document.getElementById("convert-output").value;
+  if (!input) return;
+
+  const resultsEl = document.getElementById("convert-results");
+  resultsEl.textContent = "Converting…";
+  resultsEl.classList.add("visible");
+
+  try {
+    const args = ["convert", input, "--target", container, "--method", method];
+    if (output) args.push("-o", output);
+    const cmd = Command.create("imfwizard", args);
+    const result = await cmd.execute();
+    resultsEl.textContent = result.code === 0
+      ? `✓ Conversion complete\n${result.stdout}`
+      : `✗ Error:\n${result.stderr || result.stdout}`;
+  } catch (e) {
+    resultsEl.textContent = `✗ Failed: ${e}`;
+  }
+});

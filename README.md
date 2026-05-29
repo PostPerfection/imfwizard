@@ -109,7 +109,10 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Loudness metering panel** — EBU R128 / ATSC A/85 compliance badges
 - **IMP metadata editor** — edit CPL annotations, content versioning, locale info
 - **Delivery preset selector** — one-click configuration for major platforms
-- **Preview player** — J2K frame-by-frame playback with waveform display
+- **Preview player** — mpv-based frame-accurate playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
+- **Multi-CPL composition tabs** — switch, add, remove compositions in a single IMP
+- **Target resolution conversion panel** — scale/crop to 2K/4K scope/flat/full
+- **GPU encoding toggle** — enable/disable grok GPU acceleration
 - **Bitrate analytics dashboard** — per-second charts, histogram, statistics
 - **Subtitle burn-in** — GUI for hardcoding subs into video
 - **Batch delivery panel** — deliver to multiple platforms with checkboxes
@@ -339,6 +342,19 @@ imfwizard burn-in \
   -s /path/to/subs.srt \
   -o /path/to/output_burned.mp4 \
   --font-size 56
+```
+
+### Scale/crop video to target resolution
+
+```bash
+# Scale video to 4K scope with letterboxing
+imfwizard target-convert \
+  -i /path/to/video.mov \
+  -o /path/to/video_4k_scope.mov \
+  -t 4k-scope
+
+# Targets: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
+#          4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
 ```
 
 ### Convert IMF to DCP

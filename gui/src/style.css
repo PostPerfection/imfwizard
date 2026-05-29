@@ -312,6 +312,43 @@ body {
 }
 
 /* Reels */
+/* CPL Tabs */
+.compositions-panel {
+  margin-bottom: 0;
+}
+.cpl-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.cpl-tab {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px 4px 0 0;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s, color 0.15s;
+}
+.cpl-tab:hover {
+  background: var(--surface-hover);
+}
+.cpl-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.cpl-tab .cpl-tab-remove {
+  margin-left: 6px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.cpl-tab .cpl-tab-remove:hover {
+  opacity: 1;
+}
+
 .reels-panel {
   flex: 1;
   min-height: 200px;
@@ -540,6 +577,64 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+/* Transport / Scrubber */
+.timeline-transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.timeline-transport .timecode {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.timeline-scrubber {
+  flex: 1;
+  height: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.timeline-scrubber-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  position: relative;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: -6px;
+  width: 3px;
+  height: 16px;
+  background: var(--accent, #7c3aed);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  transition: left 0.1s linear;
+}
+
+.timeline-scrubber:hover .timeline-scrubber-track {
+  height: 6px;
+}
+
+.timeline-scrubber:hover .timeline-playhead {
+  top: -5px;
+  width: 4px;
+  height: 16px;
 }
 
 .timeline-ruler {

@@ -100,6 +100,16 @@
                 </div>
               </section>
 
+              <section class="panel compositions-panel">
+                <div class="panel-header">
+                  <h2>Compositions (CPLs)</h2>
+                  <button id="add-cpl" class="btn-sm">+ CPL</button>
+                </div>
+                <div id="cpl-tabs" class="cpl-tabs">
+                  <button class="cpl-tab active" data-cpl="0">Main</button>
+                </div>
+              </section>
+
               <section class="panel reels-panel">
                 <div class="panel-header">
                   <h2>Virtual Tracks</h2>
@@ -243,6 +253,17 @@
                 <button id="tl-zoom-in" class="btn-sm">+</button>
                 <button id="tl-zoom-out" class="btn-sm">−</button>
               </div>
+            </div>
+            <!-- Scrubber / Transport Controls -->
+            <div class="timeline-transport">
+              <button id="timeline-play-btn" class="btn-sm" title="Play/Pause">▶</button>
+              <span id="timeline-position" class="timecode">00:00:00:00</span>
+              <div id="timeline-scrubber" class="timeline-scrubber">
+                <div class="timeline-scrubber-track">
+                  <div id="timeline-playhead" class="timeline-playhead" style="left: 0%"></div>
+                </div>
+              </div>
+              <span id="timeline-duration" class="timecode" data-raw="0">00:00:00:00</span>
             </div>
             <div id="timeline-view" class="timeline">
               <div class="timeline-ruler" id="timeline-ruler"></div>
@@ -451,6 +472,46 @@
               <div id="an-results" class="results-box"></div>
               <canvas id="an-chart" width="800" height="200" style="display:none;width:100%;margin-top:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);"></canvas>
             </section>
+
+            <section class="panel">
+              <h2>Target Conversion</h2>
+              <p class="field-hint">Scale, crop, or letterbox video for IMF container requirements.</p>
+              <div class="prop-field">
+                <label>Input Video/Sequence</label>
+                <div class="input-with-btn">
+                  <input id="convert-input" type="text" placeholder="Select input…" readonly>
+                  <button id="convert-browse-input" class="btn-sm">…</button>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="prop-field">
+                  <label>Target Resolution</label>
+                  <select id="convert-container">
+                    <option value="hd">HD (1920×1080)</option>
+                    <option value="2k">2K (2048×1080)</option>
+                    <option value="uhd">UHD (3840×2160)</option>
+                    <option value="4k">4K (4096×2160)</option>
+                  </select>
+                </div>
+                <div class="prop-field">
+                  <label>Method</label>
+                  <select id="convert-method">
+                    <option value="letterbox">Letterbox (pad)</option>
+                    <option value="crop">Crop (center)</option>
+                    <option value="scale">Scale (stretch)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="prop-field">
+                <label>Output Directory</label>
+                <div class="input-with-btn">
+                  <input id="convert-output" type="text" placeholder="Output folder…" readonly>
+                  <button id="convert-browse-output" class="btn-sm">…</button>
+                </div>
+              </div>
+              <button id="convert-start" class="btn-primary" disabled>Convert</button>
+              <div id="convert-results" class="results-box"></div>
+            </section>
           </div>
         </div>
 
@@ -605,6 +666,17 @@
                     <option value="HLG">HLG</option>
                     <option value="PQ">PQ</option>
                   </select>
+                </div>
+                <div class="prop-field">
+                  <label><input type="checkbox" id="set-gpu-enable" checked> GPU Acceleration</label>
+                </div>
+                <div class="prop-field">
+                  <label for="set-gpu">GPU Device (-1 = auto)</label>
+                  <input type="number" id="set-gpu" value="-1" min="-1" max="7">
+                </div>
+                <div class="prop-field">
+                  <label for="set-threads">Encoding Threads (0 = auto)</label>
+                  <input type="number" id="set-threads" value="0" min="0" max="64">
                 </div>
               </fieldset>
               <fieldset>

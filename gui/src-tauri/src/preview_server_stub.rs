@@ -147,6 +147,76 @@ pub fn preview_stop(state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn preview_get_position(state: tauri::State<'_, MpvPlayer>) -> Result<f64, String> {
+    let resp = state.send_command(r#"{"command": ["get_property", "time-pos"]}"#)?;
+    parse_property_f64(&resp)
+}
+
+#[tauri::command]
+pub fn preview_get_duration(state: tauri::State<'_, MpvPlayer>) -> Result<f64, String> {
+    let resp = state.send_command(r#"{"command": ["get_property", "duration"]}"#)?;
+    parse_property_f64(&resp)
+}
+
+#[tauri::command]
+pub fn preview_seek_absolute(seconds: f64, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
+    state.send_command(&format!(r#"{{"command": ["seek", "{seconds}", "absolute"]}}"#))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn preview_get_metadata(state: tauri::State<'_, MpvPlayer>) -> Result<String, String> {
+    let pos = state.send_command(r#"{"command": ["get_property", "time-pos"]}"#).unwrap_or_default();
+    let dur = state.send_command(r#"{"command": ["get_property", "duration"]}"#).unwrap_or_default();
+    let paused = state.send_command(r#"{"command": ["get_property", "pause"]}"#).unwrap_or_default();
+    let fname = state.send_command(r#"{"command": ["get_property", "filename"]}"#).unwrap_or_default();
+
+    Ok(format!(
+        r#"{{"position": {}, "duration": {}, "paused": {}, "filename": {}}}"#,
+        extract_data_field(&pos),
+        extract_data_field(&dur),
+        extract_data_field(&paused),
+        extract_data_field_str(&fname),
+    ))
+}
+
+fn parse_property_f64(resp: &str) -> Result<f64, String> {
+    if let Some(start) = resp.find("\"data\":") {
+        let after = &resp[start + 7..];
+        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        let val_str = after[..end].trim();
+        val_str.parse::<f64>().map_err(|e| format!("Parse error: {e} from '{val_str}'"))
+    } else {
+        Err(format!("No data in response: {resp}"))
+    }
+}
+
+fn extract_data_field(resp: &str) -> String {
+    if let Some(start) = resp.find("\"data\":") {
+        let after = &resp[start + 7..];
+        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        after[..end].trim().to_string()
+    } else {
+        "null".to_string()
+    }
+}
+
+fn extract_data_field_str(resp: &str) -> String {
+    if let Some(start) = resp.find("\"data\":") {
+        let after = &resp[start + 7..];
+        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        let val = after[..end].trim();
+        if val.starts_with('"') {
+            val.to_string()
+        } else {
+            format!("\"{}\"", val)
+        }
+    } else {
+        "null".to_string()
+    }
+}
+
+#[tauri::command]
 pub fn preview_load_dcp(dir_path: String, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
     let dir = PathBuf::from(&dir_path);
     if !dir.is_dir() {

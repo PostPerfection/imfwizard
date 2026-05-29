@@ -495,7 +495,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">🖥️</div>
             <h3>Desktop GUI</h3>
-            <p>Tauri 2 desktop app with dark theme. Drag-and-drop import, keyboard shortcuts, recent projects, context menus, asset filtering, auto-detect video properties, progress in title bar, desktop notifications, and timeline editor.</p>
+            <p>Tauri 2 desktop app with dark theme. Timeline scrubber with timecode display, multi-CPL composition tabs, target resolution conversion panel, GPU encoding toggle, subtitle burn-in, drag-and-drop import, keyboard shortcuts, and desktop notifications.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎞️</div>
@@ -716,7 +716,19 @@
         </div>
         <div class="gui-feature">
             <h4>🎥 Preview Player</h4>
-            <p>Frame-by-frame J2K playback with scrub bar and waveform display.</p>
+            <p>mpv-based frame-accurate playback with timeline scrubber, click-to-seek, drag-to-scrub, and HH:MM:SS:FF timecode display.</p>
+        </div>
+        <div class="gui-feature">
+            <h4>📑 Multi-CPL Tabs</h4>
+            <p>Switch between multiple compositions in a single IMP. Add, remove, and rename CPLs with tabbed interface.</p>
+        </div>
+        <div class="gui-feature">
+            <h4>🎯 Target Convert</h4>
+            <p>Scale/crop video to DCI targets (2K/4K scope, flat, full) with aspect-ratio-aware letterboxing.</p>
+        </div>
+        <div class="gui-feature">
+            <h4>⚙️ GPU Toggle</h4>
+            <p>Enable or disable grok GPU acceleration for JPEG 2000 encoding directly from the GUI.</p>
         </div>
         <div class="gui-feature">
             <h4>⌨️ Keyboard Shortcuts</h4>
@@ -781,7 +793,13 @@
 <span class="cmd">$</span> ./imfwizard loudness <span class="val">/path/to/audio.wav</span><br>
 <br>
 <span class="comment"># Validate with Netflix Photon</span><br>
-<span class="cmd">$</span> ./imfwizard validate <span class="val">/path/to/imp/</span>
+<span class="cmd">$</span> ./imfwizard validate <span class="val">/path/to/imp/</span><br>
+<br>
+<span class="comment"># Scale video to target resolution (2K/4K scope/flat/full)</span><br>
+<span class="cmd">$</span> ./imfwizard target-convert <span class="flag">-i</span> <span class="val">video.mov</span> <span class="flag">-o</span> <span class="val">video_4k.mov</span> <span class="flag">-t</span> <span class="val">4k-scope</span><br>
+<br>
+<span class="comment"># Burn subtitles into video</span><br>
+<span class="cmd">$</span> ./imfwizard burn-in <span class="flag">-i</span> <span class="val">video.mp4</span> <span class="flag">-s</span> <span class="val">subs.srt</span> <span class="flag">-o</span> <span class="val">burned.mp4</span>
         </code>
     </div>
 </section>

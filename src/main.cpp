@@ -785,6 +785,13 @@ int main(int argc, char* argv[])
   autoqc_cmd->add_option("--silence-duration", aqc_silence_dur, "Min silence duration (sec)")->default_val(1.0);
   autoqc_cmd->add_option("--clipping-threshold", aqc_clip_thresh, "Clipping threshold (dBFS)")->default_val(-0.5);
 
+  // === Target convert subcommand ===
+  auto* tgtconv_cmd = app.add_subcommand("target-convert", "Scale/crop video to a target resolution (2K/4K scope/flat/full)");
+  std::string tgtconv_input, tgtconv_output, tgtconv_target;
+  tgtconv_cmd->add_option("-i,--input", tgtconv_input, "Input video file")->required()->check(CLI::ExistingFile);
+  tgtconv_cmd->add_option("-o,--output", tgtconv_output, "Output video file")->required();
+  tgtconv_cmd->add_option("-t,--target", tgtconv_target, "Target: 2k-scope, 2k-flat, 2k-full, 4k-scope, 4k-flat, 4k-full")->required();
+
   CLI11_PARSE(app, argc, argv);
 
   if(verbose)
@@ -2355,6 +2362,31 @@ int main(int argc, char* argv[])
       spdlog::info("Within tolerance: {}", result.within_tolerance ? "YES" : "NO");
     }
     return result.within_tolerance ? 0 : 1;
+  }
+
+  // === Target convert handler ===
+  if(tgtconv_cmd->parsed())
+  {
+    int width = 0, height = 0;
+    if(tgtconv_target == "2k-scope") { width = 2048; height = 858; }
+    else if(tgtconv_target == "2k-flat") { width = 1998; height = 1080; }
+    else if(tgtconv_target == "2k-full") { width = 2048; height = 1080; }
+    else if(tgtconv_target == "4k-scope") { width = 4096; height = 1716; }
+    else if(tgtconv_target == "4k-flat") { width = 3996; height = 2160; }
+    else if(tgtconv_target == "4k-full") { width = 4096; height = 2160; }
+    else {
+      spdlog::error("Unknown target '{}'. Use: 2k-scope, 2k-flat, 2k-full, 4k-scope, 4k-flat, 4k-full", tgtconv_target);
+      return 1;
+    }
+
+    std::string vf = "scale=" + std::to_string(width) + ":" + std::to_string(height) +
+                     ":force_original_aspect_ratio=decrease,pad=" +
+                     std::to_string(width) + ":" + std::to_string(height) + ":(ow-iw)/2:(oh-ih)/2";
+
+    std::string cmd = "ffmpeg -y -i \"" + tgtconv_input + "\" -vf \"" + vf + "\" -c:a copy \"" + tgtconv_output + "\"";
+    spdlog::info("Running: {}", cmd);
+    int ret = std::system(cmd.c_str());
+    return ret == 0 ? 0 : 1;
   }
 
   return 0;
