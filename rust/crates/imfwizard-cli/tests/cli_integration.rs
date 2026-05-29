@@ -24,7 +24,7 @@ fn help_flag() {
         .stdout(predicate::str::contains("Usage:"))
         .stdout(predicate::str::contains("create"))
         .stdout(predicate::str::contains("encode"))
-        .stdout(predicate::str::contains("analyze"))
+        .stdout(predicate::str::contains("analytics"))
         .stdout(predicate::str::contains("profiles"));
 }
 

@@ -44,9 +44,13 @@ pub mod profiles;
 // Tools
 pub mod analytics;
 pub mod imp_diff;
+pub mod info;
 pub mod prores;
 pub mod report;
+pub mod supplement;
 pub mod timecode;
+pub mod to_dcp;
+pub mod validate;
 
 // Crypto
 pub mod hash;

@@ -117,9 +117,10 @@ enum Commands {
     },
 
     /// Analyze an IMP directory
-    Analyze {
+    #[command(name = "analytics")]
+    Analytics {
         /// IMP directory to analyze
-        #[arg(short, long)]
+        #[arg(long = "dir", short)]
         input: PathBuf,
 
         /// Output as JSON
@@ -154,6 +155,103 @@ enum Commands {
         /// Frame rate
         #[arg(short, long, default_value = "24")]
         fps: u8,
+    },
+
+    /// Validate an IMP directory
+    Validate {
+        /// IMP directory to validate
+        dir: String,
+    },
+
+    /// Measure audio loudness (EBU R128)
+    Loudness {
+        /// Audio file to measure
+        audio_file: String,
+    },
+
+    /// Burn subtitles into video
+    #[command(name = "burn-in")]
+    BurnIn {
+        /// Input video file
+        #[arg(short, long)]
+        input: String,
+
+        /// Subtitle file
+        #[arg(short, long)]
+        subtitles: String,
+
+        /// Output video file
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Show IMP metadata
+    Info {
+        /// IMP directory
+        dir: String,
+    },
+
+    /// Create a supplemental IMP
+    Supplement {
+        /// Original Version (OV) IMP directory
+        #[arg(long)]
+        ov: String,
+
+        /// Title for the supplemental package
+        #[arg(short, long)]
+        title: String,
+
+        /// Output directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Video directory (J2K codestreams)
+        #[arg(short, long)]
+        video: Option<String>,
+
+        /// Entry point (frame offset)
+        #[arg(long, default_value = "0")]
+        entry_point: u64,
+
+        /// Duration
+        #[arg(long)]
+        duration: Option<String>,
+    },
+
+    /// Convert IMP to DCP
+    #[command(name = "to-dcp")]
+    ToDcp {
+        /// Input IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output DCP directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Content kind (feature, trailer, etc.)
+        #[arg(short, long, default_value = "feature")]
+        kind: String,
+
+        /// Title override
+        #[arg(short, long)]
+        title: Option<String>,
+    },
+
+    /// Convert IMP to a delivery target format
+    #[command(name = "target-convert")]
+    TargetConvert {
+        /// Input IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Target platform (e.g. netflix, apple, amazon)
+        #[arg(short, long)]
+        target: String,
+
+        /// Output directory (defaults to input + _delivery)
+        #[arg(short, long)]
+        output: Option<String>,
     },
 }
 
@@ -433,7 +531,8 @@ fn main() {
             }
         }
 
-        Commands::Analyze { input, json } => match imfwizard_core::analytics::analyze_imp(&input) {
+        Commands::Analytics { input, json } => match imfwizard_core::analytics::analyze_imp(&input)
+        {
             Ok(a) => {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&a).unwrap());
@@ -496,6 +595,164 @@ fn main() {
                 Ok(parsed) => {
                     println!("Timecode: {parsed}");
                     println!("Total frames: {}", parsed.to_frames());
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Validate { dir } => {
+            let result = imfwizard_core::validate::validate_imp(std::path::Path::new(&dir));
+            if result.valid {
+                println!("IMP validation PASSED");
+                if !result.warnings.is_empty() {
+                    for w in &result.warnings {
+                        println!("  warning: {w}");
+                    }
+                }
+            } else {
+                eprintln!("IMP validation FAILED");
+                for e in &result.errors {
+                    eprintln!("  error: {e}");
+                }
+                for w in &result.warnings {
+                    eprintln!("  warning: {w}");
+                }
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Loudness { audio_file } => {
+            let result = postkit::loudness::measure_loudness(std::path::Path::new(&audio_file));
+            if result.success {
+                println!("Integrated: {:.1} LUFS", result.integrated_lufs);
+                println!("True Peak: {:.1} dBTP", result.true_peak_dbtp);
+                println!("Range: {:.1} LU", result.range_lu);
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::BurnIn {
+            input,
+            subtitles,
+            output,
+        } => {
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&input)
+                .arg("-vf")
+                .arg(format!("subtitles={}", subtitles))
+                .arg("-c:a")
+                .arg("copy")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    println!("Burned subtitles into: {output}");
+                }
+                Ok(s) => {
+                    eprintln!("Error: ffmpeg exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Error: Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Info { dir } => {
+            match imfwizard_core::info::inspect_imp(std::path::Path::new(&dir)) {
+                Ok(info) => {
+                    println!("{}", serde_json::to_string_pretty(&info).unwrap());
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Supplement {
+            ov,
+            title,
+            output,
+            video,
+            entry_point,
+            duration,
+        } => {
+            let opts = imfwizard_core::supplement::SupplementOptions {
+                ov_dir: PathBuf::from(ov),
+                title,
+                output_dir: PathBuf::from(output),
+                video: video.map(PathBuf::from),
+                entry_point,
+                duration,
+            };
+            let result = imfwizard_core::supplement::create_supplement(&opts);
+            if result.success {
+                println!(
+                    "Supplemental IMP created at {}",
+                    result.output_dir.display()
+                );
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::ToDcp {
+            input,
+            output,
+            kind,
+            title,
+        } => {
+            let opts = imfwizard_core::to_dcp::ToDcpOptions {
+                imp_dir: PathBuf::from(input),
+                output_dir: PathBuf::from(output),
+                title,
+                content_kind: kind,
+            };
+            let result = imfwizard_core::to_dcp::imp_to_dcp(&opts);
+            if result.success {
+                println!("DCP created at {}", result.output_dir.display());
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::TargetConvert {
+            input,
+            target,
+            output,
+        } => {
+            let imp_dir = PathBuf::from(&input);
+            let output_dir = output
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(format!("{input}_delivery")));
+
+            let spec = imfwizard_core::delivery::DeliverySpec {
+                platform: target.clone(),
+                video_codec: "h264".to_string(),
+                audio_codec: "aac".to_string(),
+                container: "mp4".to_string(),
+                resolution: (1920, 1080),
+                fps: 24.0,
+                bitrate: "20M".to_string(),
+                hdr: false,
+                dolby_vision: false,
+                atmos: false,
+            };
+
+            match imfwizard_core::delivery::deliver(&imp_dir, &output_dir, &spec) {
+                Ok(out) => {
+                    println!("Delivered to: {}", out.display());
                 }
                 Err(e) => {
                     eprintln!("Error: {e}");
