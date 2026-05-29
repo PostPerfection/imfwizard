@@ -253,6 +253,216 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
     },
+
+    /// Generate QC report for an IMP
+    Report {
+        /// IMP directory
+        #[arg(long)]
+        imp: String,
+
+        /// Output report file
+        #[arg(short, long)]
+        output: String,
+
+        /// Format: text, json, html
+        #[arg(short, long, default_value = "html")]
+        format: String,
+    },
+
+    /// Start REST API server
+    Serve {
+        /// Listen address (host:port)
+        #[arg(short, long, default_value = "127.0.0.1:8081")]
+        bind: String,
+    },
+
+    /// Start job queue daemon
+    Daemon,
+
+    /// Manage job queue
+    Batch {
+        #[command(subcommand)]
+        action: BatchAction,
+    },
+
+    /// Generate shell completions
+    Completion {
+        /// Shell (bash|zsh|fish)
+        #[arg(default_value = "bash")]
+        shell: String,
+    },
+
+    /// Edit CPL metadata
+    #[command(name = "metadata-edit")]
+    MetadataEdit {
+        /// IMP directory
+        #[arg(short, long)]
+        imp: String,
+
+        /// Title to set
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// Annotation text
+        #[arg(short, long)]
+        annotation: Option<String>,
+
+        /// Issuer
+        #[arg(long)]
+        issuer: Option<String>,
+    },
+
+    /// Create DCDM (Digital Cinema Distribution Master) X'Y'Z' sequence
+    Dcdm {
+        /// Input image sequence directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output DCDM TIFF directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Source colour space (rec709, p3, aces, logc)
+        #[arg(short, long, default_value = "rec709")]
+        colour_space: String,
+
+        /// Optional 3D LUT for colour transform
+        #[arg(long)]
+        lut: Option<String>,
+
+        /// Resolution width
+        #[arg(long, default_value = "4096")]
+        width: u32,
+
+        /// Resolution height
+        #[arg(long, default_value = "2160")]
+        height: u32,
+    },
+
+    /// Convert colour space of images/video
+    Colour {
+        /// Input file or directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output file or directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Source colour space (rec709, p3, xyz, rec2020, aces, acescg, logc)
+        #[arg(short, long)]
+        source: String,
+
+        /// Target colour space
+        #[arg(short, long)]
+        target: String,
+
+        /// Optional 3D LUT file for custom transform
+        #[arg(long)]
+        lut: Option<String>,
+    },
+
+    /// Import EDL/AAF/XML timeline for conforming
+    Conform {
+        /// Input timeline file (EDL, AAF, FCP XML, OTIO)
+        #[arg(short, long)]
+        input: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Ingest camera raw media
+    Ingest {
+        /// Camera card/media directory
+        #[arg(short, long)]
+        source: String,
+
+        /// Output directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Output format (dpx, tiff, exr, prores)
+        #[arg(short, long, default_value = "dpx")]
+        format: String,
+
+        /// Colour space (ACES, Rec.709, P3, LogC)
+        #[arg(short, long, default_value = "ACES")]
+        colour_space: String,
+    },
+
+    /// Extract a frame from video/MXF as image
+    #[command(name = "frame-extract")]
+    FrameExtract {
+        /// Input video/MXF file
+        #[arg(short, long)]
+        input: String,
+
+        /// Frame number to extract
+        #[arg(short, long, default_value = "0")]
+        frame: u32,
+
+        /// Output image file (png, jpg, tiff)
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Inject Dolby Vision RPU into HEVC stream
+    #[command(name = "dv-inject")]
+    DvInject {
+        /// Input HEVC file
+        #[arg(short, long)]
+        input: String,
+
+        /// RPU file (.bin)
+        #[arg(short, long)]
+        rpu: String,
+
+        /// Output file
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Inject HDR10 static metadata
+    #[command(name = "hdr10-inject")]
+    Hdr10Inject {
+        /// Input video file
+        #[arg(short, long)]
+        input: String,
+
+        /// Output video file
+        #[arg(short, long)]
+        output: String,
+
+        /// Max content light level (MaxCLL)
+        #[arg(long, default_value = "1000")]
+        max_cll: u16,
+
+        /// Max frame average light level (MaxFALL)
+        #[arg(long, default_value = "400")]
+        max_fall: u16,
+    },
+}
+
+#[derive(Subcommand)]
+enum BatchAction {
+    /// List all jobs
+    List,
+    /// Submit a new job
+    Add {
+        /// Job type (create|encode|transcode|validate|loudness)
+        #[arg(short = 'T', long)]
+        r#type: String,
+        /// Job parameters (JSON string)
+        #[arg(short, long)]
+        params: String,
+    },
+    /// Cancel a job
+    Cancel {
+        /// Job ID to cancel
+        id: String,
+    },
 }
 
 fn main() {
@@ -760,5 +970,325 @@ fn main() {
                 }
             }
         }
+
+        Commands::Report {
+            imp,
+            output,
+            format,
+        } => {
+            let imp_dir = std::path::Path::new(&imp);
+            let validate_result = imfwizard_core::validate::validate_imp(imp_dir);
+            let report_format = match format.as_str() {
+                "json" => postkit::report::ReportFormat::Json,
+                "text" => postkit::report::ReportFormat::Text,
+                _ => postkit::report::ReportFormat::Html,
+            };
+            let mut report = postkit::report::Report {
+                title: format!("IMF Wizard QC Report — {}", imp),
+                timestamp: time::OffsetDateTime::now_utc().to_string(),
+                ..Default::default()
+            };
+            for err in &validate_result.errors {
+                report.error_count += 1;
+                report.entries.push(postkit::report::ReportEntry {
+                    severity: "error".to_string(),
+                    category: "validation".to_string(),
+                    message: err.clone(),
+                    details: String::new(),
+                });
+            }
+            for warn in &validate_result.warnings {
+                report.warning_count += 1;
+                report.entries.push(postkit::report::ReportEntry {
+                    severity: "warning".to_string(),
+                    category: "validation".to_string(),
+                    message: warn.clone(),
+                    details: String::new(),
+                });
+            }
+            if report.error_count == 0 {
+                report.pass_count = 1;
+                report.summary = "IMP validation PASSED".to_string();
+            } else {
+                report.summary = format!("{} errors found", report.error_count);
+            }
+            let output_path = PathBuf::from(&output);
+            match report.write_to_file(&output_path, report_format) {
+                Ok(()) => println!("Report written to {output}"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Serve { bind } => {
+            let parts: Vec<&str> = bind.split(':').collect();
+            let config = imfwizard_core::rest_api::ApiConfig {
+                host: parts.first().unwrap_or(&"127.0.0.1").to_string(),
+                port: parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8081),
+            };
+            if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Daemon => {
+            println!("Starting imfwizard job queue daemon...");
+            let queue = imfwizard_core::job_queue::JobQueue::new();
+            loop {
+                if let Some(job) = queue.next_runnable() {
+                    tracing::info!("Processing job {}: {:?}", job.id, job.job_type);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+
+        Commands::Batch { action } => match action {
+            BatchAction::List => {
+                let queue = imfwizard_core::job_queue::JobQueue::new();
+                for job in queue.list() {
+                    println!(
+                        "[{}] {:?} — {:?} ({}%)",
+                        job.id,
+                        job.job_type,
+                        job.state,
+                        (job.progress * 100.0) as u32
+                    );
+                }
+            }
+            BatchAction::Add { r#type, params } => {
+                let queue = imfwizard_core::job_queue::JobQueue::new();
+                let job_type = match r#type.as_str() {
+                    "encode" => imfwizard_core::job_queue::JobType::Encode,
+                    "transcode" => imfwizard_core::job_queue::JobType::Transcode,
+                    "validate" => imfwizard_core::job_queue::JobType::Validate,
+                    "loudness" => imfwizard_core::job_queue::JobType::Loudness,
+                    _ => imfwizard_core::job_queue::JobType::Create,
+                };
+                let id = queue.submit(imfwizard_core::job_queue::Job {
+                    job_type,
+                    description: params,
+                    ..Default::default()
+                });
+                println!("Job submitted: {id}");
+            }
+            BatchAction::Cancel { id } => {
+                let queue = imfwizard_core::job_queue::JobQueue::new();
+                let job_id: u64 = id.parse().unwrap_or(0);
+                queue.cancel(job_id);
+                println!("Job {id} cancelled");
+            }
+        },
+
+        Commands::Completion { shell } => {
+            use clap::CommandFactory;
+            use clap_complete::{Shell, generate};
+            let mut cmd = Cli::command();
+            let shell = match shell.as_str() {
+                "zsh" => Shell::Zsh,
+                "fish" => Shell::Fish,
+                _ => Shell::Bash,
+            };
+            generate(shell, &mut cmd, "imfwizard", &mut std::io::stdout());
+        }
+
+        Commands::MetadataEdit {
+            imp,
+            title,
+            annotation,
+            issuer: _,
+        } => {
+            let imp_dir = std::path::Path::new(&imp);
+            let cpls = imfwizard_core::timeline::list_cpls(imp_dir);
+            if cpls.is_empty() {
+                eprintln!("Error: No CPL found in {imp}");
+                std::process::exit(1);
+            }
+            let cpl_path = imp_dir.join(&cpls[0].file_path);
+            let text = title
+                .or(annotation)
+                .unwrap_or_else(|| "Updated by imfwizard".to_string());
+            let ann = imfwizard_core::cpl_annotation::CplAnnotation {
+                author: "imfwizard".to_string(),
+                timestamp: String::new(),
+                text,
+                revision: String::new(),
+            };
+            match imfwizard_core::cpl_annotation::annotate_cpl(&cpl_path, &ann) {
+                Ok(()) => println!("Metadata updated for {}", cpl_path.display()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Dcdm {
+            input,
+            output,
+            colour_space,
+            lut,
+            width,
+            height,
+        } => {
+            let opts = postkit::dcdm::DcdmOptions {
+                input_dir: PathBuf::from(input),
+                output_dir: PathBuf::from(output),
+                encoding: postkit::dcdm::DcdmColourEncoding::Xyz12Bit,
+                width,
+                height,
+                colour_space,
+                lut_path: lut.map(PathBuf::from).unwrap_or_default(),
+                ..Default::default()
+            };
+            let result = postkit::dcdm::create_dcdm(&opts);
+            if result.success {
+                println!("DCDM created: {} frames", result.frames_written);
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Colour {
+            input,
+            output,
+            source,
+            target,
+            lut,
+        } => {
+            let source_space = parse_colour_space(&source);
+            let target_space = parse_colour_space(&target);
+            let opts = postkit::colour::ColourConvertOptions {
+                input: PathBuf::from(input),
+                output: PathBuf::from(output),
+                source_space,
+                target_space,
+                lut_path: lut.map(PathBuf::from),
+            };
+            match postkit::colour::convert_colour(&opts) {
+                Ok(()) => println!("Colour conversion complete"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Conform { input, json } => {
+            let timeline = postkit::conform::parse_timeline(std::path::Path::new(&input));
+            if json {
+                println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
+            } else {
+                println!("Timeline: {} ({:?})", timeline.title, timeline.format);
+                println!("Frame rate: {}", timeline.frame_rate);
+                println!("Events: {}", timeline.events.len());
+                for event in &timeline.events {
+                    println!(
+                        "  #{}: {} [{}-{}] → [{}-{}]",
+                        event.event_number,
+                        event.reel_name,
+                        event.source_in,
+                        event.source_out,
+                        event.record_in,
+                        event.record_out,
+                    );
+                }
+            }
+        }
+
+        Commands::Ingest {
+            source,
+            output,
+            format,
+            colour_space,
+        } => {
+            let opts = postkit::ingest::IngestOptions {
+                source: PathBuf::from(&source),
+                output_dir: PathBuf::from(output),
+                output_format: format,
+                colour_space,
+                ..Default::default()
+            };
+            let exit = postkit::ingest::ingest(&opts);
+            if exit != 0 {
+                std::process::exit(exit);
+            }
+            println!("Ingest complete");
+        }
+
+        Commands::FrameExtract {
+            input,
+            frame,
+            output,
+        } => {
+            let result = postkit::preview::extract_frame(
+                std::path::Path::new(&input),
+                frame,
+                std::path::Path::new(&output),
+            );
+            if result == 0 {
+                println!("Frame {frame} extracted to {output}");
+            } else {
+                eprintln!("Error: frame extraction failed");
+                std::process::exit(1);
+            }
+        }
+
+        Commands::DvInject { input, rpu, output } => {
+            let opts = postkit::dolby_vision::DolbyVisionOptions {
+                input: PathBuf::from(input),
+                rpu_file: PathBuf::from(rpu),
+                output: PathBuf::from(&output),
+                ..Default::default()
+            };
+            let result = postkit::dolby_vision::inject_dolby_vision(&opts);
+            if result == 0 {
+                println!("Dolby Vision RPU injected: {output}");
+            } else {
+                eprintln!("Error: DV injection failed");
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Hdr10Inject {
+            input,
+            output,
+            max_cll,
+            max_fall,
+        } => {
+            let opts = postkit::dolby_vision::HdrMetadataOptions {
+                input: PathBuf::from(input),
+                output: PathBuf::from(&output),
+                hdr_type: postkit::dolby_vision::HdrType::Hdr10,
+                hdr10: postkit::dolby_vision::Hdr10Metadata {
+                    max_cll,
+                    max_fall,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let result = postkit::dolby_vision::inject_hdr10_metadata(&opts);
+            if result == 0 {
+                println!("HDR10 metadata injected: {output}");
+            } else {
+                eprintln!("Error: HDR10 injection failed");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn parse_colour_space(s: &str) -> postkit::colour::ColourSpace {
+    match s.to_lowercase().as_str() {
+        "p3" | "dci-p3" => postkit::colour::ColourSpace::P3,
+        "xyz" => postkit::colour::ColourSpace::Xyz,
+        "rec2020" | "2020" => postkit::colour::ColourSpace::Rec2020,
+        "aces" | "ap0" => postkit::colour::ColourSpace::Aces,
+        "acescg" | "ap1" => postkit::colour::ColourSpace::AcesCg,
+        "logc" | "alexa" => postkit::colour::ColourSpace::LogC,
+        _ => postkit::colour::ColourSpace::Rec709,
     }
 }
