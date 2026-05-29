@@ -656,6 +656,53 @@ document.getElementById("meta-browse")?.addEventListener("click", async () => {
   }
 });
 
+document.getElementById("meta-save")?.addEventListener("click", async () => {
+  const box = document.getElementById("meta-results") || document.createElement("div");
+  box.classList?.add("visible");
+  setStatus("Metadata editing is not yet supported by the CLI. This feature is under development.");
+});
+
+// === Batch Delivery ===
+document.getElementById("del-start")?.addEventListener("click", async () => {
+  const video = document.getElementById("del-video").value;
+  const audio = document.getElementById("del-audio").value;
+  const title = document.getElementById("del-title").value || "Untitled";
+  const output = document.getElementById("del-output").value;
+  const box = document.getElementById("del-results");
+  box.classList.add("visible");
+
+  const targets = [...document.querySelectorAll("#del-start")
+    .closest("section")
+    .querySelectorAll(".checkbox-group input:checked")]
+    .map(cb => cb.value);
+
+  if (!targets.length) {
+    box.textContent = "Please select at least one delivery target.";
+    return;
+  }
+
+  box.textContent = `Submitting ${targets.length} delivery job(s)...`;
+  const jobIds = [];
+  for (const target of targets) {
+    try {
+      const jobId = await invoke("submit_job", {
+        videoPath: video,
+        title: `${title} [${target}]`,
+        outputDir: `${output}/${target}`,
+        audioPath: audio || null,
+        framerate: document.getElementById("prop-framerate")?.value || "24/1",
+        contentKind: document.getElementById("prop-content-kind")?.value || "feature",
+        bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
+      });
+      jobIds.push(jobId);
+    } catch (e) {
+      box.textContent += `\n✗ Failed to queue ${target}: ${e}`;
+    }
+  }
+  box.textContent = `✓ Queued ${jobIds.length} delivery job(s): ${targets.join(", ")}`;
+  setStatus(`${jobIds.length} delivery jobs queued`);
+});
+
 // === Jobs ===
 let jobsPollInterval = null;
 
