@@ -91,3 +91,40 @@ jobs:
         run: |
           cd build
           ctest --output-on-failure --build-config Release
+
+  rust:
+    runs-on: ubuntu-24.04
+    name: Rust CLI
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
+
+      - name: Build
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Test
+        working-directory: rust
+        run: cargo test
+
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Format check
+        working-directory: rust
+        run: cargo fmt -- --check
+
+      - name: CLI flag consistency
+        run: bash tests/cli_flags_test.sh ./rust/target/release/imfwizard
