@@ -8,6 +8,7 @@ mod pipeline;
 mod preview_server;
 #[cfg(not(unix))]
 mod preview_server_stub;
+mod timeline_cmd;
 #[cfg(not(unix))]
 use preview_server_stub as preview_server;
 
@@ -87,6 +88,8 @@ pub fn run() {
             pipeline::pause_job,
             pipeline::resume_job,
             pipeline::list_jobs,
+            timeline_cmd::list_cpls,
+            timeline_cmd::get_timeline,
         ])
         .setup(|_app| Ok(()))
         .on_window_event(|window, event| {

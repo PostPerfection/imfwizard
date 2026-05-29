@@ -256,15 +256,32 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         &pause,
         |p| {
             emit_progress(
-                &app_ref, job_id, &p.stage, &p.message, p.frame, p.total_frames, p.fps,
-                p.elapsed_secs, p.percent,
+                &app_ref,
+                job_id,
+                &p.stage,
+                &p.message,
+                p.frame,
+                p.total_frames,
+                p.fps,
+                p.elapsed_secs,
+                p.percent,
             );
         },
         |msg| log_to(&log_ref, msg),
     )?;
 
     // Package IMP
-    emit_progress(app, job.id, "package", "Creating IMP...", 0, 0, 0.0, 0.0, 99.0);
+    emit_progress(
+        app,
+        job.id,
+        "package",
+        "Creating IMP...",
+        0,
+        0,
+        0.0,
+        0.0,
+        99.0,
+    );
     log_to(&log_file, "[PACKAGE] Creating IMP...");
 
     let opts = imfwizard_core::imp::ImpOptions {
@@ -285,7 +302,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
 
     log_to(
         &log_file,
-        &format!("=== Pipeline finished in {:.1}s ===", encode_result.elapsed_secs),
+        &format!(
+            "=== Pipeline finished in {:.1}s ===",
+            encode_result.elapsed_secs
+        ),
     );
     Ok(format!("IMP created in {:.1}s", encode_result.elapsed_secs))
 }

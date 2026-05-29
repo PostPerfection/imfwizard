@@ -4,6 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open } from "@tauri-apps/plugin-dialog";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp } from "./preview.js";
+import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 
 // === Browse wrapper ===
 let lastBrowseDir = null;
@@ -397,6 +398,17 @@ document.getElementById("btn-open-project")?.addEventListener("click", async () 
     document.getElementById("prop-title").value = name;
     addRecentProject(dir, name);
     setStatus(`Opened: ${dir}`);
+
+    // Load timeline from the first CPL found
+    try {
+      const cpls = await invoke('list_cpls', { impDir: dir });
+      if (cpls && cpls.length > 0) {
+        const cplPath = dir + '/' + cpls[0].file_path;
+        loadTimelineFromCpl(cplPath);
+      }
+    } catch (e) {
+      console.warn('[main] Could not load timeline:', e);
+    }
   }
 });
 
@@ -915,6 +927,7 @@ renderSegments();
 renderRecentProjects();
 updateStatusStats();
 initPreview();
+initTimeline();
 setStatus("Ready");
 
 // === Target Conversion (Scale/Crop/Letterbox) ===

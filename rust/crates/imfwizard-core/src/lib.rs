@@ -7,6 +7,7 @@ pub mod imp;
 pub mod mxf_wrap;
 pub mod otioz_import;
 pub mod pkl;
+pub mod timeline;
 
 // Encoding/transcoding
 pub mod encode;

@@ -1,179 +1,328 @@
-import { Command } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 // Timeline state
-let segments = [];
-let selectedSegment = -1;
-let timelineZoom = 1.0;
+let timelineData = null; // { segments: [], totalFrames, editRate }
+let currentSegmentIdx = -1;
+let playheadFrame = 0;
+let timelinePollingId = null;
 
 export function initTimeline() {
-  const container = document.getElementById("timeline-page");
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="timeline-toolbar">
-      <button id="tl-add-video" class="btn-sm">+ Video</button>
-      <button id="tl-add-audio" class="btn-sm">+ Audio</button>
-      <button id="tl-add-subtitle" class="btn-sm">+ Subtitle</button>
-      <button id="tl-remove" class="btn-sm btn-danger" disabled>Remove</button>
-      <div class="tl-spacer"></div>
-      <button id="tl-zoom-in" class="btn-sm">+</button>
-      <button id="tl-zoom-out" class="btn-sm">−</button>
-      <span id="tl-duration" class="tl-info">Duration: 0 frames</span>
-    </div>
-    <div class="timeline-tracks">
-      <div class="track-lane" data-type="video">
-        <div class="track-label">Video</div>
-        <div class="track-content" id="tl-video-lane"></div>
-      </div>
-      <div class="track-lane" data-type="audio">
-        <div class="track-label">Audio</div>
-        <div class="track-content" id="tl-audio-lane"></div>
-      </div>
-      <div class="track-lane" data-type="subtitle">
-        <div class="track-label">Subtitle</div>
-        <div class="track-content" id="tl-subtitle-lane"></div>
-      </div>
-    </div>
-    <div class="timeline-properties" id="tl-properties">
-      <h3>Segment Properties</h3>
-      <div id="tl-props-content">Select a segment to edit properties</div>
-    </div>
-  `;
-
-  // Event listeners
-  document.getElementById("tl-add-video").addEventListener("click", () => addSegment("video"));
-  document.getElementById("tl-add-audio").addEventListener("click", () => addSegment("audio"));
-  document.getElementById("tl-add-subtitle").addEventListener("click", () => addSegment("subtitle"));
-  document.getElementById("tl-remove").addEventListener("click", removeSelectedSegment);
-  document.getElementById("tl-zoom-in").addEventListener("click", () => { timelineZoom *= 1.5; render(); });
-  document.getElementById("tl-zoom-out").addEventListener("click", () => { timelineZoom /= 1.5; render(); });
+  renderEmpty();
 }
 
-async function addSegment(type) {
-  let path;
-  if (type === "video") {
-    path = await open({ directory: true, title: "Select Video Directory" });
-  } else if (type === "audio") {
-    path = await open({ filters: [{ name: "Audio", extensions: ["wav"] }] });
-  } else {
-    path = await open({ filters: [{ name: "TTML", extensions: ["xml", "ttml"] }] });
-  }
-
-  if (!path) return;
-
-  const segment = {
-    id: Date.now(),
-    type,
-    path,
-    name: path.split(/[/\\]/).pop(),
-    startFrame: getTotalDuration(type),
-    duration: 240, // Default 10 seconds at 24fps
-    color: type === "video" ? "#7c3aed" : type === "audio" ? "#3b82f6" : "#f59e0b",
-  };
-
-  segments.push(segment);
-  render();
-}
-
-function removeSelectedSegment() {
-  if (selectedSegment >= 0) {
-    segments = segments.filter((_, i) => i !== selectedSegment);
-    selectedSegment = -1;
+// Load timeline from an opened IMP's CPL
+export async function loadTimelineFromCpl(cplPath) {
+  try {
+    const segs = await invoke('get_timeline', { cplPath });
+    if (!segs || segs.length === 0) {
+      renderEmpty();
+      return;
+    }
+    buildTimelineData(segs);
     render();
+    startTimelinePolling();
+  } catch (e) {
+    console.error('[timeline] Failed to load CPL:', e);
+    renderEmpty();
   }
 }
 
-function getTotalDuration(type) {
-  return segments
-    .filter(s => s.type === type)
-    .reduce((max, s) => Math.max(max, s.startFrame + s.duration), 0);
-}
-
-function selectSegment(index) {
-  selectedSegment = index;
-  document.getElementById("tl-remove").disabled = false;
+// Load timeline from the project model (for IMPs being built)
+export function loadTimelineFromProject(segments, editRate) {
+  if (!segments || segments.length === 0) {
+    renderEmpty();
+    return;
+  }
+  const entries = segments.map((seg, i) => ({
+    segment_id: String(seg.id || i),
+    segment_number: i + 1,
+    duration_frames: seg.durationFrames || seg.duration || 0,
+    entry_point: 0,
+    edit_rate: editRate || '24 1',
+    video_track_file_id: '',
+    audio_track_file_id: '',
+    video_file: seg.videoPath || '',
+    audio_file: seg.audioPath || '',
+  }));
+  buildTimelineData(entries);
   render();
-  showProperties(segments[index]);
 }
 
-function showProperties(segment) {
-  const el = document.getElementById("tl-props-content");
-  el.innerHTML = `
-    <div class="prop-row">
-      <label>Name:</label><span>${segment.name}</span>
-    </div>
-    <div class="prop-row">
-      <label>Type:</label><span>${segment.type}</span>
-    </div>
-    <div class="prop-row">
-      <label>Path:</label><span class="prop-path">${segment.path}</span>
-    </div>
-    <div class="prop-row">
-      <label>Start Frame:</label>
-      <input type="number" value="${segment.startFrame}" id="prop-start" min="0" />
-    </div>
-    <div class="prop-row">
-      <label>Duration:</label>
-      <input type="number" value="${segment.duration}" id="prop-duration" min="1" />
-    </div>
-  `;
+function buildTimelineData(segs) {
+  let totalFrames = 0;
+  const parsed = segs.map(s => {
+    const fps = parseEditRate(s.edit_rate);
+    const startFrame = totalFrames;
+    totalFrames += s.duration_frames;
+    return { ...s, startFrame, fps };
+  });
+  timelineData = { segments: parsed, totalFrames, editRate: parsed[0]?.fps || 24 };
+}
 
-  document.getElementById("prop-start").addEventListener("change", (e) => {
-    segment.startFrame = parseInt(e.target.value) || 0;
-    render();
-  });
-  document.getElementById("prop-duration").addEventListener("change", (e) => {
-    segment.duration = parseInt(e.target.value) || 1;
-    render();
-  });
+function parseEditRate(er) {
+  if (!er) return 24;
+  const parts = er.trim().split(/\s+/);
+  if (parts.length === 2) return Math.round(parseInt(parts[0]) / parseInt(parts[1]));
+  return parseInt(parts[0]) || 24;
+}
+
+function renderEmpty() {
+  const ruler = document.getElementById('timeline-ruler');
+  const picture = document.getElementById('timeline-picture');
+  const sound = document.getElementById('timeline-sound');
+  const subtitle = document.getElementById('timeline-subtitle');
+  if (ruler) ruler.innerHTML = '<span class="timeline-empty-msg">Open an IMP or build a project to see the timeline</span>';
+  if (picture) picture.innerHTML = '';
+  if (sound) sound.innerHTML = '';
+  if (subtitle) subtitle.innerHTML = '';
+  timelineData = null;
 }
 
 function render() {
-  const maxDuration = Math.max(240, ...segments.map(s => s.startFrame + s.duration));
-  const pxPerFrame = timelineZoom * 2;
+  if (!timelineData || timelineData.segments.length === 0) {
+    renderEmpty();
+    return;
+  }
+  renderRuler();
+  renderTracks();
+  updatePlayheadPosition();
+}
 
-  for (const type of ["video", "audio", "subtitle"]) {
-    const lane = document.getElementById(`tl-${type}-lane`);
-    lane.innerHTML = "";
-    lane.style.width = (maxDuration * pxPerFrame) + "px";
+function renderRuler() {
+  const ruler = document.getElementById('timeline-ruler');
+  if (!ruler) return;
+  ruler.innerHTML = '';
+  ruler.style.position = 'relative';
 
-    segments.filter(s => s.type === type).forEach((seg, i) => {
-      const globalIdx = segments.indexOf(seg);
-      const el = document.createElement("div");
-      el.className = "segment" + (globalIdx === selectedSegment ? " selected" : "");
-      el.style.left = (seg.startFrame * pxPerFrame) + "px";
-      el.style.width = (seg.duration * pxPerFrame) + "px";
-      el.style.backgroundColor = seg.color;
-      el.textContent = seg.name;
-      el.addEventListener("click", () => selectSegment(globalIdx));
+  const { totalFrames, editRate } = timelineData;
+  if (totalFrames === 0) return;
 
-      // Drag to reposition
-      el.draggable = true;
-      el.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("text/plain", String(globalIdx));
-      });
+  const totalSeconds = totalFrames / editRate;
+  const interval = getTickInterval(totalSeconds);
 
-      lane.appendChild(el);
-    });
+  for (let t = 0; t <= totalSeconds; t += interval) {
+    const pct = (t / totalSeconds) * 100;
+    const tick = document.createElement('div');
+    tick.className = 'ruler-tick';
+    tick.style.left = `${pct}%`;
+
+    const label = document.createElement('span');
+    label.className = 'ruler-label';
+    label.textContent = formatTimecodeShort(t);
+    tick.appendChild(label);
+    ruler.appendChild(tick);
   }
 
-  document.getElementById("tl-duration").textContent =
-    `Duration: ${maxDuration} frames`;
+  // Segment boundary markers
+  for (const seg of timelineData.segments) {
+    if (seg.startFrame > 0) {
+      const pct = (seg.startFrame / totalFrames) * 100;
+      const marker = document.createElement('div');
+      marker.className = 'ruler-reel-marker';
+      marker.style.left = `${pct}%`;
+      marker.title = `Segment ${seg.segment_number}`;
+      ruler.appendChild(marker);
+    }
+  }
+
+  // Playhead
+  const playhead = document.createElement('div');
+  playhead.className = 'ruler-playhead';
+  playhead.id = 'ruler-playhead';
+  ruler.appendChild(playhead);
+
+  // Click on ruler to seek
+  ruler.addEventListener('mousedown', handleRulerSeek);
+}
+
+function renderTracks() {
+  const pictureEl = document.getElementById('timeline-picture');
+  const soundEl = document.getElementById('timeline-sound');
+  const subtitleEl = document.getElementById('timeline-subtitle');
+  if (!pictureEl || !soundEl) return;
+
+  pictureEl.innerHTML = '';
+  soundEl.innerHTML = '';
+  if (subtitleEl) subtitleEl.innerHTML = '';
+
+  const { segments, totalFrames } = timelineData;
+  const colors = ['#7c3aed', '#6d28d9', '#5b21b6', '#4c1d95', '#8b5cf6'];
+  const soundColors = ['#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#60a5fa'];
+
+  for (const seg of segments) {
+    const widthPct = (seg.duration_frames / totalFrames) * 100;
+    const leftPct = (seg.startFrame / totalFrames) * 100;
+
+    if (seg.video_file || seg.video_track_file_id) {
+      const el = createSegment(seg, leftPct, widthPct, colors[(seg.segment_number - 1) % colors.length]);
+      pictureEl.appendChild(el);
+    }
+
+    if (seg.audio_file || seg.audio_track_file_id) {
+      const el = createSegment(seg, leftPct, widthPct, soundColors[(seg.segment_number - 1) % soundColors.length]);
+      soundEl.appendChild(el);
+    }
+  }
+
+  pictureEl.addEventListener('mousedown', handleTrackSeek);
+  soundEl.addEventListener('mousedown', handleTrackSeek);
+}
+
+function createSegment(seg, leftPct, widthPct, color) {
+  const el = document.createElement('div');
+  el.className = 'timeline-segment' + (seg.segment_number - 1 === currentSegmentIdx ? ' active' : '');
+  el.style.left = `${leftPct}%`;
+  el.style.width = `${widthPct}%`;
+  el.style.backgroundColor = color;
+  el.dataset.segIndex = seg.segment_number - 1;
+
+  const label = document.createElement('span');
+  label.className = 'segment-label';
+  label.textContent = `S${seg.segment_number}`;
+  el.appendChild(label);
+
+  const dur = document.createElement('span');
+  dur.className = 'segment-duration';
+  dur.textContent = formatTimecodeShort(seg.duration_frames / (seg.fps || 24));
+  el.appendChild(dur);
+
+  return el;
+}
+
+function handleRulerSeek(e) {
+  const ruler = document.getElementById('timeline-ruler');
+  if (!ruler || !timelineData) return;
+  const rect = ruler.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  seekToPercent(pct);
+}
+
+function handleTrackSeek(e) {
+  const track = e.currentTarget;
+  if (!track || !timelineData) return;
+  const rect = track.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  seekToPercent(pct);
+}
+
+async function seekToPercent(pct) {
+  if (!timelineData) return;
+  const targetFrame = Math.floor(pct * timelineData.totalFrames);
+
+  let targetSeg = null;
+  for (const seg of timelineData.segments) {
+    if (targetFrame >= seg.startFrame && targetFrame < seg.startFrame + seg.duration_frames) {
+      targetSeg = seg;
+      break;
+    }
+  }
+  if (!targetSeg) targetSeg = timelineData.segments[timelineData.segments.length - 1];
+
+  const segIdx = targetSeg.segment_number - 1;
+  const frameInSeg = targetFrame - targetSeg.startFrame + targetSeg.entry_point;
+  const secondsInSeg = frameInSeg / (targetSeg.fps || 24);
+
+  if (segIdx !== currentSegmentIdx && targetSeg.video_file) {
+    currentSegmentIdx = segIdx;
+    try {
+      await invoke('preview_load', { filePath: targetSeg.video_file });
+    } catch (e) {
+      console.error('[timeline] Failed to load segment:', e);
+      return;
+    }
+  }
+
+  try {
+    await invoke('preview_seek_absolute', { seconds: secondsInSeg });
+  } catch (e) {
+    console.error('[timeline] Failed to seek:', e);
+  }
+
+  playheadFrame = targetFrame;
+  updatePlayheadPosition();
+}
+
+function updatePlayheadPosition() {
+  if (!timelineData || timelineData.totalFrames === 0) return;
+  const pct = (playheadFrame / timelineData.totalFrames) * 100;
+  const rulerPlayhead = document.getElementById('ruler-playhead');
+  if (rulerPlayhead) rulerPlayhead.style.left = `${pct}%`;
+
+  document.querySelectorAll('.timeline-segment').forEach(el => {
+    const idx = parseInt(el.dataset.segIndex);
+    el.classList.toggle('active', idx === currentSegmentIdx);
+  });
+}
+
+export function startTimelinePolling() {
+  if (timelinePollingId) return;
+  timelinePollingId = setInterval(async () => {
+    if (!timelineData) return;
+    try {
+      const resp = await invoke('preview_get_metadata');
+      const meta = JSON.parse(resp);
+      if (meta.position != null && meta.duration != null) {
+        const seg = timelineData.segments[currentSegmentIdx] || timelineData.segments[0];
+        if (seg) {
+          const fps = seg.fps || 24;
+          const frameInSeg = Math.floor(meta.position * fps) - seg.entry_point;
+          playheadFrame = seg.startFrame + Math.max(0, frameInSeg);
+
+          // Auto-advance to next segment
+          if (meta.position >= meta.duration - 0.1 && currentSegmentIdx < timelineData.segments.length - 1) {
+            const nextSeg = timelineData.segments[currentSegmentIdx + 1];
+            if (nextSeg && nextSeg.video_file) {
+              currentSegmentIdx++;
+              invoke('preview_load', { filePath: nextSeg.video_file }).catch(() => {});
+            }
+          }
+
+          updatePlayheadPosition();
+        }
+      }
+    } catch {
+      // mpv not running
+    }
+  }, 250);
+}
+
+export function stopTimelinePolling() {
+  if (timelinePollingId) {
+    clearInterval(timelinePollingId);
+    timelinePollingId = null;
+  }
+}
+
+function getTickInterval(totalSeconds) {
+  if (totalSeconds <= 10) return 1;
+  if (totalSeconds <= 30) return 5;
+  if (totalSeconds <= 60) return 10;
+  if (totalSeconds <= 300) return 30;
+  if (totalSeconds <= 600) return 60;
+  if (totalSeconds <= 1800) return 300;
+  return 600;
+}
+
+function formatTimecodeShort(seconds) {
+  if (!seconds || seconds <= 0) return '0:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export function getTimelineSegments() {
-  return segments;
+  return timelineData?.segments || [];
 }
 
 export function getTimelineAsImpArgs() {
-  // Convert timeline state to CLI arguments for IMP creation
-  const videoSegs = segments.filter(s => s.type === "video");
-  const audioSegs = segments.filter(s => s.type === "audio");
-
+  if (!timelineData) return [];
+  const segs = timelineData.segments;
   const args = [];
-  if (videoSegs.length > 0) args.push("--video", videoSegs[0].path);
-  if (audioSegs.length > 0) args.push("--audio", audioSegs[0].path);
-
+  if (segs.length > 0 && segs[0].video_file) args.push("--video", segs[0].video_file);
+  const audioSeg = segs.find(s => s.audio_file);
+  if (audioSeg) args.push("--audio", audioSeg.audio_file);
   return args;
 }
