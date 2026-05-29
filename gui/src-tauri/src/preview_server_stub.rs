@@ -1,18 +1,21 @@
 /// Windows preview server using named pipes for mpv IPC.
 /// mpv supports `--input-ipc-server=\\.\pipe\name` on Windows.
-
+///
+/// Embedding: Call `preview_set_parent_wid` with a native HWND to embed mpv
+/// inside a window. Without it, mpv runs as a floating always-on-top window.
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use std::fs::OpenOptions;
-use std::os::windows::fs::OpenOptionsExt;
 
 const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
 
 pub struct MpvPlayer {
     process: Mutex<Option<Child>>,
     pipe_name: String,
+    parent_wid: Mutex<Option<u64>>,
 }
 
 impl MpvPlayer {
@@ -21,12 +24,18 @@ impl MpvPlayer {
         Self {
             process: Mutex::new(None),
             pipe_name,
+            parent_wid: Mutex::new(None),
         }
+    }
+
+    pub fn set_parent_wid(&self, wid: u64) {
+        *self.parent_wid.lock().unwrap() = Some(wid);
     }
 
     fn is_alive(&self) -> bool {
         let mut proc = self.process.lock().unwrap();
-        proc.as_mut().map_or(false, |p| p.try_wait().ok().flatten().is_none())
+        proc.as_mut()
+            .map_or(false, |p| p.try_wait().ok().flatten().is_none())
     }
 
     fn start_mpv(&self) -> Result<(), String> {
@@ -36,15 +45,22 @@ impl MpvPlayer {
             let _ = old.wait();
         }
 
-        let args = vec![
+        let mut args = vec![
             "--idle=yes".to_string(),
             "--no-terminal".to_string(),
             "--keep-open=yes".to_string(),
             "--osc=yes".to_string(),
             format!("--input-ipc-server={}", self.pipe_name),
             "--title=IMFWizard Preview".to_string(),
-            "--force-window=yes".to_string(),
         ];
+
+        if let Some(wid) = *self.parent_wid.lock().unwrap() {
+            args.push(format!("--wid={}", wid));
+        } else {
+            args.push("--force-window=yes".to_string());
+            args.push("--ontop=yes".to_string());
+            args.push("--geometry=640x360+0+0".to_string());
+        }
 
         let child = Command::new("mpv")
             .args(&args)
@@ -80,13 +96,10 @@ impl MpvPlayer {
     }
 
     fn send_command(&self, cmd: &str) -> Result<String, String> {
-        match self.try_send(cmd) {
-            Ok(resp) => Ok(resp),
-            Err(_) => {
-                self.start_mpv()?;
-                self.try_send(cmd)
-            }
+        if !self.is_alive() {
+            return Err("mpv not running".to_string());
         }
+        self.try_send(cmd)
     }
 
     fn try_send(&self, cmd: &str) -> Result<String, String> {
@@ -101,14 +114,29 @@ impl MpvPlayer {
         reader.read_line(&mut response).ok();
         Ok(response)
     }
+
+    pub fn kill(&self) {
+        if let Some(mut child) = self.process.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 impl Drop for MpvPlayer {
     fn drop(&mut self) {
-        if let Some(mut child) = self.process.lock().unwrap().take() {
-            let _ = child.kill();
-        }
+        self.kill();
     }
+}
+
+#[tauri::command]
+pub fn preview_set_parent_wid(wid: u64, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
+    state.set_parent_wid(wid);
+    if state.is_alive() {
+        state.kill();
+        state.start_mpv()?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -122,7 +150,10 @@ pub fn preview_load(file_path: String, state: tauri::State<'_, MpvPlayer>) -> Re
 
     let cmd = format!(
         r#"{{"command": ["loadfile", "{}"]}}"#,
-        path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+        path.display()
+            .to_string()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
     );
     state.send_command(&cmd)?;
     Ok(())
@@ -136,7 +167,9 @@ pub fn preview_play_pause(state: tauri::State<'_, MpvPlayer>) -> Result<(), Stri
 
 #[tauri::command]
 pub fn preview_seek(seconds: f64, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
-    state.send_command(&format!(r#"{{"command": ["seek", "{seconds}", "relative"]}}"#))?;
+    state.send_command(&format!(
+        r#"{{"command": ["seek", "{seconds}", "relative"]}}"#
+    ))?;
     Ok(())
 }
 
@@ -159,17 +192,30 @@ pub fn preview_get_duration(state: tauri::State<'_, MpvPlayer>) -> Result<f64, S
 }
 
 #[tauri::command]
-pub fn preview_seek_absolute(seconds: f64, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
-    state.send_command(&format!(r#"{{"command": ["seek", "{seconds}", "absolute"]}}"#))?;
+pub fn preview_seek_absolute(
+    seconds: f64,
+    state: tauri::State<'_, MpvPlayer>,
+) -> Result<(), String> {
+    state.send_command(&format!(
+        r#"{{"command": ["seek", "{seconds}", "absolute"]}}"#
+    ))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn preview_get_metadata(state: tauri::State<'_, MpvPlayer>) -> Result<String, String> {
-    let pos = state.send_command(r#"{"command": ["get_property", "time-pos"]}"#).unwrap_or_default();
-    let dur = state.send_command(r#"{"command": ["get_property", "duration"]}"#).unwrap_or_default();
-    let paused = state.send_command(r#"{"command": ["get_property", "pause"]}"#).unwrap_or_default();
-    let fname = state.send_command(r#"{"command": ["get_property", "filename"]}"#).unwrap_or_default();
+    let pos = state
+        .send_command(r#"{"command": ["get_property", "time-pos"]}"#)
+        .unwrap_or_default();
+    let dur = state
+        .send_command(r#"{"command": ["get_property", "duration"]}"#)
+        .unwrap_or_default();
+    let paused = state
+        .send_command(r#"{"command": ["get_property", "pause"]}"#)
+        .unwrap_or_default();
+    let fname = state
+        .send_command(r#"{"command": ["get_property", "filename"]}"#)
+        .unwrap_or_default();
 
     Ok(format!(
         r#"{{"position": {}, "duration": {}, "paused": {}, "filename": {}}}"#,
@@ -183,9 +229,13 @@ pub fn preview_get_metadata(state: tauri::State<'_, MpvPlayer>) -> Result<String
 fn parse_property_f64(resp: &str) -> Result<f64, String> {
     if let Some(start) = resp.find("\"data\":") {
         let after = &resp[start + 7..];
-        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        let end = after
+            .find(|c: char| c == ',' || c == '}')
+            .unwrap_or(after.len());
         let val_str = after[..end].trim();
-        val_str.parse::<f64>().map_err(|e| format!("Parse error: {e} from '{val_str}'"))
+        val_str
+            .parse::<f64>()
+            .map_err(|e| format!("Parse error: {e} from '{val_str}'"))
     } else {
         Err(format!("No data in response: {resp}"))
     }
@@ -194,7 +244,9 @@ fn parse_property_f64(resp: &str) -> Result<f64, String> {
 fn extract_data_field(resp: &str) -> String {
     if let Some(start) = resp.find("\"data\":") {
         let after = &resp[start + 7..];
-        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        let end = after
+            .find(|c: char| c == ',' || c == '}')
+            .unwrap_or(after.len());
         after[..end].trim().to_string()
     } else {
         "null".to_string()
@@ -204,7 +256,9 @@ fn extract_data_field(resp: &str) -> String {
 fn extract_data_field_str(resp: &str) -> String {
     if let Some(start) = resp.find("\"data\":") {
         let after = &resp[start + 7..];
-        let end = after.find(|c: char| c == ',' || c == '}').unwrap_or(after.len());
+        let end = after
+            .find(|c: char| c == ',' || c == '}')
+            .unwrap_or(after.len());
         let val = after[..end].trim();
         if val.starts_with('"') {
             val.to_string()
@@ -217,7 +271,10 @@ fn extract_data_field_str(resp: &str) -> String {
 }
 
 #[tauri::command]
-pub fn preview_load_dcp(dir_path: String, state: tauri::State<'_, MpvPlayer>) -> Result<(), String> {
+pub fn preview_load_dcp(
+    dir_path: String,
+    state: tauri::State<'_, MpvPlayer>,
+) -> Result<(), String> {
     let dir = PathBuf::from(&dir_path);
     if !dir.is_dir() {
         return Err(format!("Not a directory: {dir_path}"));
@@ -230,7 +287,10 @@ pub fn preview_load_dcp(dir_path: String, state: tauri::State<'_, MpvPlayer>) ->
                 let path = entry.path();
                 if path.is_dir() {
                     results.extend(find_mxf_files(&path));
-                } else if path.extension().map_or(false, |ext| ext.eq_ignore_ascii_case("mxf")) {
+                } else if path
+                    .extension()
+                    .map_or(false, |ext| ext.eq_ignore_ascii_case("mxf"))
+                {
                     results.push(path);
                 }
             }
@@ -243,7 +303,8 @@ pub fn preview_load_dcp(dir_path: String, state: tauri::State<'_, MpvPlayer>) ->
         return Err("No MXF files found in directory".to_string());
     }
 
-    let video_mxf = mxf_files.iter()
+    let video_mxf = mxf_files
+        .iter()
         .find(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
@@ -263,7 +324,11 @@ pub fn preview_load_dcp(dir_path: String, state: tauri::State<'_, MpvPlayer>) ->
 
     let cmd = format!(
         r#"{{"command": ["loadfile", "{}"]}}"#,
-        video_mxf.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+        video_mxf
+            .display()
+            .to_string()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
     );
     state.send_command(&cmd)?;
     Ok(())
