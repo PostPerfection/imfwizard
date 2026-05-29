@@ -36,6 +36,7 @@ pub struct JobInfo {
 // ─── Job types ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct JobConfig {
     id: u64,
     video_path: PathBuf,
@@ -425,6 +426,7 @@ fn package_imp(
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn emit_progress(
     app: &AppHandle,
     job_id: u64,
