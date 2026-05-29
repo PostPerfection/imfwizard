@@ -17,3 +17,20 @@ postkit.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[package.metadata.deb]
+name = "imfwizard"
+maintainer = "Post Perfection <dev@postperfection.com>"
+section = "video"
+priority = "optional"
+depends = "$auto"
+recommends = "ffmpeg, mpv"
+assets = [
+    ["target/release/imfwizard", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/imfwizard/README.md", "644"],
+    ["../../CHANGELOG.md", "usr/share/doc/imfwizard/CHANGELOG.md", "644"],
+]
+extended-description = """\
+IMF Wizard creates valid IMF packages from video sources, image sequences, \
+and WAV audio, conforming to SMPTE ST 2067 (App#2E). Features include \
+JPEG 2000 encoding, HDR/Dolby Vision support, and platform delivery presets."""
