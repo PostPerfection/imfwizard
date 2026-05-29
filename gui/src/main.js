@@ -504,7 +504,7 @@ document.getElementById("val-run")?.addEventListener("click", async () => {
   const box = document.getElementById("val-results");
   box.classList.add("visible");
   box.textContent = "Validating...";
-  const cmd = Command.sidecar("imfwizard", ["analyze", "-i", dir]);
+  const cmd = Command.sidecar("imfwizard", ["validate", dir]);
   const result = await cmd.execute();
   box.textContent = result.code === 0
     ? "✓ IMP validation PASSED\n\n" + result.stdout
@@ -537,9 +537,13 @@ document.getElementById("loud-browse")?.addEventListener("click", async () => {
 });
 
 document.getElementById("loud-measure")?.addEventListener("click", async () => {
+  const input = document.getElementById("loud-input").value;
   const box = document.getElementById("loud-results");
   box.classList.add("visible");
-  box.textContent = "Loudness measurement is not yet supported by the CLI.\nUse an external tool such as ffmpeg loudnorm or dpMeter.";
+  box.textContent = "Measuring loudness...";
+  const cmd = Command.sidecar("imfwizard", ["loudness", input]);
+  const result = await cmd.execute();
+  box.textContent = result.code === 0 ? "✓ Loudness Results\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 
 // === Tools: Burn-In ===
@@ -554,9 +558,15 @@ document.getElementById("bi-browse-output")?.addEventListener("click", async () 
 });
 
 document.getElementById("bi-start")?.addEventListener("click", async () => {
+  const video = document.getElementById("bi-video").value;
+  const subs = document.getElementById("bi-subs").value;
+  const output = document.getElementById("bi-output").value;
   const box = document.getElementById("bi-results");
   box.classList.add("visible");
-  box.textContent = "Subtitle burn-in is not yet supported by the CLI.\nUse dcpwizard or ffmpeg for subtitle burn-in.";
+  box.textContent = "Burning subtitles...";
+  const cmd = Command.sidecar("imfwizard", ["burn-in", "-i", video, "-s", subs, "-o", output]);
+  const result = await cmd.execute();
+  box.textContent = result.code === 0 ? "✓ Done\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 
 // === Tools: Analytics ===
@@ -568,7 +578,7 @@ document.getElementById("an-analyze")?.addEventListener("click", async () => {
   const input = document.getElementById("an-input").value;
   const box = document.getElementById("an-results");
   box.classList.add("visible"); box.textContent = "Analyzing...";
-  const cmd = Command.sidecar("imfwizard", ["analyze", "-i", input, "--json"]);
+  const cmd = Command.sidecar("imfwizard", ["analytics", "--dir", input, "--json"]);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
@@ -611,9 +621,18 @@ document.getElementById("dcp-browse-output")?.addEventListener("click", async ()
 });
 
 document.getElementById("dcp-convert")?.addEventListener("click", async () => {
+  const imp = document.getElementById("dcp-imp").value;
+  const output = document.getElementById("dcp-output").value;
+  const title = document.getElementById("dcp-title").value;
+  const kind = document.getElementById("dcp-kind").value;
   const box = document.getElementById("dcp-results");
   box.classList.add("visible");
-  box.textContent = "IMP-to-DCP conversion is not yet supported by the CLI.\nUse dcpwizard to create a DCP from source media.";
+  box.textContent = "Converting IMP to DCP...";
+  const args = ["to-dcp", "-i", imp, "-o", output, "-k", kind];
+  if (title) args.push("-t", title);
+  const cmd = Command.sidecar("imfwizard", args);
+  const result = await cmd.execute();
+  box.textContent = result.code === 0 ? "✓ DCP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 
 // === Supplement ===
@@ -623,16 +642,33 @@ document.getElementById("sup-browse-ov")?.addEventListener("click", async () => 
 document.getElementById("sup-browse-video")?.addEventListener("click", async () => {
   const d = await open({ directory: true }); if (d) { document.getElementById("sup-video").value = d; checkSupReady(); }
 });
+document.getElementById("sup-browse-output")?.addEventListener("click", async () => {
+  const d = await open({ directory: true }); if (d) { document.getElementById("sup-output").value = d; checkSupReady(); }
+});
 
 function checkSupReady() {
   const btn = document.getElementById("sup-create");
-  if (btn) btn.disabled = !(document.getElementById("sup-ov")?.value && document.getElementById("sup-video")?.value);
+  if (btn) btn.disabled = !(document.getElementById("sup-ov")?.value && document.getElementById("sup-title")?.value && document.getElementById("sup-output")?.value);
 }
+document.getElementById("sup-title")?.addEventListener("input", checkSupReady);
 
 document.getElementById("sup-create")?.addEventListener("click", async () => {
+  const ov = document.getElementById("sup-ov").value;
+  const title = document.getElementById("sup-title").value;
+  const video = document.getElementById("sup-video").value;
+  const output = document.getElementById("sup-output").value;
+  const entryPoint = document.getElementById("sup-entry-point").value;
+  const duration = document.getElementById("sup-duration").value;
   const box = document.getElementById("sup-results");
   box.classList.add("visible");
-  box.textContent = "Supplemental IMP creation is not yet supported by the CLI.\nThis feature is under development.";
+  box.textContent = "Creating supplemental IMP...";
+  const args = ["supplement", "--ov", ov, "-t", title, "-o", output];
+  if (video) args.push("-v", video);
+  if (entryPoint && parseInt(entryPoint) > 0) args.push("--entry-point", entryPoint);
+  if (duration) args.push("--duration", duration);
+  const cmd = Command.sidecar("imfwizard", args);
+  const result = await cmd.execute();
+  box.textContent = result.code === 0 ? "✓ Supplemental IMP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 
 // === Metadata ===
@@ -641,7 +677,7 @@ document.getElementById("meta-browse")?.addEventListener("click", async () => {
   if (d) {
     document.getElementById("meta-fields").style.display = "block";
     setStatus("Loading metadata...");
-    const cmd = Command.sidecar("imfwizard", ["analyze", "-i", d, "--json"]);
+    const cmd = Command.sidecar("imfwizard", ["info", d]);
     const result = await cmd.execute();
     if (result.code === 0) {
       try {
@@ -964,9 +1000,16 @@ document.getElementById("convert-browse-output")?.addEventListener("click", asyn
 });
 document.getElementById("convert-start")?.addEventListener("click", async () => {
   const input = document.getElementById("convert-input").value;
+  const output = document.getElementById("convert-output").value;
+  const target = document.getElementById("convert-target").value;
   if (!input) return;
 
   const resultsEl = document.getElementById("convert-results");
-  resultsEl.textContent = "Target conversion is not yet supported by the CLI.\nUse dcpwizard or ffmpeg for container conversion.";
+  resultsEl.textContent = "Converting...";
   resultsEl.classList.add("visible");
+  const args = ["target-convert", "-i", input, "-t", target];
+  if (output) args.push("-o", output);
+  const cmd = Command.sidecar("imfwizard", args);
+  const result = await cmd.execute();
+  resultsEl.textContent = result.code === 0 ? "✓ Conversion complete\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });

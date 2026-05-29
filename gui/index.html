@@ -276,7 +276,7 @@
           <!-- Supplement creation inline -->
           <section class="panel" style="margin-top:16px;">
             <div class="panel-header">
-              <h2>Supplemental Version <span class="badge-coming-soon">Coming Soon</span></h2>
+              <h2>Supplemental Version</h2>
             </div>
             <div class="prop-field">
               <label>Original Version (OV) IMP</label>
@@ -284,6 +284,10 @@
                 <input id="sup-ov" type="text" placeholder="Select OV IMP…" readonly>
                 <button id="sup-browse-ov" class="btn-sm">…</button>
               </div>
+            </div>
+            <div class="prop-field">
+              <label>Content Title</label>
+              <input id="sup-title" type="text" placeholder="Supplemental title">
             </div>
             <div class="prop-field">
               <label>Replacement Video Segment</label>
@@ -300,6 +304,13 @@
               <div class="prop-field">
                 <label>Duration (frames)</label>
                 <input type="number" id="sup-duration" value="240" min="1">
+              </div>
+            </div>
+            <div class="prop-field">
+              <label>Output Directory</label>
+              <div class="input-with-btn">
+                <input id="sup-output" type="text" placeholder="Select output dir…" readonly>
+                <button id="sup-browse-output" class="btn-sm">…</button>
               </div>
             </div>
             <button id="sup-create" class="btn-primary" disabled>Create Supplement</button>
@@ -410,7 +421,7 @@
             </section>
 
             <section class="panel">
-              <h2>Loudness <span class="badge-coming-soon">Coming Soon</span></h2>
+              <h2>Loudness</h2>
               <div class="prop-field">
                 <label>Audio File</label>
                 <div class="input-with-btn">
@@ -423,7 +434,7 @@
             </section>
 
             <section class="panel">
-              <h2>Burn-In Subtitles <span class="badge-coming-soon">Coming Soon</span></h2>
+              <h2>Burn-In Subtitles</h2>
               <div class="prop-field">
                 <label>Video</label>
                 <div class="input-with-btn">
@@ -464,7 +475,7 @@
             </section>
 
             <section class="panel">
-              <h2>Target Conversion <span class="badge-coming-soon">Coming Soon</span></h2>
+              <h2>Target Conversion</h2>
               <p class="field-hint">Scale, crop, or letterbox video for IMF container requirements.</p>
               <div class="prop-field">
                 <label>Input Video/Sequence</label>
@@ -473,24 +484,16 @@
                   <button id="convert-browse-input" class="btn-sm">…</button>
                 </div>
               </div>
-              <div class="field-row">
-                <div class="prop-field">
-                  <label>Target Resolution</label>
-                  <select id="convert-container">
-                    <option value="hd">HD (1920×1080)</option>
-                    <option value="2k">2K (2048×1080)</option>
-                    <option value="uhd">UHD (3840×2160)</option>
-                    <option value="4k">4K (4096×2160)</option>
-                  </select>
-                </div>
-                <div class="prop-field">
-                  <label>Method</label>
-                  <select id="convert-method">
-                    <option value="letterbox">Letterbox (pad)</option>
-                    <option value="crop">Crop (center)</option>
-                    <option value="scale">Scale (stretch)</option>
-                  </select>
-                </div>
+              <div class="prop-field">
+                <label>Target</label>
+                <select id="convert-target">
+                  <option value="2k-scope">2K Scope (2048×858)</option>
+                  <option value="2k-flat">2K Flat (1998×1080)</option>
+                  <option value="2k-full">2K Full (2048×1080)</option>
+                  <option value="4k-scope">4K Scope (4096×1716)</option>
+                  <option value="4k-flat">4K Flat (3996×2160)</option>
+                  <option value="4k-full">4K Full (4096×2160)</option>
+                </select>
               </div>
               <div class="prop-field">
                 <label>Output Directory</label>
@@ -553,7 +556,7 @@
             </section>
 
             <section class="panel">
-              <h2>Convert to DCP <span class="badge-coming-soon">Coming Soon</span></h2>
+              <h2>Convert to DCP</h2>
               <p class="field-hint">Repackage an IMF package as a DCP for theatrical playback.</p>
               <div class="prop-field">
                 <label>Input IMP</label>
