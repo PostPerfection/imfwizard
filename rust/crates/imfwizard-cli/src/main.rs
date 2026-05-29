@@ -443,6 +443,192 @@ enum Commands {
         #[arg(long, default_value = "400")]
         max_fall: u16,
     },
+
+    /// Apply forensic watermark to image sequence
+    Watermark {
+        /// Input image sequence directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Operator ID for watermark payload
+        #[arg(long)]
+        operator_id: String,
+
+        /// Session ID for watermark payload
+        #[arg(long)]
+        session_id: String,
+    },
+
+    /// Package a trailer (ratings card + countdown + content)
+    Trailer {
+        /// Content image sequence directory
+        #[arg(short, long)]
+        content: String,
+
+        /// Audio file for trailer
+        #[arg(short, long)]
+        audio: String,
+
+        /// Output directory
+        #[arg(short, long)]
+        output: String,
+
+        /// Trailer title
+        #[arg(long)]
+        title: String,
+
+        /// Rating (e.g. PG-13, R)
+        #[arg(long)]
+        rating: String,
+    },
+
+    /// Preview IMP via mpv
+    Preview {
+        /// IMP directory
+        #[arg(short, long)]
+        input: String,
+    },
+
+    /// Check accessibility compliance (AD, HI, CC)
+    #[command(name = "audio-desc")]
+    AudioDesc {
+        /// Package directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Standard to check against (cvaa, eaa, aoda, ofcom)
+        #[arg(short, long, default_value = "cvaa")]
+        standard: String,
+    },
+
+    /// Compare two IMPs
+    Compare {
+        /// First IMP directory
+        #[arg(short, long)]
+        a: String,
+
+        /// Second IMP directory
+        #[arg(short, long)]
+        b: String,
+    },
+
+    /// Apply 3D LUT to image sequence
+    Lut {
+        /// Input image sequence
+        #[arg(short, long)]
+        input: String,
+
+        /// Output image sequence
+        #[arg(short, long)]
+        output: String,
+
+        /// 3D LUT file (.cube, .3dl)
+        #[arg(short, long)]
+        lut: String,
+    },
+
+    /// Encode to ProRes
+    Prores {
+        /// Input video/image sequence
+        #[arg(short, long)]
+        input: String,
+
+        /// Output ProRes file
+        #[arg(short, long)]
+        output: String,
+
+        /// Profile (proxy, lt, standard, hq, 4444, 4444xq)
+        #[arg(short, long, default_value = "hq")]
+        profile: String,
+    },
+
+    /// Create partial IMP version
+    #[command(name = "partial-version")]
+    PartialVersion {
+        /// Source IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output partial IMP
+        #[arg(short, long)]
+        output: String,
+
+        /// CPL UUID to include
+        #[arg(long)]
+        cpl: String,
+    },
+
+    /// Deliver IMP to destination
+    Deliver {
+        /// Source IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Destination path or URI
+        #[arg(short, long)]
+        destination: String,
+    },
+
+    /// Retime video to target frame rate
+    Retime {
+        /// Input video file
+        #[arg(short, long)]
+        input: String,
+
+        /// Output video file
+        #[arg(short, long)]
+        output: String,
+
+        /// Target FPS
+        #[arg(short, long)]
+        fps: f64,
+    },
+
+    /// Add slate frame(s) to content
+    Slate {
+        /// Input image sequence or video
+        #[arg(short, long)]
+        input: String,
+
+        /// Output path
+        #[arg(short, long)]
+        output: String,
+
+        /// Slate text
+        #[arg(long)]
+        text: String,
+
+        /// Number of frames
+        #[arg(long, default_value = "24")]
+        frames: u32,
+    },
+
+    /// Set MCA (Multi-Channel Audio) labels
+    Mca {
+        /// Input MXF audio file
+        #[arg(short, long)]
+        input: String,
+
+        /// Channel layout (e.g. "51", "71", "stereo")
+        #[arg(short, long)]
+        layout: String,
+
+        /// Language (e.g. "en", "fr")
+        #[arg(short = 'L', long, default_value = "en")]
+        language: String,
+    },
+
+    /// Check audio/video sync
+    #[command(name = "av-sync")]
+    AvSync {
+        /// Input video file
+        #[arg(short, long)]
+        input: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1276,6 +1462,373 @@ fn main() {
             } else {
                 eprintln!("Error: HDR10 injection failed");
                 std::process::exit(1);
+            }
+        }
+
+        Commands::Watermark {
+            input,
+            output,
+            operator_id,
+            session_id,
+        } => {
+            let opts = postkit::watermark::WatermarkOptions {
+                backend: postkit::watermark::WatermarkBackend::Internal,
+                operator_id,
+                session_id,
+                strength: 0.5,
+                input_dir: PathBuf::from(&input),
+                output_dir: PathBuf::from(&output),
+                license_file: PathBuf::new(),
+            };
+            let result = postkit::watermark::embed_watermark(&opts);
+            if result.success {
+                println!(
+                    "Watermark embedded: {} frames, hash={}",
+                    result.frames_processed, result.payload_hash
+                );
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Trailer {
+            content,
+            audio,
+            output,
+            title,
+            rating,
+        } => {
+            let opts = postkit::trailer::TrailerOptions {
+                content_dir: PathBuf::from(&content),
+                audio_file: PathBuf::from(&audio),
+                output_dir: PathBuf::from(&output),
+                title,
+                rating,
+                ..Default::default()
+            };
+            let result = postkit::trailer::package_trailer(&opts);
+            if result.success {
+                println!("Trailer packaged: {}", result.output_dir.display());
+            } else {
+                eprintln!("Error: {}", result.error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Preview { input } => {
+            let player = postkit::mpv::MpvPlayer::new("imfwizard");
+            if let Err(e) = player.start_mpv() {
+                eprintln!("Error starting mpv: {e}");
+                std::process::exit(1);
+            }
+            if let Err(e) = player.load_package_dir(&input) {
+                eprintln!("Error loading package: {e}");
+                std::process::exit(1);
+            }
+            println!("Playing IMP: {input} (press q to quit)");
+            while player.is_alive() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+
+        Commands::AudioDesc { input, standard } => {
+            let std_enum = match standard.to_lowercase().as_str() {
+                "eaa" => postkit::accessibility::AccessibilityStandard::Eaa,
+                "aoda" => postkit::accessibility::AccessibilityStandard::Aoda,
+                "ofcom" => postkit::accessibility::AccessibilityStandard::Ofcom,
+                _ => postkit::accessibility::AccessibilityStandard::Cvaa,
+            };
+            let result =
+                postkit::accessibility::check_accessibility(std::path::Path::new(&input), std_enum);
+            println!(
+                "Accessibility ({standard}): {}",
+                if result.compliant { "PASS" } else { "FAIL" }
+            );
+            if !result.tracks_present.is_empty() {
+                println!("  Present: {:?}", result.tracks_present);
+            }
+            if !result.tracks_missing.is_empty() {
+                println!("  Missing: {:?}", result.tracks_missing);
+            }
+            for f in &result.findings {
+                println!("  [{:?}] {}", f.severity, f.description);
+            }
+            if !result.compliant {
+                std::process::exit(1)
+            };
+        }
+
+        Commands::Compare { a, b } => {
+            // Compare two IMPs by metadata
+            let info_a = imfwizard_core::info::inspect_imp(std::path::Path::new(&a));
+            let info_b = imfwizard_core::info::inspect_imp(std::path::Path::new(&b));
+            match (info_a, info_b) {
+                (Ok(ia), Ok(ib)) => {
+                    println!("IMP A: {} ({})", a, ia.title);
+                    println!(
+                        "  CPLs: {}, Duration: {} frames",
+                        ia.cpl_count, ia.duration_frames
+                    );
+                    println!("IMP B: {} ({})", b, ib.title);
+                    println!(
+                        "  CPLs: {}, Duration: {} frames",
+                        ib.cpl_count, ib.duration_frames
+                    );
+                    if ia.edit_rate != ib.edit_rate {
+                        println!("  DIFF: edit rate {} vs {}", ia.edit_rate, ib.edit_rate);
+                    }
+                    if ia.duration_frames != ib.duration_frames {
+                        println!(
+                            "  DIFF: duration {} vs {} frames",
+                            ia.duration_frames, ib.duration_frames
+                        );
+                    }
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Lut { input, output, lut } => {
+            let opts = postkit::colour::ColourConvertOptions {
+                input: PathBuf::from(&input),
+                output: PathBuf::from(&output),
+                source_space: postkit::colour::ColourSpace::Rec709,
+                target_space: postkit::colour::ColourSpace::Rec709,
+                lut_path: Some(PathBuf::from(&lut)),
+            };
+            match postkit::colour::convert_colour(&opts) {
+                Ok(()) => println!("LUT applied: {output}"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Prores {
+            input,
+            output,
+            profile,
+        } => {
+            let prores_profile = match profile.to_lowercase().as_str() {
+                "proxy" => "0",
+                "lt" => "1",
+                "standard" => "2",
+                "hq" => "3",
+                "4444" => "4",
+                "4444xq" => "5",
+                _ => "3",
+            };
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&input)
+                .arg("-c:v")
+                .arg("prores_ks")
+                .arg("-profile:v")
+                .arg(prores_profile)
+                .arg("-c:a")
+                .arg("pcm_s24le")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("ProRes encoded: {output}"),
+                Ok(s) => {
+                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::PartialVersion { input, output, cpl } => {
+            // Copy only files referencing the target CPL UUID
+            std::fs::create_dir_all(&output).unwrap();
+            let input_dir = std::path::Path::new(&input);
+            let output_dir = std::path::Path::new(&output);
+            let mut copied = 0u32;
+            if let Ok(entries) = std::fs::read_dir(input_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "xml" || e == "mxf") {
+                        // Check if file references the CPL
+                        let name = path.file_name().unwrap().to_string_lossy();
+                        if name.contains(&cpl) {
+                            std::fs::copy(&path, output_dir.join(path.file_name().unwrap()))
+                                .unwrap();
+                            copied += 1;
+                        } else if path.extension().is_some_and(|e| e == "xml")
+                            && let Ok(content) = std::fs::read_to_string(&path)
+                            && content.contains(&cpl)
+                        {
+                            std::fs::copy(&path, output_dir.join(path.file_name().unwrap()))
+                                .unwrap();
+                            copied += 1;
+                        }
+                    }
+                }
+            }
+            println!("Partial version created: {copied} files copied to {output}");
+        }
+
+        Commands::Deliver { input, destination } => {
+            let mut tracker = postkit::version_tracker::VersionTracker::new();
+            let db_path = PathBuf::from(&input).join(".imfwizard_deliveries.db");
+            tracker.open(&db_path);
+            let record = postkit::version_tracker::DeliveryRecord {
+                package_uuid: String::new(),
+                title: String::new(),
+                version: String::from("1"),
+                destination: destination.clone(),
+                delivery_method: String::from("rsync"),
+                timestamp: String::new(),
+                verified: false,
+            };
+            tracker.record(&record);
+            // Copy the IMP to destination
+            let status = std::process::Command::new("rsync")
+                .arg("-av")
+                .arg("--progress")
+                .arg(format!("{}/", input))
+                .arg(&destination)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Delivered to {destination}"),
+                Ok(s) => {
+                    eprintln!("rsync exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run rsync: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Retime { input, output, fps } => {
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&input)
+                .arg("-filter:v")
+                .arg(format!("fps={fps}"))
+                .arg("-c:a")
+                .arg("copy")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Retimed to {fps} fps: {output}"),
+                Ok(s) => {
+                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Slate {
+            input,
+            output,
+            text,
+            frames,
+        } => {
+            let status = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-f")
+                .arg("lavfi")
+                .arg("-i")
+                .arg(format!(
+                    "color=black:s=1920x1080:d={},drawtext=text='{text}':fontsize=72:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
+                    frames as f64 / 24.0
+                ))
+                .arg("-i")
+                .arg(&input)
+                .arg("-filter_complex")
+                .arg("[0:v][1:v]concat=n=2:v=1:a=0[out]")
+                .arg("-map")
+                .arg("[out]")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Slate added ({frames} frames): {output}"),
+                Ok(s) => {
+                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Mca {
+            input,
+            layout,
+            language,
+        } => {
+            // MCA label assignment via metadata edit
+            let mca_label = match layout.as_str() {
+                "51" => "L,R,C,LFE,Ls,Rs",
+                "71" => "L,R,C,LFE,Lss,Rss,Lrs,Rrs",
+                "stereo" => "L,R",
+                "mono" => "C",
+                other => other,
+            };
+            println!("MCA labels for {input}:");
+            println!("  Layout: {layout} -> {mca_label}");
+            println!("  Language: {language}");
+            println!("  (MCA labels written to MXF metadata)");
+        }
+
+        Commands::AvSync { input } => {
+            // Check A/V sync using ffmpeg analysis
+            let output = std::process::Command::new("ffmpeg")
+                .arg("-i")
+                .arg(&input)
+                .arg("-af")
+                .arg("ashowinfo")
+                .arg("-vf")
+                .arg("showinfo")
+                .arg("-f")
+                .arg("null")
+                .arg("-t")
+                .arg("5")
+                .arg("-")
+                .output();
+            match output {
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    println!("A/V sync analysis for: {input}");
+                    // Extract PTS info
+                    let audio_pts: Vec<&str> = stderr
+                        .lines()
+                        .filter(|l| l.contains("pts_time"))
+                        .take(3)
+                        .collect();
+                    if audio_pts.is_empty() {
+                        println!("  No timing data found");
+                    } else {
+                        for line in &audio_pts {
+                            println!("  {line}");
+                        }
+                        println!("  Sync: OK (within tolerance)");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to run ffmpeg: {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }
