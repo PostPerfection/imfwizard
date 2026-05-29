@@ -101,12 +101,13 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
                 in_resource = false;
             }
 
-            if in_segment && !in_image_seq && !in_audio_seq {
-                if let Some(id) = extract_xml_value(trimmed, "Id") {
-                    if segment_id.is_empty() {
-                        segment_id = id.replace("urn:uuid:", "");
-                    }
-                }
+            if in_segment
+                && !in_image_seq
+                && !in_audio_seq
+                && let Some(id) = extract_xml_value(trimmed, "Id")
+                && segment_id.is_empty()
+            {
+                segment_id = id.replace("urn:uuid:", "");
             }
 
             if in_resource {
@@ -122,24 +123,23 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
                     if let Ok(v) = d.parse::<u64>() {
                         duration = v;
                     }
-                } else if duration == 0 {
-                    if let Some(d) = extract_xml_value(trimmed, "IntrinsicDuration") {
-                        if let Ok(v) = d.parse::<u64>() {
-                            duration = v;
-                        }
-                    }
+                } else if duration == 0
+                    && let Some(d) = extract_xml_value(trimmed, "IntrinsicDuration")
+                    && let Ok(v) = d.parse::<u64>()
+                {
+                    duration = v;
                 }
-                if let Some(ep) = extract_xml_value(trimmed, "EntryPoint") {
-                    if let Ok(v) = ep.parse::<u64>() {
-                        entry_point = v;
-                    }
+                if let Some(ep) = extract_xml_value(trimmed, "EntryPoint")
+                    && let Ok(v) = ep.parse::<u64>()
+                {
+                    entry_point = v;
                 }
             }
 
-            if let Some(er) = extract_xml_value(trimmed, "EditRate") {
-                if edit_rate.is_empty() {
-                    edit_rate = er;
-                }
+            if let Some(er) = extract_xml_value(trimmed, "EditRate")
+                && edit_rate.is_empty()
+            {
+                edit_rate = er;
             }
         }
     }
@@ -173,18 +173,17 @@ pub fn list_cpls(imp_dir: &Path) -> Vec<CplInfo> {
         } else if trimmed == "</Asset>" {
             if in_asset && !current_id.is_empty() && !current_path.is_empty() {
                 let full_path = imp_dir.join(&current_path);
-                if full_path.exists() {
-                    if let Ok(file_content) = std::fs::read_to_string(&full_path) {
-                        if file_content.contains("CompositionPlaylist") {
-                            let title = extract_xml_value(&file_content, "ContentTitle")
-                                .unwrap_or_default();
-                            cpls.push(CplInfo {
-                                id: current_id.clone(),
-                                file_path: current_path.clone(),
-                                title,
-                            });
-                        }
-                    }
+                if full_path.exists()
+                    && let Ok(file_content) = std::fs::read_to_string(&full_path)
+                    && file_content.contains("CompositionPlaylist")
+                {
+                    let title =
+                        extract_xml_value(&file_content, "ContentTitle").unwrap_or_default();
+                    cpls.push(CplInfo {
+                        id: current_id.clone(),
+                        file_path: current_path.clone(),
+                        title,
+                    });
                 }
             }
             in_asset = false;

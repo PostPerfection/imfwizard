@@ -178,11 +178,7 @@ fn wrap_pcm(opts: &MxfWrapOptions) -> MxfWrapResult {
 
     let pcm_start = if wav_data.len() > 44 { 44 } else { 0 };
     let pcm_data = &wav_data[pcm_start..];
-    let num_frames = if frame_size > 0 {
-        pcm_data.len() as u32 / frame_size
-    } else {
-        0
-    };
+    let num_frames = (pcm_data.len() as u32).checked_div(frame_size).unwrap_or(0);
 
     let desc = asdcplib::pcm::AudioDescriptor {
         edit_rate: asdcplib::Rational::new(opts.edit_rate_num as i32, opts.edit_rate_den as i32),
