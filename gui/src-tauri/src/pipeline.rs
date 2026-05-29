@@ -38,6 +38,10 @@ struct JobConfig {
     title: String,
     output_dir: PathBuf,
     audio_path: Option<String>,
+    fps_num: u32,
+    fps_den: u32,
+    content_kind: String,
+    bandwidth: u32,
 }
 
 // ─── Queue state (managed by Tauri) ────────────────────────────────────────
@@ -69,15 +73,29 @@ impl JobQueue {
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_job(
     app: AppHandle,
     video_path: String,
     title: String,
     output_dir: String,
     audio_path: Option<String>,
+    framerate: Option<String>,
+    content_kind: Option<String>,
+    bandwidth: Option<u32>,
 ) -> Result<u64, String> {
     let queue = app.state::<JobQueue>();
     let id = queue.next_id.fetch_add(1, Ordering::Relaxed);
+
+    let (fps_num, fps_den) = match framerate.as_deref() {
+        Some("25/1") => (25, 1),
+        Some("30000/1001") => (30000, 1001),
+        Some("30/1") => (30, 1),
+        Some("48/1") => (48, 1),
+        Some("60000/1001") => (60000, 1001),
+        Some("60/1") => (60, 1),
+        _ => (24, 1),
+    };
 
     let job = JobConfig {
         id,
@@ -85,6 +103,10 @@ pub async fn submit_job(
         title: title.clone(),
         output_dir: PathBuf::from(&output_dir),
         audio_path,
+        fps_num,
+        fps_den,
+        content_kind: content_kind.unwrap_or_else(|| "feature".to_string()),
+        bandwidth: bandwidth.unwrap_or(250),
     };
 
     {
@@ -287,8 +309,9 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     let opts = imfwizard_core::imp::ImpOptions {
         title: job.title.clone(),
         output_dir: job.output_dir.clone(),
-        fps_num: 24,
-        fps_den: 1,
+        fps_num: job.fps_num,
+        fps_den: job.fps_den,
+        content_kind: job.content_kind.clone(),
         j2k_dir: Some(encode_result.j2k_dir.clone()),
         ..Default::default()
     };

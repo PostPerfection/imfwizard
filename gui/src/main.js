@@ -476,8 +476,9 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   try {
     currentJobId = await invoke("submit_job", {
       videoPath: video, title, outputDir: output, audioPath: audio,
-      fps: document.getElementById("prop-framerate")?.value || "24/1",
-      colorSpace: document.getElementById("prop-colour")?.value || "bt709",
+      framerate: document.getElementById("prop-framerate")?.value || "24/1",
+      contentKind: document.getElementById("prop-content-kind")?.value || "feature",
+      bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     });
     setStatus("Building IMP...");
   } catch (e) {
@@ -503,7 +504,7 @@ document.getElementById("val-run")?.addEventListener("click", async () => {
   const box = document.getElementById("val-results");
   box.classList.add("visible");
   box.textContent = "Validating...";
-  const cmd = Command.sidecar("imfwizard", ["validate", dir]);
+  const cmd = Command.sidecar("imfwizard", ["analyze", "-i", dir]);
   const result = await cmd.execute();
   box.textContent = result.code === 0
     ? "✓ IMP validation PASSED\n\n" + result.stdout
@@ -525,7 +526,7 @@ document.getElementById("tc-start")?.addEventListener("click", async () => {
   const format = document.getElementById("tc-format").value;
   const box = document.getElementById("tc-results");
   box.classList.add("visible"); box.textContent = "Transcoding...";
-  const cmd = Command.sidecar("imfwizard", ["transcode", "-i", input, "-o", output, "-f", format]);
+  const cmd = Command.sidecar("imfwizard", ["transcode", "-i", input, "-o", output]);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? "✓ Done\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
@@ -536,12 +537,9 @@ document.getElementById("loud-browse")?.addEventListener("click", async () => {
 });
 
 document.getElementById("loud-measure")?.addEventListener("click", async () => {
-  const input = document.getElementById("loud-input").value;
   const box = document.getElementById("loud-results");
-  box.classList.add("visible"); box.textContent = "Measuring...";
-  const cmd = Command.sidecar("imfwizard", ["loudness", input]);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0 ? result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+  box.classList.add("visible");
+  box.textContent = "Loudness measurement is not yet supported by the CLI.\nUse an external tool such as ffmpeg loudnorm or dpMeter.";
 });
 
 // === Tools: Burn-In ===
@@ -556,14 +554,9 @@ document.getElementById("bi-browse-output")?.addEventListener("click", async () 
 });
 
 document.getElementById("bi-start")?.addEventListener("click", async () => {
-  const video = document.getElementById("bi-video").value;
-  const subs = document.getElementById("bi-subs").value;
-  const output = document.getElementById("bi-output").value;
   const box = document.getElementById("bi-results");
-  box.classList.add("visible"); box.textContent = "Burning in subtitles...";
-  const cmd = Command.sidecar("imfwizard", ["burnin", "-i", video, "-s", subs, "-o", output]);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0 ? "✓ Done\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+  box.classList.add("visible");
+  box.textContent = "Subtitle burn-in is not yet supported by the CLI.\nUse dcpwizard or ffmpeg for subtitle burn-in.";
 });
 
 // === Tools: Analytics ===
@@ -575,7 +568,7 @@ document.getElementById("an-analyze")?.addEventListener("click", async () => {
   const input = document.getElementById("an-input").value;
   const box = document.getElementById("an-results");
   box.classList.add("visible"); box.textContent = "Analyzing...";
-  const cmd = Command.sidecar("imfwizard", ["analytics", input]);
+  const cmd = Command.sidecar("imfwizard", ["analyze", "-i", input, "--json"]);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
@@ -618,18 +611,9 @@ document.getElementById("dcp-browse-output")?.addEventListener("click", async ()
 });
 
 document.getElementById("dcp-convert")?.addEventListener("click", async () => {
-  const imp = document.getElementById("dcp-imp").value;
-  const output = document.getElementById("dcp-output").value;
-  const title = document.getElementById("dcp-title").value;
-  const kind = document.getElementById("dcp-kind").value;
   const box = document.getElementById("dcp-results");
-  box.classList.add("visible"); box.textContent = "Converting...";
-  const args = ["to-dcp", "-i", imp, "-o", output];
-  if (title) args.push("-t", title);
-  args.push("-k", kind);
-  const cmd = Command.sidecar("imfwizard", args);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0 ? "✓ DCP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+  box.classList.add("visible");
+  box.textContent = "IMP-to-DCP conversion is not yet supported by the CLI.\nUse dcpwizard to create a DCP from source media.";
 });
 
 // === Supplement ===
@@ -646,15 +630,9 @@ function checkSupReady() {
 }
 
 document.getElementById("sup-create")?.addEventListener("click", async () => {
-  const ov = document.getElementById("sup-ov").value;
-  const video = document.getElementById("sup-video").value;
-  const entry = document.getElementById("sup-entry-point").value;
-  const dur = document.getElementById("sup-duration").value;
   const box = document.getElementById("sup-results");
-  box.classList.add("visible"); box.textContent = "Creating supplement...";
-  const cmd = Command.sidecar("imfwizard", ["supplement", "-o", ov, "-v", video, "--entry", entry, "--duration", dur]);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0 ? "✓ Supplemental IMP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+  box.classList.add("visible");
+  box.textContent = "Supplemental IMP creation is not yet supported by the CLI.\nThis feature is under development.";
 });
 
 // === Metadata ===
@@ -663,7 +641,7 @@ document.getElementById("meta-browse")?.addEventListener("click", async () => {
   if (d) {
     document.getElementById("meta-fields").style.display = "block";
     setStatus("Loading metadata...");
-    const cmd = Command.sidecar("imfwizard", ["info", d]);
+    const cmd = Command.sidecar("imfwizard", ["analyze", "-i", d, "--json"]);
     const result = await cmd.execute();
     if (result.code === 0) {
       try {
@@ -684,28 +662,20 @@ let jobsPollInterval = null;
 async function refreshJobs() {
   const badge = document.getElementById("jobs-status");
   try {
-    const result = await Command.sidecar("imfwizard", ["batch", "list"]).execute();
-    if (result.code !== 0) {
-      badge.textContent = "Offline";
-      document.getElementById("jobs-tbody").innerHTML = '<tr><td colspan="5" style="text-align:center">Daemon not running</td></tr>';
-      return;
-    }
-    badge.textContent = "Online";
-    const lines = result.stdout.trim().split("\n");
+    const jobs = await invoke("list_jobs");
+    badge.textContent = "Active";
     const tbody = document.getElementById("jobs-tbody");
-    if (lines.length <= 1 || lines[0].startsWith("No")) {
+    if (!jobs || jobs.length === 0) {
       tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">No jobs</td></tr>';
       return;
     }
-    const jobLines = lines.slice(2).filter(l => l.trim());
-    tbody.innerHTML = jobLines.map(line => {
-      const [id, state, progress, type] = line.trim().split(/\s+/);
-      return `<tr><td>${id}</td><td>${type}</td><td>${state}</td><td>${progress}</td>
-        <td>${(state === "running" || state === "queued") ? `<button class="btn-sm btn-cancel" data-job-id="${id}">✕</button>` : ''}</td></tr>`;
+    tbody.innerHTML = jobs.map(j => {
+      return `<tr><td>${j.id}</td><td>${j.title}</td><td>${j.status}</td><td>${j.percent.toFixed(0)}%</td>
+        <td>${(j.status === "running" || j.status === "queued") ? `<button class="btn-sm btn-cancel" data-job-id="${j.id}">✕</button>` : ''}</td></tr>`;
     }).join('');
     tbody.querySelectorAll(".btn-cancel").forEach(btn => {
       btn.addEventListener("click", async () => {
-        await Command.sidecar("imfwizard", ["batch", "cancel", btn.dataset.jobId]).execute();
+        await invoke("cancel_job", { jobId: parseInt(btn.dataset.jobId) });
         refreshJobs();
       });
     });
@@ -947,24 +917,9 @@ document.getElementById("convert-browse-output")?.addEventListener("click", asyn
 });
 document.getElementById("convert-start")?.addEventListener("click", async () => {
   const input = document.getElementById("convert-input").value;
-  const container = document.getElementById("convert-container").value;
-  const method = document.getElementById("convert-method").value;
-  const output = document.getElementById("convert-output").value;
   if (!input) return;
 
   const resultsEl = document.getElementById("convert-results");
-  resultsEl.textContent = "Converting…";
+  resultsEl.textContent = "Target conversion is not yet supported by the CLI.\nUse dcpwizard or ffmpeg for container conversion.";
   resultsEl.classList.add("visible");
-
-  try {
-    const args = ["convert", input, "--target", container, "--method", method];
-    if (output) args.push("-o", output);
-    const cmd = Command.create("imfwizard", args);
-    const result = await cmd.execute();
-    resultsEl.textContent = result.code === 0
-      ? `✓ Conversion complete\n${result.stdout}`
-      : `✗ Error:\n${result.stderr || result.stdout}`;
-  } catch (e) {
-    resultsEl.textContent = `✗ Failed: ${e}`;
-  }
 });
