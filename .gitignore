@@ -14,7 +14,6 @@ gui/dist/
 gui/.vite/
 gui/src-tauri/target/
 gui/src-tauri/gen/
-gui/src-tauri/icons/
 gui/src-tauri/Cargo.lock
 gui/src-tauri/imfwizard-*
 
