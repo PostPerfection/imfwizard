@@ -419,6 +419,16 @@ document.getElementById("btn-preview")?.addEventListener("click", () => {
   else { alert("Import a video asset first"); }
 });
 
+// === Supplement ===
+document.getElementById("btn-supplement")?.addEventListener("click", () => {
+  switchView("timeline");
+  // Scroll the supplement panel into view
+  setTimeout(() => {
+    const supOv = document.getElementById("sup-ov");
+    if (supOv) supOv.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 100);
+});
+
 // === Build IMP ===
 let currentJobId = null;
 
