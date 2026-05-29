@@ -6,9 +6,32 @@ let timelineData = null; // { segments: [], totalFrames, editRate }
 let currentSegmentIdx = -1;
 let playheadFrame = 0;
 let timelinePollingId = null;
+let zoomLevel = 1; // 1 = fit-to-view, >1 = zoomed in
 
 export function initTimeline() {
   renderEmpty();
+
+  // Wire up zoom buttons
+  const zoomInBtn = document.getElementById('tl-zoom-in');
+  const zoomOutBtn = document.getElementById('tl-zoom-out');
+  if (zoomInBtn) zoomInBtn.addEventListener('click', () => setZoom(zoomLevel * 1.5));
+  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => setZoom(zoomLevel / 1.5));
+}
+
+function setZoom(level) {
+  zoomLevel = Math.max(1, Math.min(20, level));
+  const view = document.getElementById('timeline-view');
+  if (!view) return;
+  const tracks = view.querySelector('.timeline-tracks');
+  const ruler = document.getElementById('timeline-ruler');
+  const width = zoomLevel === 1 ? '100%' : `${zoomLevel * 100}%`;
+  if (tracks) tracks.style.width = width;
+  if (ruler) ruler.style.width = width;
+  // Scroll playhead into view
+  if (zoomLevel > 1 && timelineData && timelineData.totalFrames > 0) {
+    const pct = playheadFrame / timelineData.totalFrames;
+    view.scrollLeft = pct * view.scrollWidth - view.clientWidth / 2;
+  }
 }
 
 // Load timeline from an opened IMP's CPL
