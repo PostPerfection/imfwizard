@@ -344,13 +344,13 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "dcpdoctor-core"
-version = "1.0.0"
-source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
+version = "0.1.0"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v0.1.0#6427a027d25962b6d0f0d7692a8f1056942df73a"
 dependencies = [
  "asdcplib",
  "base64",
  "dcpdoctor-imf",
- "postkit 1.0.0 (git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0)",
+ "postkit 0.1.0 (git+https://github.com/PostPerfection/dcpdoctor.git?tag=v0.1.0)",
  "quick-xml",
  "regex-lite",
  "serde",
@@ -364,8 +364,8 @@ dependencies = [
 
 [[package]]
 name = "dcpdoctor-imf"
-version = "1.0.0"
-source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
+version = "0.1.0"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v0.1.0#6427a027d25962b6d0f0d7692a8f1056942df73a"
 dependencies = [
  "quick-xml",
  "serde",
@@ -639,14 +639,14 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "imfwizard-cli"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
  "clap_complete",
  "ctrlc",
  "imfwizard-core",
- "postkit 1.0.0",
+ "postkit 0.1.0",
  "predicates",
  "serde_json",
  "tempfile",
@@ -657,12 +657,12 @@ dependencies = [
 
 [[package]]
 name = "imfwizard-core"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "asdcplib",
  "base64",
  "dcpdoctor-core",
- "postkit 1.0.0",
+ "postkit 0.1.0",
  "quick-xml",
  "regex-lite",
  "serde",
@@ -1016,7 +1016,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "postkit"
-version = "1.0.0"
+version = "0.1.0"
 dependencies = [
  "asdcplib",
  "base64",
@@ -1042,8 +1042,8 @@ dependencies = [
 
 [[package]]
 name = "postkit"
-version = "1.0.0"
-source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
+version = "0.1.0"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v0.1.0#6427a027d25962b6d0f0d7692a8f1056942df73a"
 dependencies = [
  "asdcplib",
  "base64",
