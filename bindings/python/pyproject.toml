@@ -1,0 +1,9 @@
+[project]
+name = "imfwizard"
+version = "1.0.0"
+description = "Python bindings for IMF Wizard"
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

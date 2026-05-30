@@ -1860,56 +1860,164 @@ fn main() {
             layout,
             language,
         } => {
-            // MCA label assignment via metadata edit
-            let mca_label = match layout.as_str() {
-                "51" => "L,R,C,LFE,Ls,Rs",
-                "71" => "L,R,C,LFE,Lss,Rss,Lrs,Rrs",
-                "stereo" => "L,R",
-                "mono" => "C",
-                other => other,
+            // Generate MCA labels and write into CPL
+            let soundfield = match layout.as_str() {
+                "51" => imfwizard_core::mca::soundfield_51(),
+                "71" => imfwizard_core::mca::soundfield_71(),
+                "stereo" | "20" => imfwizard_core::mca::soundfield_stereo(),
+                "mono" | "10" => imfwizard_core::mca::McaSoundfield {
+                    name: "10".to_string(),
+                    channels: vec![imfwizard_core::mca::McaLabel {
+                        symbol: imfwizard_core::mca::McaTagSymbol::M1,
+                        tag_name: "Mono One".to_string(),
+                        tag_symbol: "chM1".to_string(),
+                        channel_index: 0,
+                        spoken_language: String::new(),
+                    }],
+                },
+                "51+hi+vi" | "51+HI+VI" => imfwizard_core::mca::soundfield_51_with_hi_vi(),
+                _ => {
+                    eprintln!("Unknown layout: {layout}. Use: mono, stereo, 51, 71, 51+HI+VI");
+                    std::process::exit(1);
+                }
             };
-            println!("MCA labels for {input}:");
-            println!("  Layout: {layout} -> {mca_label}");
+
+            // Set spoken language on all channels
+            let mut soundfield = soundfield;
+            for ch in &mut soundfield.channels {
+                ch.spoken_language = language.clone();
+            }
+
+            let mca_xml = imfwizard_core::mca::generate_mca_xml(&soundfield);
+
+            // Find CPL in IMP directory or use input as CPL path directly
+            let input_path = std::path::Path::new(&input);
+            let cpl_path = if input_path.is_dir() {
+                // Search for CPL XML file in IMP
+                let mut found = None;
+                if let Ok(entries) = std::fs::read_dir(input_path) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_lowercase();
+                        if name.starts_with("cpl") && name.ends_with(".xml") {
+                            found = Some(entry.path());
+                            break;
+                        }
+                    }
+                }
+                found.unwrap_or_else(|| {
+                    eprintln!("No CPL XML found in {input}");
+                    std::process::exit(1);
+                })
+            } else {
+                input_path.to_path_buf()
+            };
+
+            // Read CPL and inject MCA labels
+            let cpl_content = std::fs::read_to_string(&cpl_path).unwrap_or_else(|e| {
+                eprintln!("Failed to read CPL: {e}");
+                std::process::exit(1);
+            });
+
+            // Insert MCA labels before </MainSoundConfiguration> or before </CompositionPlaylist>
+            let updated = if cpl_content.contains("</MainSoundConfiguration>") {
+                cpl_content.replace(
+                    "</MainSoundConfiguration>",
+                    &format!("</MainSoundConfiguration>\n{mca_xml}"),
+                )
+            } else if cpl_content.contains("</CompositionPlaylist>") {
+                cpl_content.replace(
+                    "</CompositionPlaylist>",
+                    &format!("{mca_xml}</CompositionPlaylist>"),
+                )
+            } else {
+                eprintln!("Cannot find insertion point in CPL");
+                std::process::exit(1);
+            };
+
+            std::fs::write(&cpl_path, &updated).unwrap_or_else(|e| {
+                eprintln!("Failed to write CPL: {e}");
+                std::process::exit(1);
+            });
+
+            println!("MCA labels written to {}", cpl_path.display());
+            println!("  Layout: {} ({})", soundfield.name, layout);
             println!("  Language: {language}");
-            println!("  (MCA labels written to MXF metadata)");
+            println!("  Channels: {}", soundfield.channels.len());
         }
 
         Commands::AvSync { input } => {
-            // Check A/V sync using ffmpeg analysis
-            let output = std::process::Command::new("ffmpeg")
-                .arg("-i")
-                .arg(&input)
-                .arg("-af")
-                .arg("ashowinfo")
-                .arg("-vf")
-                .arg("showinfo")
-                .arg("-f")
-                .arg("null")
-                .arg("-t")
-                .arg("5")
-                .arg("-")
+            // Measure A/V sync by comparing first audio PTS with first video PTS
+            let output = std::process::Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "quiet",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "packet=pts_time",
+                    "-of",
+                    "csv=p=0",
+                    "-read_intervals",
+                    "%+#1",
+                    &input,
+                ])
                 .output();
-            match output {
-                Ok(out) => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    println!("A/V sync analysis for: {input}");
-                    // Extract PTS info
-                    let audio_pts: Vec<&str> = stderr
-                        .lines()
-                        .filter(|l| l.contains("pts_time"))
-                        .take(3)
-                        .collect();
-                    if audio_pts.is_empty() {
-                        println!("  No timing data found");
+            let first_video_pts = match &output {
+                Ok(out) => String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .parse::<f64>()
+                    .ok(),
+                Err(_) => None,
+            };
+
+            let output = std::process::Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "quiet",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "packet=pts_time",
+                    "-of",
+                    "csv=p=0",
+                    "-read_intervals",
+                    "%+#1",
+                    &input,
+                ])
+                .output();
+            let first_audio_pts = match &output {
+                Ok(out) => String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .parse::<f64>()
+                    .ok(),
+                Err(_) => None,
+            };
+
+            println!("A/V sync analysis: {input}");
+            match (first_video_pts, first_audio_pts) {
+                (Some(v), Some(a)) => {
+                    let drift_ms = (v - a) * 1000.0;
+                    println!("  First video PTS: {v:.6}s");
+                    println!("  First audio PTS: {a:.6}s");
+                    println!("  Drift: {drift_ms:.2}ms (video - audio)");
+                    // EBU R128 recommends < ±40ms for broadcast
+                    if drift_ms.abs() < 5.0 {
+                        println!("  Result: PASS (drift < 5ms, frame-accurate)");
+                    } else if drift_ms.abs() < 40.0 {
+                        println!(
+                            "  Result: WARNING (drift {drift_ms:.1}ms, within EBU tolerance but audible)"
+                        );
                     } else {
-                        for line in &audio_pts {
-                            println!("  {line}");
-                        }
-                        println!("  Sync: OK (within tolerance)");
+                        println!("  Result: FAIL (drift {drift_ms:.1}ms, exceeds ±40ms tolerance)");
+                        std::process::exit(1);
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to run ffmpeg: {e}");
+                (None, _) => {
+                    eprintln!("  Could not determine video start PTS (no video stream?)");
+                    std::process::exit(1);
+                }
+                (_, None) => {
+                    eprintln!("  Could not determine audio start PTS (no audio stream?)");
                     std::process::exit(1);
                 }
             }
@@ -1975,23 +2083,160 @@ fn main() {
         }
 
         Commands::Compliance { input, standard } => {
-            // Compliance = validation against a specific standard
-            let profile = match standard.to_lowercase().as_str() {
-                "netflix" => "Netflix IMF",
-                "dolby" => "Dolby Vision IMF",
-                "amazon" => "Amazon IMF",
-                _ => "SMPTE ST 2067",
+            // Validate IMP against platform-specific delivery requirements
+            let platform = match standard.to_lowercase().as_str() {
+                "netflix" => postkit::profiles::Platform::Netflix,
+                "amazon" | "prime" => postkit::profiles::Platform::AmazonPrime,
+                "disney" | "disney+" => postkit::profiles::Platform::Disney,
+                "apple" | "appletv" => postkit::profiles::Platform::Apple,
+                "hbo" => postkit::profiles::Platform::Hbo,
+                "broadcast" => postkit::profiles::Platform::Broadcast,
+                "archival" => postkit::profiles::Platform::ArchivalPreservation,
+                "dci-2k" | "cinema-2k" => postkit::profiles::Platform::TheatricalDci2k,
+                "dci-4k" | "cinema-4k" => postkit::profiles::Platform::TheatricalDci4k,
+                _ => postkit::profiles::Platform::Netflix,
             };
-            println!("Checking compliance against: {profile}");
+            let profile = postkit::profiles::profile_for(platform);
+            println!("Checking compliance against: {}", profile.name);
+            println!(
+                "  Required: {}x{} @ {}fps, {} colour, {}-bit, {} audio",
+                profile.width,
+                profile.height,
+                profile.frame_rate,
+                profile.colour_space,
+                profile.bit_depth,
+                profile.audio_channels
+            );
+            println!();
+
+            // Structural validation
             let report = imfwizard_core::validate::validate_imp(std::path::Path::new(&input));
-            if report.valid {
-                println!("PASS: compliant with {profile}");
-            } else {
-                println!("FAIL: {} errors", report.errors.len());
-                for e in &report.errors {
-                    println!("  - {e}");
+            let mut errors: Vec<String> = report.errors;
+            let mut warnings: Vec<String> = report.warnings;
+
+            // Probe MXF files for platform-specific parameter checks
+            let imp_path = std::path::Path::new(&input);
+            if imp_path.is_dir() {
+                let mxf_files: Vec<_> = std::fs::read_dir(imp_path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .and_then(|x| x.to_str())
+                            .is_some_and(|x| x.eq_ignore_ascii_case("mxf"))
+                    })
+                    .collect();
+                for entry in &mxf_files {
+                    let path = entry.path();
+                    let fname = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let Ok(out) = std::process::Command::new("ffprobe")
+                        .args(["-v", "quiet", "-show_streams", "-of", "json"])
+                        .arg(&path)
+                        .output()
+                    else {
+                        continue;
+                    };
+                    let json_str = String::from_utf8_lossy(&out.stdout);
+                    let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) else {
+                        continue;
+                    };
+                    let Some(streams) = val.get("streams").and_then(|s| s.as_array()) else {
+                        continue;
+                    };
+                    for stream in streams {
+                        let codec_type = stream
+                            .get("codec_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if codec_type == "video" {
+                            let w =
+                                stream.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let h =
+                                stream.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let bits = stream
+                                .get("bits_per_raw_sample")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            if w > 0 && w != profile.width {
+                                errors.push(format!(
+                                    "{fname}: width {w} != required {}",
+                                    profile.width
+                                ));
+                            }
+                            if h > 0
+                                && h != profile.height
+                                && !(profile.height == 2160
+                                    && (h == 1600 || h == 1800 || h == 2160))
+                                && !(profile.height == 1080 && (h == 858 || h == 1080))
+                            {
+                                warnings.push(format!(
+                                    "{fname}: height {h} != nominal {}",
+                                    profile.height
+                                ));
+                            }
+                            if bits > 0 && bits < profile.bit_depth {
+                                errors.push(format!(
+                                    "{fname}: bit depth {bits} < required {}",
+                                    profile.bit_depth
+                                ));
+                            }
+                        } else if codec_type == "audio" {
+                            let sr = stream
+                                .get("sample_rate")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            let bits = stream
+                                .get("bits_per_raw_sample")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            if sr > 0 && sr != profile.audio_sample_rate {
+                                errors.push(format!(
+                                    "{fname}: sample rate {sr}Hz != required {}Hz",
+                                    profile.audio_sample_rate
+                                ));
+                            }
+                            if bits > 0 && bits < profile.audio_bit_depth {
+                                errors.push(format!(
+                                    "{fname}: audio bit depth {bits} < required {}",
+                                    profile.audio_bit_depth
+                                ));
+                            }
+                        }
+                    }
                 }
-                std::process::exit(1);
+            }
+
+            // Report
+            if errors.is_empty() && warnings.is_empty() {
+                println!("PASS: compliant with {}", profile.name);
+            } else {
+                if !errors.is_empty() {
+                    println!("ERRORS ({}):", errors.len());
+                    for e in &errors {
+                        println!("  ✗ {e}");
+                    }
+                }
+                if !warnings.is_empty() {
+                    println!("WARNINGS ({}):", warnings.len());
+                    for w in &warnings {
+                        println!("  ⚠ {w}");
+                    }
+                }
+                if !errors.is_empty() {
+                    println!("\nFAIL: not compliant with {}", profile.name);
+                    std::process::exit(1);
+                } else {
+                    println!("\nPASS (with warnings): compliant with {}", profile.name);
+                }
             }
         }
 

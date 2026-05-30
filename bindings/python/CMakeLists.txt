@@ -1,22 +1,10 @@
-cmake_minimum_required(VERSION 3.25)
-
-find_package(SWIG 4.0 REQUIRED)
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-include(UseSWIG)
-
-set_property(SOURCE imfwizard.i PROPERTY CPLUSPLUS ON)
-set_property(SOURCE imfwizard.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
-
-swig_add_library(pyimfwizard
-  TYPE SHARED
-  LANGUAGE python
-  SOURCES imfwizard.i
-)
-
-target_include_directories(pyimfwizard PRIVATE
-  ${PROJECT_SOURCE_DIR}/include
-  ${Python3_INCLUDE_DIRS}
-)
+# Python bindings for IMF Wizard
+# These are subprocess-based wrappers around the CLI binary.
+# No compilation needed — just install the Python package.
+#
+# Usage:
+#   pip install -e bindings/python/
+#   or: IMFWIZARD_BIN=/path/to/imfwizard python -c "import imfwizard; ..."
 
 target_link_libraries(pyimfwizard PRIVATE
   imfwizard_core
