@@ -95,8 +95,8 @@ const TOOL_DEFS: &[ToolDef] = &[
         version_args: &["--version"],
     },
     ToolDef {
-        name: "gst-inspect-1.0",
-        purpose: "GStreamer (DeckLink SDI output)",
+        name: "gst-launch-1.0",
+        purpose: "GStreamer pipeline runner (DeckLink SDI output)",
         required: false,
         version_args: &["--version"],
     },
@@ -268,7 +268,7 @@ pub fn has_weasyprint() -> bool {
     tool_available("weasyprint")
 }
 pub fn has_gst_decklink() -> bool {
-    tool_available("gst-inspect-1.0")
+    tool_available("gst-launch-1.0")
 }
 pub fn has_ascp() -> bool {
     tool_available("ascp")
