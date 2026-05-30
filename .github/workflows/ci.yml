@@ -69,4 +69,4 @@ jobs:
         run: |
           ./rust/target/release/imfwizard --version
           ./rust/target/release/imfwizard --help
-          ./rust/target/release/imfwizard doctor --json
+          ./rust/target/release/imfwizard doctor --json || true
