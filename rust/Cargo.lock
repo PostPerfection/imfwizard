@@ -345,11 +345,14 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 [[package]]
 name = "dcpdoctor-core"
 version = "1.0.0"
-source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.0.0#e72e3b0a5c0147165ee1c24876016606b62e915a"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
 dependencies = [
+ "asdcplib",
  "base64",
- "postkit 1.0.0 (git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.0.0)",
+ "dcpdoctor-imf",
+ "postkit 1.0.0 (git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0)",
  "quick-xml",
+ "regex-lite",
  "serde",
  "serde_json",
  "sha1",
@@ -357,6 +360,15 @@ dependencies = [
  "time",
  "tracing",
  "x509-parser",
+]
+
+[[package]]
+name = "dcpdoctor-imf"
+version = "1.0.0"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
+dependencies = [
+ "quick-xml",
+ "serde",
 ]
 
 [[package]]
@@ -1031,7 +1043,7 @@ dependencies = [
 [[package]]
 name = "postkit"
 version = "1.0.0"
-source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.0.0#e72e3b0a5c0147165ee1c24876016606b62e915a"
+source = "git+https://github.com/PostPerfection/dcpdoctor.git?tag=v1.1.0#f3685ac18bef18d3dd87cfd9abaeaa5a6ccd2db5"
 dependencies = [
  "asdcplib",
  "base64",
