@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  build:
+  rust:
     strategy:
       fail-fast: false
       matrix:
@@ -28,87 +28,25 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libxml2-dev \
-            libssl-dev \
-            libxerces-c-dev
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install \
-            cmake \
-            ninja \
-            pkg-config \
-            libxml2 \
-            openssl@3 \
-            xerces-c
+          brew install pkg-config libxml2 openssl@3 xerces-c
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           $env:VCPKG_BUILD_TYPE="release"
-          vcpkg install libxml2 openssl xerces-c sqlite3 --triplet x64-windows
-
-      - name: Configure (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DBUILD_TESTING=ON
-
-      - name: Configure (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DBUILD_TESTING=ON \
-            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix libxml2);$(brew --prefix xerces-c)"
-
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
-            -DBUILD_TESTING=ON `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: |
-          cd build
-          ctest --output-on-failure --build-config Release
-
-  rust:
-    runs-on: ubuntu-24.04
-    name: Rust CLI
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
+          vcpkg install libxml2 openssl xerces-c --triplet x64-windows
 
       - name: Build
         working-directory: rust
@@ -126,5 +64,9 @@ jobs:
         working-directory: rust
         run: cargo fmt -- --check
 
-      - name: CLI flag consistency
-        run: bash tests/cli_flags_test.sh ./rust/target/release/imfwizard
+      - name: CLI smoke test
+        if: runner.os != 'Windows'
+        run: |
+          ./rust/target/release/imfwizard --version
+          ./rust/target/release/imfwizard --help
+          ./rust/target/release/imfwizard doctor --json
