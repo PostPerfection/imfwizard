@@ -109,10 +109,9 @@ fn find_schema(schema_dir: &Path, doc_type: &str) -> Option<String> {
     if let Ok(entries) = std::fs::read_dir(schema_dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|name| name.to_lowercase().contains(doc_type) && name.ends_with(".xsd"))
-            {
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
+                name.to_lowercase().contains(doc_type) && name.ends_with(".xsd")
+            }) {
                 return Some(p.to_string_lossy().to_string());
             }
         }
