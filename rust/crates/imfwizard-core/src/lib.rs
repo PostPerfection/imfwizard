@@ -15,12 +15,14 @@ pub mod probe;
 pub mod transcode;
 
 // HDR/Color
+pub mod aces;
 pub mod dolby_vision;
 pub mod hdr;
 
 // Audio
 pub mod atmos;
 pub mod audio;
+pub mod audio_desc;
 pub mod channel_map;
 pub mod mca;
 
@@ -45,6 +47,7 @@ pub mod profiles;
 
 // Tools
 pub mod analytics;
+pub mod frame_compare;
 pub mod imp_diff;
 pub mod info;
 pub mod prores;
@@ -53,6 +56,7 @@ pub mod supplement;
 pub mod timecode;
 pub mod to_dcp;
 pub mod validate;
+pub mod xsd_validate;
 
 // Crypto
 pub mod hash;

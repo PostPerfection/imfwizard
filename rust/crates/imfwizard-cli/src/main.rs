@@ -126,6 +126,14 @@ enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Video MXF file for per-second bitrate analysis
+        #[arg(long)]
+        video: Option<PathBuf>,
+
+        /// Number of histogram buckets for bitrate distribution
+        #[arg(long, default_value = "20")]
+        histogram_buckets: usize,
     },
 
     /// Compute hash of a file
@@ -161,6 +169,14 @@ enum Commands {
     Validate {
         /// IMP directory to validate
         dir: String,
+
+        /// Also validate XML files against SMPTE ST 2067 XSD schemas
+        #[arg(long)]
+        xsd: bool,
+
+        /// Directory containing SMPTE XSD schema files
+        #[arg(long)]
+        schema_dir: Option<String>,
     },
 
     /// Measure audio loudness (EBU R128)
@@ -496,27 +512,47 @@ enum Commands {
         input: String,
     },
 
-    /// Check accessibility compliance (AD, HI, CC)
+    /// Check accessibility compliance or mix audio description with ducking
     #[command(name = "audio-desc")]
     AudioDesc {
-        /// Package directory
+        /// Package directory (for compliance check) or main audio file (for mix)
         #[arg(short, long)]
         input: String,
 
         /// Standard to check against (cvaa, eaa, aoda, ofcom)
         #[arg(short, long, default_value = "cvaa")]
         standard: String,
+
+        /// Audio description narration file to mix with main audio
+        #[arg(long)]
+        narration: Option<String>,
+
+        /// Output mixed audio file (required with --narration)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Duck level in dB (how much to reduce main audio during narration)
+        #[arg(long, default_value = "-12.0")]
+        duck_level: f64,
     },
 
     /// Compare two IMPs
     Compare {
-        /// First IMP directory
+        /// First IMP directory or video file
         #[arg(short, long)]
         a: String,
 
-        /// Second IMP directory
+        /// Second IMP directory or video file
         #[arg(short, long)]
         b: String,
+
+        /// Enable pixel-level PSNR/SSIM comparison (requires video MXF inputs)
+        #[arg(long)]
+        pixel: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Apply 3D LUT to image sequence
@@ -663,7 +699,7 @@ enum Commands {
         device: u32,
     },
 
-    /// ACES colour pipeline conversion
+    /// ACES colour pipeline conversion (IDT → RRT → ODT via ctlrender)
     Aces {
         /// Input image/video
         #[arg(short, long)]
@@ -673,9 +709,21 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Target space (acescg, aces, rec709, p3, xyz)
+        /// Target space (acescg, aces, rec709, p3, xyz) — used for simple conversion
         #[arg(short, long, default_value = "acescg")]
         target: String,
+
+        /// Input Device Transform CTL name (enables full IDT→RRT→ODT pipeline)
+        #[arg(long)]
+        idt: Option<String>,
+
+        /// Output Device Transform CTL name
+        #[arg(long)]
+        odt: Option<String>,
+
+        /// CTL transforms directory (defaults to system ACES install)
+        #[arg(long)]
+        ctl_dir: Option<String>,
     },
 
     /// Check regulatory compliance
@@ -1009,24 +1057,60 @@ fn main() {
             }
         }
 
-        Commands::Analytics { input, json } => match imfwizard_core::analytics::analyze_imp(&input)
-        {
-            Ok(a) => {
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&a).unwrap());
-                } else {
-                    println!("Total assets: {}", a.total_assets);
-                    println!("Video tracks: {}", a.video_tracks);
-                    println!("Audio tracks: {}", a.audio_tracks);
-                    println!("Subtitle tracks: {}", a.subtitle_tracks);
-                    println!("Total size: {} bytes", a.total_size_bytes);
+        Commands::Analytics {
+            input,
+            json,
+            video,
+            histogram_buckets,
+        } => {
+            match imfwizard_core::analytics::analyze_imp(&input) {
+                Ok(a) => {
+                    if json && video.is_none() {
+                        println!("{}", serde_json::to_string_pretty(&a).unwrap());
+                    } else if video.is_none() {
+                        println!("Total assets: {}", a.total_assets);
+                        println!("Video tracks: {}", a.video_tracks);
+                        println!("Audio tracks: {}", a.audio_tracks);
+                        println!("Subtitle tracks: {}", a.subtitle_tracks);
+                        println!("Total size: {} bytes", a.total_size_bytes);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
                 }
             }
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
+
+            if let Some(ref video_path) = video {
+                match imfwizard_core::analytics::analyze_bitrate(video_path, histogram_buckets) {
+                    Ok(bitrate) => {
+                        if json {
+                            println!("{}", serde_json::to_string_pretty(&bitrate).unwrap());
+                        } else {
+                            println!("\nBitrate Analysis:");
+                            println!("  Duration:    {:.2} s", bitrate.duration_seconds);
+                            println!("  Frames:      {}", bitrate.total_frames);
+                            println!("  Min:         {:.1} kbps", bitrate.min_kbps);
+                            println!("  Max:         {:.1} kbps", bitrate.max_kbps);
+                            println!("  Average:     {:.1} kbps", bitrate.avg_kbps);
+                            println!("  Std Dev:     {:.1} kbps", bitrate.stddev_kbps);
+                            println!("\n  Histogram:");
+                            for bucket in &bitrate.histogram {
+                                let bar = "#".repeat(bucket.count.min(50));
+                                println!(
+                                    "    {:>8.0}-{:<8.0} kbps [{:>4}] {}",
+                                    bucket.range_min_kbps, bucket.range_max_kbps, bucket.count, bar
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Bitrate analysis error: {e}");
+                        std::process::exit(1);
+                    }
+                }
             }
-        },
+        }
 
         Commands::Hash { file, algorithm } => {
             let algo = match algorithm.as_str() {
@@ -1081,7 +1165,11 @@ fn main() {
             }
         }
 
-        Commands::Validate { dir } => {
+        Commands::Validate {
+            dir,
+            xsd,
+            schema_dir,
+        } => {
             let result = imfwizard_core::validate::validate_imp(std::path::Path::new(&dir));
             if result.valid {
                 println!("IMP validation PASSED");
@@ -1098,7 +1186,39 @@ fn main() {
                 for w in &result.warnings {
                     eprintln!("  warning: {w}");
                 }
-                std::process::exit(1);
+                if !xsd {
+                    std::process::exit(1);
+                }
+            }
+
+            if xsd {
+                let sd = schema_dir.as_deref().map(std::path::Path::new);
+                match imfwizard_core::xsd_validate::validate_imp_schemas(
+                    std::path::Path::new(&dir),
+                    sd,
+                ) {
+                    Ok(results) => {
+                        let mut all_valid = true;
+                        for r in &results {
+                            if r.valid {
+                                println!("  XSD {}: PASS", r.file);
+                            } else {
+                                all_valid = false;
+                                eprintln!("  XSD {}: FAIL", r.file);
+                                for err in &r.errors {
+                                    eprintln!("    {err}");
+                                }
+                            }
+                        }
+                        if !all_valid {
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("XSD validation error: {e}");
+                        std::process::exit(1);
+                    }
+                }
             }
         }
 
@@ -1615,62 +1735,123 @@ fn main() {
             }
         }
 
-        Commands::AudioDesc { input, standard } => {
-            let std_enum = match standard.to_lowercase().as_str() {
-                "eaa" => postkit::accessibility::AccessibilityStandard::Eaa,
-                "aoda" => postkit::accessibility::AccessibilityStandard::Aoda,
-                "ofcom" => postkit::accessibility::AccessibilityStandard::Ofcom,
-                _ => postkit::accessibility::AccessibilityStandard::Cvaa,
-            };
-            let result =
-                postkit::accessibility::check_accessibility(std::path::Path::new(&input), std_enum);
-            println!(
-                "Accessibility ({standard}): {}",
-                if result.compliant { "PASS" } else { "FAIL" }
-            );
-            if !result.tracks_present.is_empty() {
-                println!("  Present: {:?}", result.tracks_present);
-            }
-            if !result.tracks_missing.is_empty() {
-                println!("  Missing: {:?}", result.tracks_missing);
-            }
-            for f in &result.findings {
-                println!("  [{:?}] {}", f.severity, f.description);
-            }
-            if !result.compliant {
-                std::process::exit(1)
-            };
-        }
-
-        Commands::Compare { a, b } => {
-            // Compare two IMPs by metadata
-            let info_a = imfwizard_core::info::inspect_imp(std::path::Path::new(&a));
-            let info_b = imfwizard_core::info::inspect_imp(std::path::Path::new(&b));
-            match (info_a, info_b) {
-                (Ok(ia), Ok(ib)) => {
-                    println!("IMP A: {} ({})", a, ia.title);
-                    println!(
-                        "  CPLs: {}, Duration: {} frames",
-                        ia.cpl_count, ia.duration_frames
-                    );
-                    println!("IMP B: {} ({})", b, ib.title);
-                    println!(
-                        "  CPLs: {}, Duration: {} frames",
-                        ib.cpl_count, ib.duration_frames
-                    );
-                    if ia.edit_rate != ib.edit_rate {
-                        println!("  DIFF: edit rate {} vs {}", ia.edit_rate, ib.edit_rate);
-                    }
-                    if ia.duration_frames != ib.duration_frames {
-                        println!(
-                            "  DIFF: duration {} vs {} frames",
-                            ia.duration_frames, ib.duration_frames
-                        );
+        Commands::AudioDesc {
+            input,
+            standard,
+            narration,
+            output,
+            duck_level,
+        } => {
+            if let Some(narration_path) = narration {
+                // Audio description mixing with ducking
+                let out = output.unwrap_or_else(|| {
+                    eprintln!("Error: --output is required when mixing audio description");
+                    std::process::exit(1);
+                });
+                match imfwizard_core::audio_desc::mix_audio_description(
+                    std::path::Path::new(&input),
+                    std::path::Path::new(&narration_path),
+                    std::path::Path::new(&out),
+                    duck_level,
+                    -30.0, // threshold
+                    20.0,  // attack ms
+                    200.0, // release ms
+                ) {
+                    Ok(()) => println!("Audio description mixed: {out}"),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
                     }
                 }
-                (Err(e), _) | (_, Err(e)) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
+            } else {
+                // Accessibility compliance check
+                let std_enum = match standard.to_lowercase().as_str() {
+                    "eaa" => postkit::accessibility::AccessibilityStandard::Eaa,
+                    "aoda" => postkit::accessibility::AccessibilityStandard::Aoda,
+                    "ofcom" => postkit::accessibility::AccessibilityStandard::Ofcom,
+                    _ => postkit::accessibility::AccessibilityStandard::Cvaa,
+                };
+                let result = postkit::accessibility::check_accessibility(
+                    std::path::Path::new(&input),
+                    std_enum,
+                );
+                println!(
+                    "Accessibility ({standard}): {}",
+                    if result.compliant { "PASS" } else { "FAIL" }
+                );
+                if !result.tracks_present.is_empty() {
+                    println!("  Present: {:?}", result.tracks_present);
+                }
+                if !result.tracks_missing.is_empty() {
+                    println!("  Missing: {:?}", result.tracks_missing);
+                }
+                for f in &result.findings {
+                    println!("  [{:?}] {}", f.severity, f.description);
+                }
+                if !result.compliant {
+                    std::process::exit(1)
+                };
+            }
+        }
+
+        Commands::Compare { a, b, pixel, json } => {
+            if pixel {
+                // Pixel-level PSNR/SSIM comparison
+                match imfwizard_core::frame_compare::compare_frames(
+                    std::path::Path::new(&a),
+                    std::path::Path::new(&b),
+                ) {
+                    Ok(result) => {
+                        if json {
+                            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        } else {
+                            println!("Frame Comparison: {} vs {}", a, b);
+                            println!("  Frames compared: {}", result.frames_compared);
+                            println!(
+                                "  PSNR (avg/min/max): {:.2} / {:.2} / {:.2} dB",
+                                result.avg_psnr, result.min_psnr, result.max_psnr
+                            );
+                            println!(
+                                "  SSIM (avg/min/max): {:.6} / {:.6} / {:.6}",
+                                result.avg_ssim, result.min_ssim, result.max_ssim
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // Metadata-level comparison
+                let info_a = imfwizard_core::info::inspect_imp(std::path::Path::new(&a));
+                let info_b = imfwizard_core::info::inspect_imp(std::path::Path::new(&b));
+                match (info_a, info_b) {
+                    (Ok(ia), Ok(ib)) => {
+                        println!("IMP A: {} ({})", a, ia.title);
+                        println!(
+                            "  CPLs: {}, Duration: {} frames",
+                            ia.cpl_count, ia.duration_frames
+                        );
+                        println!("IMP B: {} ({})", b, ib.title);
+                        println!(
+                            "  CPLs: {}, Duration: {} frames",
+                            ib.cpl_count, ib.duration_frames
+                        );
+                        if ia.edit_rate != ib.edit_rate {
+                            println!("  DIFF: edit rate {} vs {}", ia.edit_rate, ib.edit_rate);
+                        }
+                        if ia.duration_frames != ib.duration_frames {
+                            println!(
+                                "  DIFF: duration {} vs {} frames",
+                                ia.duration_frames, ib.duration_frames
+                            );
+                        }
+                    }
+                    (Err(e), _) | (_, Err(e)) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -2064,20 +2245,42 @@ fn main() {
             input,
             output,
             target,
+            idt,
+            odt,
+            ctl_dir,
         } => {
-            let target_space = parse_colour_space(&target);
-            let opts = postkit::colour::ColourConvertOptions {
-                input: PathBuf::from(&input),
-                output: PathBuf::from(&output),
-                source_space: postkit::colour::ColourSpace::Aces,
-                target_space,
-                lut_path: None,
-            };
-            match postkit::colour::convert_colour(&opts) {
-                Ok(()) => println!("ACES converted to {target}: {output}"),
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
+            if idt.is_some() || odt.is_some() {
+                // Full CTL pipeline: IDT → RRT → ODT
+                let opts = imfwizard_core::aces::AcesPipelineOptions {
+                    input: std::path::Path::new(&input),
+                    output: std::path::Path::new(&output),
+                    idt: idt.as_deref(),
+                    odt: odt.as_deref(),
+                    ctl_dir: ctl_dir.as_deref().map(std::path::Path::new),
+                };
+                match imfwizard_core::aces::run_aces_pipeline(&opts) {
+                    Ok(()) => println!("ACES pipeline complete: {output}"),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // Simple colour space conversion via postkit
+                let target_space = parse_colour_space(&target);
+                let opts = postkit::colour::ColourConvertOptions {
+                    input: PathBuf::from(&input),
+                    output: PathBuf::from(&output),
+                    source_space: postkit::colour::ColourSpace::Aces,
+                    target_space,
+                    lut_path: None,
+                };
+                match postkit::colour::convert_colour(&opts) {
+                    Ok(()) => println!("ACES converted to {target}: {output}"),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
