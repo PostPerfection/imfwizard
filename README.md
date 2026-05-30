@@ -304,6 +304,9 @@ imfwizard loudness /path/to/audio.wav
 
 ```bash
 imfwizard validate /path/to/imp/
+
+# With deep IMF conformance (requires Photon)
+PHOTON_JAR=/opt/photon/photon.jar imfwizard validate /path/to/imp/
 ```
 
 ### Display IMP info
