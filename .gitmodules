@@ -1,15 +1,4 @@
-[submodule "extern/asdcplib"]
-	path = extern/asdcplib
-	url = https://github.com/cinecert/asdcplib.git
-[submodule "extern/CLI11"]
-	path = extern/CLI11
-	url = https://github.com/CLIUtils/CLI11.git
-[submodule "extern/spdlog"]
-	path = extern/spdlog
-	url = https://github.com/gabime/spdlog.git
-[submodule "extern/dcpdoctor"]
-	path = extern/dcpdoctor
-	url = ../dcpdoctor
+
 [submodule "extern/postkit"]
 	path = extern/postkit
-        url = https://github.com/PostPerfection/postkit.git
+	url = https://github.com/PostPerfection/postkit.git

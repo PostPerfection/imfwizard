@@ -11,6 +11,7 @@ base64 = "0.22"
 dcpdoctor-core.workspace = true
 postkit.workspace = true
 quick-xml.workspace = true
+regex-lite = "0.1"
 serde.workspace = true
 serde_json.workspace = true
 sha1 = "0.10"

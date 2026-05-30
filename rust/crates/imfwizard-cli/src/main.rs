@@ -633,15 +633,22 @@ enum Commands {
         input: String,
     },
 
-    /// Wrap Dolby Atmos master into MXF
+    /// Wrap Dolby Atmos ADM BWF master into MXF
     Atmos {
-        /// Input Dolby Atmos .atmos master file
+        /// Input Dolby Atmos BWF file (with ADM axml chunk)
         #[arg(short, long)]
         input: String,
 
-        /// Output MXF file
+        /// Output directory for MXF and ADM sidecar
         #[arg(short, long)]
         output: String,
+    },
+
+    /// Check external tool dependencies
+    Doctor {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Preview via SDI output (Decklink/AJA)
@@ -1288,6 +1295,7 @@ fn main() {
             let config = imfwizard_core::rest_api::ApiConfig {
                 host: parts.first().unwrap_or(&"127.0.0.1").to_string(),
                 port: parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8081),
+                api_key: None,
             };
             if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
                 eprintln!("Error: {e}");
@@ -1908,27 +1916,21 @@ fn main() {
         }
 
         Commands::Atmos { input, output } => {
-            // Wrap Dolby Atmos .atmos master into IMF-compatible MXF
-            let status = std::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-i")
-                .arg(&input)
-                .arg("-c:a")
-                .arg("copy")
-                .arg("-f")
-                .arg("mxf")
-                .arg(&output)
-                .status();
-            match status {
-                Ok(s) if s.success() => println!("Atmos wrapped to MXF: {output}"),
-                Ok(s) => {
-                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
-                    std::process::exit(1);
-                }
-                Err(e) => {
-                    eprintln!("Failed to run ffmpeg: {e}");
-                    std::process::exit(1);
-                }
+            // Import Dolby Atmos ADM BWF into IMF-compatible MXF
+            let input_path = std::path::Path::new(&input);
+            let output_path = std::path::Path::new(&output);
+
+            let result = imfwizard_core::atmos::import_atmos(input_path, output_path);
+            if result.success {
+                println!(
+                    "Atmos import complete: {} beds, {} objects, {} channels",
+                    result.bed_count, result.object_count, result.total_channels
+                );
+                println!("  MXF: {}", result.mxf_output.display());
+                println!("  ADM sidecar: {}", result.adm_sidecar.display());
+            } else {
+                eprintln!("Atmos import failed: {}", result.error);
+                std::process::exit(1);
             }
         }
 
@@ -2030,6 +2032,19 @@ fn main() {
                     eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+
+        Commands::Doctor { json } => {
+            let result = imfwizard_core::tools::check_all_tools();
+            if json {
+                let out = serde_json::to_string_pretty(&result).unwrap_or_default();
+                println!("{out}");
+            } else {
+                print!("{}", imfwizard_core::tools::format_doctor_report(&result));
+            }
+            if result.required_missing > 0 {
+                std::process::exit(1);
             }
         }
     }

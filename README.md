@@ -69,11 +69,12 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Reference tone** — optional 1kHz WAV tone paired with visual pre-roll
 
 ### Integration & Extensibility
-- **REST API server** — HTTP interface for /create, /validate, /encode, /transcode, /jobs
+- **REST API server** — HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume
 - **Webhook notifications** — POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
 - **EDL/FCP XML import** — parse CMX 3600 EDL and Final Cut Pro XML timelines
 - **Plugin system** — discover and execute Python plugin scripts with pre/post hooks
 - **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via GStreamer decklinkvideosink
+- **Dependency management (`doctor`)** — check all external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
 - **Delivery presets** — Netflix, Disney+, Amazon, Apple TV+, Cinema 2K/4K, Broadcast, Archival
@@ -153,10 +154,11 @@ The CLI binary is fully self-contained (all dependencies statically linked). Ext
 #### Linux (Ubuntu/Debian)
 
 ```bash
-sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev
+sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
 # For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
 
-cd rust
+git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
+cd imfwizard/rust
 cargo build --release
 # Binary at rust/target/release/imfwizard
 ```
@@ -164,11 +166,10 @@ cargo build --release
 #### macOS
 
 ```bash
-brew install cmake pkg-config libxml2 openssl@3 xerces-c
+brew install pkg-config libxml2 openssl@3 xerces-c
 
 export OPENSSL_DIR=$(brew --prefix openssl@3)
 export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig"
-export CMAKE_PREFIX_PATH="$(brew --prefix libxml2);$(brew --prefix xerces-c)"
 
 cd rust
 cargo build --release
@@ -192,11 +193,20 @@ cargo build --release
 | Dependency | Purpose | Install |
 |-----------|---------|---------|
 | `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
+| `grk_compress` | JPEG 2000 encoding (Grok codec) | [grok.rocks](https://grok.rocks/) |
 | `mpv` | GUI preview player | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
+| `ctlrender` | ACES CTL transforms (IDT/RRT/ODT) | [GitHub](https://github.com/ampas/CTL) |
+| `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
+| `wkhtmltopdf` | PDF report generation | `apt install wkhtmltopdf` / [wkhtmltopdf.org](https://wkhtmltopdf.org/) |
+| `weasyprint` | PDF report generation (alternative) | `pip install weasyprint` |
+| `gst-inspect-1.0` | GStreamer (DeckLink SDI output) | `apt install gstreamer1.0-tools` / `brew install gstreamer` |
+| `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
 | Java + Photon | IMF validation via Netflix Photon | `apt install default-jre` / `brew install openjdk` |
 | AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+
+Use `imfwizard doctor` to check which tools are installed and which are missing.
 
 ### Docker
 
@@ -392,7 +402,30 @@ imfwizard preview -d /path/to/j2k/ -o /tmp/thumbs/ --strip
 # Start on port 9090 with API key auth
 imfwizard rest-api --port 9090 --api-key "my-secret" --max-jobs 8
 
-# Endpoints: GET /health, POST /create, POST /validate, POST /encode, POST /transcode, GET /jobs
+# Endpoints:
+#   GET  /api/v1/health        — health check
+#   POST /api/v1/create        — submit IMP creation job
+#   POST /api/v1/validate      — submit validation job
+#   POST /api/v1/encode        — submit encoding job
+#   POST /api/v1/transcode     — submit transcode job
+#   GET  /api/v1/jobs          — list all jobs
+#   GET  /api/v1/jobs/<id>     — job status
+#   DELETE /api/v1/jobs/<id>   — cancel job
+#   GET  /api/v1/profiles      — list delivery presets
+#   GET  /api/v1/tools         — dependency check
+#   POST /api/v1/pause         — pause job queue
+#   POST /api/v1/resume        — resume job queue
+#   GET  /metrics              — Prometheus metrics
+```
+
+### Dependency check (doctor)
+
+```bash
+# Check external tool availability
+imfwizard doctor
+
+# JSON output for CI/CD or scripting
+imfwizard doctor --json
 ```
 
 ### EDL import
@@ -530,12 +563,13 @@ imfwizard sdi-preview -i video.mxf --device 0
 imfwizard/
 ├── rust/                # Rust workspace
 │   ├── crates/
-│   │   ├── imfwizard-core/  # Core IMF creation library
-│   │   └── imfwizard-cli/   # CLI binary
+│   │   ├── imfwizard-core/  # Core library — packaging, encoding, tools, REST API, Atmos
+│   │   └── imfwizard-cli/   # CLI binary (imfwizard)
 │   └── Cargo.toml
 ├── gui/                 # Tauri 2 desktop application
 │   ├── src/             # Frontend (Vite + vanilla JS)
 │   └── src-tauri/       # Rust backend (plugin shell)
+├── tests/               # Integration tests
 └── docs/                # GitHub Pages site
 ```
 

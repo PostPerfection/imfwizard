@@ -25,20 +25,20 @@ namespace fs = std::filesystem;
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name)                                          \
-  do                                                        \
-  {                                                         \
-    tests_run++;                                            \
-    try                                                     \
-    {                                                       \
-      name();                                               \
-      tests_passed++;                                       \
-      spdlog::info("  {}... PASS", #name);                  \
-    }                                                       \
-    catch(const std::exception& e)                          \
-    {                                                       \
-      spdlog::error("  {}... FAIL: {}", #name, e.what());   \
-    }                                                       \
+#define TEST(name)                                        \
+  do                                                      \
+  {                                                       \
+    tests_run++;                                          \
+    try                                                   \
+    {                                                     \
+      name();                                             \
+      tests_passed++;                                     \
+      spdlog::info("  {}... PASS", #name);                \
+    }                                                     \
+    catch(const std::exception& e)                        \
+    {                                                     \
+      spdlog::error("  {}... FAIL: {}", #name, e.what()); \
+    }                                                     \
   } while(0)
 
 #define ASSERT(cond)                                        \
@@ -94,9 +94,12 @@ void test_sha1_base64()
 void test_sha1_nonexistent()
 {
   bool threw = false;
-  try {
+  try
+  {
     imfwizard::sha1_base64("/nonexistent_path_xyz");
-  } catch(const std::runtime_error&) {
+  }
+  catch(const std::runtime_error&)
+  {
     threw = true;
   }
   ASSERT(threw);
@@ -133,9 +136,12 @@ void test_encode_nonexistent()
   opts.input_dir = "/nonexistent_xyz";
   opts.output_dir = "/tmp/imfwizard_test_enc";
   bool threw = false;
-  try {
+  try
+  {
     imfwizard::encode_to_j2k(opts);
-  } catch(const std::exception&) {
+  }
+  catch(const std::exception&)
+  {
     threw = true;
   }
   ASSERT(threw);
@@ -444,7 +450,7 @@ void test_supplemental_nonexistent()
 void test_ffmpeg_available()
 {
   bool avail = imfwizard::ffmpeg_available();
-  if (system("which ffmpeg >/dev/null 2>&1") == 0)
+  if(system("which ffmpeg >/dev/null 2>&1") == 0)
     ASSERT(avail);
   else
     ASSERT(!avail);
@@ -453,7 +459,7 @@ void test_ffmpeg_available()
 void test_ffprobe_available()
 {
   bool avail = imfwizard::ffprobe_available();
-  if (system("which ffprobe >/dev/null 2>&1") == 0)
+  if(system("which ffprobe >/dev/null 2>&1") == 0)
     ASSERT(avail);
   else
     ASSERT(!avail);
@@ -523,10 +529,22 @@ void test_count_frames_with_files()
 {
   auto tmp = fs::temp_directory_path() / "imfwiz_test_count_frames";
   fs::create_directories(tmp);
-  { std::ofstream f(tmp / "frame_001.tiff"); f << "fake"; }
-  { std::ofstream f(tmp / "frame_002.tiff"); f << "fake"; }
-  { std::ofstream f(tmp / "frame_003.tiff"); f << "fake"; }
-  { std::ofstream f(tmp / "readme.txt"); f << "not a frame"; }
+  {
+    std::ofstream f(tmp / "frame_001.tiff");
+    f << "fake";
+  }
+  {
+    std::ofstream f(tmp / "frame_002.tiff");
+    f << "fake";
+  }
+  {
+    std::ofstream f(tmp / "frame_003.tiff");
+    f << "fake";
+  }
+  {
+    std::ofstream f(tmp / "readme.txt");
+    f << "not a frame";
+  }
   ASSERT(imfwizard::count_frames(tmp) == 3);
   fs::remove_all(tmp);
 }

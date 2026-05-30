@@ -20,20 +20,20 @@ using namespace imfwizard;
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name)                                          \
-  do                                                        \
-  {                                                         \
-    tests_run++;                                            \
-    try                                                     \
-    {                                                       \
-      name();                                               \
-      tests_passed++;                                       \
-      spdlog::info("  {}... PASS", #name);                  \
-    }                                                       \
-    catch(const std::exception& e)                          \
-    {                                                       \
-      spdlog::error("  {}... FAIL: {}", #name, e.what());   \
-    }                                                       \
+#define TEST(name)                                        \
+  do                                                      \
+  {                                                       \
+    tests_run++;                                          \
+    try                                                   \
+    {                                                     \
+      name();                                             \
+      tests_passed++;                                     \
+      spdlog::info("  {}... PASS", #name);                \
+    }                                                     \
+    catch(const std::exception& e)                        \
+    {                                                     \
+      spdlog::error("  {}... FAIL: {}", #name, e.what()); \
+    }                                                     \
   } while(0)
 
 #define ASSERT(cond)                                        \

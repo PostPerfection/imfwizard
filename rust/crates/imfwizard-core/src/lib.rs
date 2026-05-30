@@ -19,6 +19,7 @@ pub mod dolby_vision;
 pub mod hdr;
 
 // Audio
+pub mod atmos;
 pub mod audio;
 pub mod channel_map;
 pub mod mca;
@@ -34,6 +35,7 @@ pub mod job_queue;
 pub mod plugin;
 pub mod preferences;
 pub mod rest_api;
+pub mod tools;
 pub mod watch;
 pub mod webhook;
 

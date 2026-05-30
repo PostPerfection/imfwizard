@@ -626,8 +626,11 @@
             <div class="feature-icon" style="background: rgba(248,113,113,0.15);">📑</div>
             <h3>PDF QC Reports</h3>
             <p>Generate print-ready PDF quality control reports using wkhtmltopdf or weasyprint.</p>
-        </div>
-    </div>
+        </div>        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(74,222,128,0.15);">🩺</div>
+            <h3>Dependency Doctor</h3>
+            <p>Built-in <code>doctor</code> subcommand checks all external tool dependencies with version detection and JSON output for CI/CD.</p>
+        </div>    </div>
 </section>
 
 <section class="section" id="install">
@@ -639,14 +642,18 @@
         <div class="prereq"><span class="tag required">Required</span><span>Rust toolchain (1.85+)</span></div>
         <div class="prereq"><span class="tag required">Required</span><span>CMake (for asdcplib FFI build)</span></div>
         <div class="prereq"><span class="tag required">Required</span><span>OpenSSL, Xerces-C (for asdcplib)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>grok (J2K encode/decode, GPU and CPU)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>ffmpeg / ffprobe (transcode, loudness)</span></div>
+        <div class="prereq"><span class="tag required">Runtime</span><span>ffmpeg / ffprobe (transcode, loudness)</span></div>
+        <div class="prereq"><span class="tag required">Runtime</span><span>grk_compress (J2K encoding)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>dovi_tool (Dolby Vision RPU injection)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>ctlrender (ACES CTL transforms)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>Java + Netflix Photon (validation)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>Node.js + Rust (GUI build)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>xmllint / libxml2-utils (XSD schema validation)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>wkhtmltopdf or weasyprint (PDF reports)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>curl (webhook notifications)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>gst-inspect-1.0 (DeckLink SDI output)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>ascp (Aspera FASP high-speed transfer)</span></div>
     </div>
+    <p style="color: var(--text-tertiary); font-size: 0.85rem; margin-top: 1rem;">Run <code style="font-family:'JetBrains Mono',monospace;background:var(--bg-primary);padding:2px 6px;border-radius:4px;font-size:0.8rem;color:var(--cyan);">imfwizard doctor</code> to check which tools are installed.</p>
 
     <h3 style="color: var(--text-primary); margin: 2rem 0 1rem;">Build Steps</h3>
     <div class="install-steps">
@@ -658,12 +665,12 @@
         <div class="install-step">
             <div class="step-num">2</div>
             <h4>Build CLI</h4>
-            <p><code>cd imfwizard && mkdir build && cd build && cmake .. && make -j$(nproc)</code></p>
+            <p><code>cd imfwizard/rust && cargo build --release</code></p>
         </div>
         <div class="install-step">
             <div class="step-num">3</div>
             <h4>Run Tests</h4>
-            <p><code>ctest</code> in the build directory to verify everything works.</p>
+            <p><code>cargo test</code> in the rust directory to verify everything works.</p>
         </div>
         <div class="install-step">
             <div class="step-num">4</div>
@@ -799,7 +806,13 @@
 <span class="cmd">$</span> ./imfwizard target-convert <span class="flag">-i</span> <span class="val">video.mov</span> <span class="flag">-o</span> <span class="val">video_4k.mov</span> <span class="flag">-t</span> <span class="val">4k-scope</span><br>
 <br>
 <span class="comment"># Burn subtitles into video</span><br>
-<span class="cmd">$</span> ./imfwizard burn-in <span class="flag">-i</span> <span class="val">video.mp4</span> <span class="flag">-s</span> <span class="val">subs.srt</span> <span class="flag">-o</span> <span class="val">burned.mp4</span>
+<span class="cmd">$</span> ./imfwizard burn-in <span class="flag">-i</span> <span class="val">video.mp4</span> <span class="flag">-s</span> <span class="val">subs.srt</span> <span class="flag">-o</span> <span class="val">burned.mp4</span><br>
+<br>
+<span class="comment"># Check external tool dependencies</span><br>
+<span class="cmd">$</span> ./imfwizard doctor<br>
+<br>
+<span class="comment"># JSON output for CI/CD</span><br>
+<span class="cmd">$</span> ./imfwizard doctor <span class="flag">--json</span>
         </code>
     </div>
 </section>
