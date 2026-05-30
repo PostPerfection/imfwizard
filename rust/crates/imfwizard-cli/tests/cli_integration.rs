@@ -12,7 +12,7 @@ fn version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("imfwizard").and(predicate::str::contains("1.0.")));
+        .stdout(predicate::str::contains("imfwizard").and(predicate::str::contains("0.1.0")));
 }
 
 #[test]
