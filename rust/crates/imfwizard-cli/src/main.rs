@@ -782,6 +782,16 @@ enum BatchAction {
 }
 
 fn main() {
+    // Windows debug builds overflow the default 1MB stack due to large clap
+    // derive enum (many subcommands with args). Spawn with 8MB stack.
+    let thread = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(run)
+        .expect("failed to spawn main thread");
+    thread.join().unwrap();
+}
+
+fn run() {
     std::panic::set_hook(Box::new(|info| {
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
             (*s).to_string()
