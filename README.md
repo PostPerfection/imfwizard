@@ -576,8 +576,8 @@ imfwizard/
 └── docs/                # GitHub Pages site
 ```
 
-IMF Wizard shares common functionality with [DCP Wizard](https://github.com/DcpDoctor/dcpwizard)
-via the [postkit](https://github.com/DcpDoctor/postkit) library (encoding, transcoding, hashing,
+IMF Wizard shares common functionality with [DCP Wizard](https://github.com/PostPerfection/dcpwizard)
+via the [postkit](https://github.com/PostPerfection/postkit) library (encoding, transcoding, hashing,
 job queue, preferences, REST API, watch folders, and more).
 
 ## License
