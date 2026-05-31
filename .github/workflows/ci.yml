@@ -52,6 +52,13 @@ jobs:
           $env:VCPKG_BUILD_TYPE="release"
           vcpkg install libxml2 openssl xerces-c --triplet x64-windows
 
+      - name: Set vcpkg env (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "OPENSSL_DIR=C:\vcpkg\installed\x64-windows" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=C:\vcpkg\installed\x64-windows\lib" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=C:\vcpkg\installed\x64-windows\include" >> $env:GITHUB_ENV
+
       - name: Build
         working-directory: rust
         run: cargo build --release
