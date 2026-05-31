@@ -73,7 +73,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Webhook notifications** — POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
 - **EDL/FCP XML import** — parse CMX 3600 EDL and Final Cut Pro XML timelines
 - **Plugin system** — discover and execute Python plugin scripts with pre/post hooks
-- **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via GStreamer decklinkvideosink
+- **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via mpv DeckLink output
 - **Dependency management (`doctor`)** — check all external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
@@ -83,9 +83,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Job queue daemon** — background processing with Unix socket / Windows named pipe IPC
 - **Watch folder** — auto-IMP creation when files appear
 - **EDL/AAF conform** — import CMX3600 edit decisions to auto-build CPL timelines
-- **S3 cloud upload** — push completed IMPs to AWS S3
-- **Aspera FASP** — high-speed delivery via IBM Aspera
-- **Partial restore** — extract tracks/segments from existing IMPs back to raw files
+
 
 ### Comparison & Analysis
 - **IMF package diff** — compare two IMPs and show track/segment changes
@@ -93,9 +91,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **OTIOZ import** — import OpenTimelineIO zip bundles with timeline-to-CPL conversion
 
 ### Distributed & Advanced
-- **Multi-node render** — distribute J2K encoding across multiple machines (coordinator + worker mode)
-- **KDM generation** — generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
-- **Dolby Vision Profile 8.1** — HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
 - **Prometheus metrics** — `/metrics` endpoint on REST API for monitoring (jobs, frames, bytes, uptime)
 - **Shell tab completion** — bash, zsh, and fish completion scripts (`imfwizard completions --bash`)
 
@@ -201,10 +196,8 @@ cargo build --release
 | `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
 | `wkhtmltopdf` | PDF report generation | `apt install wkhtmltopdf` / [wkhtmltopdf.org](https://wkhtmltopdf.org/) |
 | `weasyprint` | PDF report generation (alternative) | `pip install weasyprint` |
-| `gst-inspect-1.0` | GStreamer (DeckLink SDI output) | `apt install gstreamer1.0-tools` / `brew install gstreamer` |
-| `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
+| `mpv` | GUI preview player and SDI output (DeckLink) | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | Java + Photon | IMF validation via Netflix Photon | `apt install default-jre` / `brew install openjdk` |
-| AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 
 Use `imfwizard doctor` to check which tools are installed and which are missing.
 
@@ -547,17 +540,11 @@ imfwizard retime -i subs.srt -o subs_24.srt --src-fps-num 24000 --src-fps-den 10
 ### SDI output (Blackmagic DeckLink)
 
 ```bash
-# List available DeckLink devices
-imfwizard sdi-preview --list-devices
+# Play content out over SDI on device 0 (via mpv DeckLink output)
+imfwizard sdi-preview -i /path/to/imp/ --device 0
 
-# Play J2K frames out over SDI on device 0 at 24fps
-imfwizard sdi-preview -i /path/to/j2k_frames/ --device 0 --fps-num 24
-
-# Play with embedded audio, loop, UHD mode
-imfwizard sdi-preview -i /path/to/j2k/ --audio mix.wav --loop --width 3840 --height 2160
-
-# Play from MXF directly
-imfwizard sdi-preview -i video.mxf --device 0
+# Play from MXF directly on device 1
+imfwizard sdi-preview -i video.mxf --device 1
 ```
 
 ## Architecture
