@@ -73,7 +73,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Webhook notifications** — POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
 - **EDL/FCP XML import** — parse CMX 3600 EDL and Final Cut Pro XML timelines
 - **Plugin system** — discover and execute Python plugin scripts with pre/post hooks
-- **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via GStreamer decklinkvideosink
+- **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via mpv DeckLink output
 - **Dependency management (`doctor`)** — check all external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
@@ -93,7 +93,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **OTIOZ import** — import OpenTimelineIO zip bundles with timeline-to-CPL conversion
 
 ### Distributed & Advanced
-- **Multi-node render** — distribute J2K encoding across multiple machines (coordinator + worker mode)
 - **KDM generation** — generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
 - **Dolby Vision Profile 8.1** — HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
 - **Prometheus metrics** — `/metrics` endpoint on REST API for monitoring (jobs, frames, bytes, uptime)

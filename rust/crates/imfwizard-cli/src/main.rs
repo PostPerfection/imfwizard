@@ -759,6 +759,72 @@ enum Commands {
         #[arg(short, long)]
         text: String,
     },
+
+    /// Generate a SMPTE 430-1 Key Delivery Message (KDM)
+    Kdm {
+        /// CPL UUID to target
+        #[arg(long)]
+        cpl_id: String,
+
+        /// Content title for the KDM
+        #[arg(long)]
+        content_title: String,
+
+        /// Recipient certificate PEM file
+        #[arg(long)]
+        cert: PathBuf,
+
+        /// Output KDM XML file
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Validity start (ISO 8601 or "now")
+        #[arg(long, default_value = "now")]
+        valid_from: String,
+
+        /// Validity end (ISO 8601 or duration like "2 weeks")
+        #[arg(long, default_value = "2 weeks")]
+        valid_to: String,
+
+        /// KDM formulation (modified-transitional-1, dci-any, dci-specific)
+        #[arg(long, default_value = "modified-transitional-1")]
+        formulation: String,
+    },
+
+    /// Extract/restore tracks from an IMP back to raw essence files
+    Restore {
+        /// Input IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output directory for extracted raw files
+        #[arg(short, long)]
+        output: String,
+
+        /// Extract only video tracks
+        #[arg(long)]
+        video_only: bool,
+
+        /// Extract only audio tracks
+        #[arg(long)]
+        audio_only: bool,
+    },
+
+    /// Convert Dolby Vision profile (e.g., profile 5 → profile 8.1)
+    #[command(name = "dv-convert")]
+    DvConvert {
+        /// Input HEVC file with RPU
+        #[arg(short, long)]
+        input: String,
+
+        /// Output file
+        #[arg(short, long)]
+        output: String,
+
+        /// Target DV profile (8.1, 8.4)
+        #[arg(long, default_value = "8.1")]
+        target_profile: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1956,31 +2022,71 @@ fn run() {
             let mut tracker = postkit::version_tracker::VersionTracker::new();
             let db_path = PathBuf::from(&input).join(".imfwizard_deliveries.db");
             tracker.open(&db_path);
+
+            let delivery_method = if destination.starts_with("s3://") {
+                "s3"
+            } else if destination.starts_with("aspera://") || destination.starts_with("fasp://") {
+                "aspera"
+            } else {
+                "rsync"
+            };
+
             let record = postkit::version_tracker::DeliveryRecord {
                 package_uuid: String::new(),
                 title: String::new(),
                 version: String::from("1"),
                 destination: destination.clone(),
-                delivery_method: String::from("rsync"),
+                delivery_method: delivery_method.to_string(),
                 timestamp: String::new(),
                 verified: false,
             };
             tracker.record(&record);
-            // Copy the IMP to destination
-            let status = std::process::Command::new("rsync")
-                .arg("-av")
-                .arg("--progress")
-                .arg(format!("{}/", input))
-                .arg(&destination)
-                .status();
+
+            let status = match delivery_method {
+                "s3" => {
+                    println!("Uploading to S3: {destination}");
+                    std::process::Command::new("aws")
+                        .arg("s3")
+                        .arg("sync")
+                        .arg(&input)
+                        .arg(&destination)
+                        .arg("--no-progress")
+                        .status()
+                }
+                "aspera" => {
+                    let remote = destination
+                        .strip_prefix("aspera://")
+                        .or_else(|| destination.strip_prefix("fasp://"))
+                        .unwrap_or(&destination);
+                    println!("Delivering via Aspera FASP: {remote}");
+                    std::process::Command::new("ascp")
+                        .arg("-QT")
+                        .arg("-l")
+                        .arg("1000m")
+                        .arg("-r")
+                        .arg(&input)
+                        .arg(remote)
+                        .status()
+                }
+                _ => std::process::Command::new("rsync")
+                    .arg("-av")
+                    .arg("--progress")
+                    .arg(format!("{}/", input))
+                    .arg(&destination)
+                    .status(),
+            };
+
             match status {
                 Ok(s) if s.success() => println!("Delivered to {destination}"),
                 Ok(s) => {
-                    eprintln!("rsync exited with code {}", s.code().unwrap_or(-1));
+                    eprintln!(
+                        "{delivery_method} exited with code {}",
+                        s.code().unwrap_or(-1)
+                    );
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Failed to run rsync: {e}");
+                    eprintln!("Failed to run {delivery_method}: {e}");
                     std::process::exit(1);
                 }
             }
@@ -2503,6 +2609,163 @@ fn run() {
             }
             if result.required_missing > 0 {
                 std::process::exit(1);
+            }
+        }
+
+        Commands::Kdm {
+            cpl_id,
+            content_title,
+            cert,
+            output,
+            valid_from,
+            valid_to,
+            formulation,
+        } => {
+            let config = postkit::certificate::KdmConfig {
+                cpl_id,
+                content_title,
+                recipient_cert_file: cert,
+                output_file: output.clone(),
+                valid_from,
+                valid_to,
+                formulation,
+            };
+            match postkit::certificate::generate_kdm(&config) {
+                Ok(()) => println!("KDM written to {}", output.display()),
+                Err(e) => {
+                    eprintln!("Error generating KDM: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Restore {
+            input,
+            output,
+            video_only,
+            audio_only,
+        } => {
+            let input_path = PathBuf::from(&input);
+            let output_path = PathBuf::from(&output);
+            std::fs::create_dir_all(&output_path).unwrap_or_default();
+
+            let mxf_files: Vec<PathBuf> = std::fs::read_dir(&input_path)
+                .unwrap_or_else(|e| {
+                    eprintln!("Cannot read IMP directory: {e}");
+                    std::process::exit(1);
+                })
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("mxf"))
+                })
+                .collect();
+
+            if mxf_files.is_empty() {
+                eprintln!("No MXF files found in {input}");
+                std::process::exit(1);
+            }
+
+            let mut extracted = 0u32;
+            for mxf in &mxf_files {
+                let stem = mxf.file_stem().unwrap_or_default().to_string_lossy();
+                let track_dir = output_path.join(stem.as_ref());
+                std::fs::create_dir_all(&track_dir).unwrap_or_default();
+
+                // Use asdcp-unwrap to extract essence from MXF
+                let status = std::process::Command::new("asdcp-unwrap")
+                    .arg(mxf)
+                    .arg("-d")
+                    .arg(&track_dir)
+                    .status();
+
+                match status {
+                    Ok(s) if s.success() => {
+                        // Check if we should filter by type
+                        let has_j2c = std::fs::read_dir(&track_dir)
+                            .map(|rd| {
+                                rd.filter_map(|e| e.ok()).any(|e| {
+                                    e.path()
+                                        .extension()
+                                        .and_then(|x| x.to_str())
+                                        .is_some_and(|x| x == "j2c")
+                                })
+                            })
+                            .unwrap_or(false);
+                        let has_wav = std::fs::read_dir(&track_dir)
+                            .map(|rd| {
+                                rd.filter_map(|e| e.ok()).any(|e| {
+                                    e.path()
+                                        .extension()
+                                        .and_then(|x| x.to_str())
+                                        .is_some_and(|x| x == "wav" || x == "pcm")
+                                })
+                            })
+                            .unwrap_or(false);
+
+                        if (video_only && !has_j2c) || (audio_only && !has_wav) {
+                            // Remove the track dir if it doesn't match the filter
+                            let _ = std::fs::remove_dir_all(&track_dir);
+                            continue;
+                        }
+
+                        println!("Extracted {}", mxf.display());
+                        extracted += 1;
+                    }
+                    Ok(s) => {
+                        eprintln!(
+                            "asdcp-unwrap failed for {} (exit {})",
+                            mxf.display(),
+                            s.code().unwrap_or(-1)
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to run asdcp-unwrap: {e}");
+                        eprintln!("Install asdcplib tools or ensure asdcp-unwrap is in PATH");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            println!("Restored {extracted} track(s) to {output}");
+        }
+
+        Commands::DvConvert {
+            input,
+            output,
+            target_profile,
+        } => {
+            let profile_arg = match target_profile.as_str() {
+                "8.1" => "--profile",
+                "8.4" => "--profile",
+                other => {
+                    eprintln!("Unsupported target profile: {other} (supported: 8.1, 8.4)");
+                    std::process::exit(1);
+                }
+            };
+            let status = std::process::Command::new("dovi_tool")
+                .arg("convert")
+                .arg(profile_arg)
+                .arg(&target_profile)
+                .arg("-i")
+                .arg(&input)
+                .arg("-o")
+                .arg(&output)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    println!("Converted to Dolby Vision profile {target_profile}: {output}");
+                }
+                Ok(s) => {
+                    eprintln!("dovi_tool exited with code {}", s.code().unwrap_or(-1));
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Failed to run dovi_tool: {e}");
+                    eprintln!("Install dovi_tool: https://github.com/quietvoid/dovi_tool/releases");
+                    std::process::exit(1);
+                }
             }
         }
     }
