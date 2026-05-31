@@ -2736,34 +2736,22 @@ fn run() {
             output,
             target_profile,
         } => {
-            let profile_arg = match target_profile.as_str() {
-                "8.1" => "--profile",
-                "8.4" => "--profile",
+            let mode = match target_profile.as_str() {
+                "8.1" => postkit::dolby_vision::DvMode::Mode2,
+                "8.4" => postkit::dolby_vision::DvMode::Mode5,
                 other => {
                     eprintln!("Unsupported target profile: {other} (supported: 8.1, 8.4)");
                     std::process::exit(1);
                 }
             };
-            let status = std::process::Command::new("dovi_tool")
-                .arg("convert")
-                .arg(profile_arg)
-                .arg(&target_profile)
-                .arg("-i")
-                .arg(&input)
-                .arg("-o")
-                .arg(&output)
-                .status();
-            match status {
-                Ok(s) if s.success() => {
+            let input_path = std::path::Path::new(&input);
+            let output_path = std::path::Path::new(&output);
+            match postkit::dolby_vision::convert_dv_mode(input_path, output_path, mode) {
+                Ok(()) => {
                     println!("Converted to Dolby Vision profile {target_profile}: {output}");
                 }
-                Ok(s) => {
-                    eprintln!("dovi_tool exited with code {}", s.code().unwrap_or(-1));
-                    std::process::exit(1);
-                }
                 Err(e) => {
-                    eprintln!("Failed to run dovi_tool: {e}");
-                    eprintln!("Install dovi_tool: https://github.com/quietvoid/dovi_tool/releases");
+                    eprintln!("DV conversion failed: {e}");
                     std::process::exit(1);
                 }
             }
