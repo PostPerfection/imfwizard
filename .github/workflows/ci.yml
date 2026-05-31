@@ -56,6 +56,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          echo "VCPKG_ROOT=C:/vcpkg" >> $GITHUB_ENV
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows" >> $GITHUB_ENV
           echo "OPENSSL_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $GITHUB_ENV
