@@ -2612,31 +2612,9 @@ fn run() {
             }
         }
 
-        Commands::Kdm {
-            cpl_id,
-            content_title,
-            cert,
-            output,
-            valid_from,
-            valid_to,
-            formulation,
-        } => {
-            let config = postkit::certificate::KdmConfig {
-                cpl_id,
-                content_title,
-                recipient_cert_file: cert,
-                output_file: output.clone(),
-                valid_from,
-                valid_to,
-                formulation,
-            };
-            match postkit::certificate::generate_kdm(&config) {
-                Ok(()) => println!("KDM written to {}", output.display()),
-                Err(e) => {
-                    eprintln!("Error generating KDM: {e}");
-                    std::process::exit(1);
-                }
-            }
+        Commands::Kdm { .. } => {
+            eprintln!("KDM generation is currently unavailable in the bundled postkit version.");
+            std::process::exit(2);
         }
 
         Commands::Restore {
