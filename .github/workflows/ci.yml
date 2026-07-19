@@ -115,5 +115,12 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Build CLI sidecar
+        working-directory: rust
+        run: |
+          cargo build --release -p imfwizard-cli
+          TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
+          cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
+
       - name: Check Tauri backend
         run: cargo check --manifest-path gui/src-tauri/Cargo.toml
