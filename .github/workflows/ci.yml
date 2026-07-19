@@ -85,8 +85,9 @@ jobs:
           ./rust/target/release/imfwizard --help
           ./rust/target/release/imfwizard doctor --json || true
 
+      # linux only: the script uses grep -P, which macOS BSD grep lacks
       - name: CLI flags test
-        if: runner.os != 'Windows'
+        if: runner.os == 'Linux'
         run: bash tests/cli_flags_test.sh ./rust/target/release/imfwizard
 
   gui:
