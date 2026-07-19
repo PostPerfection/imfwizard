@@ -1,16 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[allow(unused_imports)]
 use tauri::Manager;
 
 mod pipeline;
-#[cfg(unix)]
 mod preview_server;
-#[cfg(not(unix))]
-mod preview_server_stub;
 mod timeline_cmd;
-#[cfg(not(unix))]
-use preview_server_stub as preview_server;
 
 /// Fork a parent process that waits for the app to exit, then unconditionally
 /// restores terminal settings. This handles WebKitGTK child processes that

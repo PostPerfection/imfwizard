@@ -21,16 +21,19 @@ STAGING_DIR="${BUILD_DIR}/staging"
 
 echo "=== Building IMF Wizard for macOS ==="
 
-# Build CLI
-cmake -B build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_TESTING=OFF \
-  -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-cmake --build build --parallel
+# Build CLI (universal)
+cd rust
+cargo build --release --target aarch64-apple-darwin -p imfwizard-cli
+cargo build --release --target x86_64-apple-darwin -p imfwizard-cli
+lipo -create \
+  target/aarch64-apple-darwin/release/imfwizard \
+  target/x86_64-apple-darwin/release/imfwizard \
+  -output target/release/imfwizard-universal
+cd ..
 
 # Build GUI (Tauri)
 cd gui
-npm ci
+pnpm install --frozen-lockfile
 cd src-tauri
 cargo build --release --target aarch64-apple-darwin
 cargo build --release --target x86_64-apple-darwin
@@ -48,7 +51,7 @@ mkdir -p "${STAGING_DIR}/${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${STAGING_DIR}/${APP_BUNDLE}/Contents/Resources"
 
 # Copy binaries
-cp build/imfwizard "${STAGING_DIR}/${APP_BUNDLE}/Contents/MacOS/"
+cp rust/target/release/imfwizard-universal "${STAGING_DIR}/${APP_BUNDLE}/Contents/MacOS/imfwizard"
 cp gui/src-tauri/target/release/imfwizard-gui-universal \
    "${STAGING_DIR}/${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 

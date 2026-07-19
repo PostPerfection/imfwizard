@@ -85,6 +85,10 @@ jobs:
           ./rust/target/release/imfwizard --help
           ./rust/target/release/imfwizard doctor --json || true
 
+      - name: CLI flags test
+        if: runner.os != 'Windows'
+        run: bash tests/cli_flags_test.sh ./rust/target/release/imfwizard
+
   gui:
     runs-on: ubuntu-24.04
     steps:
@@ -122,5 +126,31 @@ jobs:
           TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
           cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
 
-      - name: Check Tauri backend
-        run: cargo check --manifest-path gui/src-tauri/Cargo.toml
+      - name: Test Tauri backend
+        working-directory: gui/src-tauri
+        run: cargo test
+
+      - name: Clippy Tauri backend
+        working-directory: gui/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Format check Tauri backend
+        working-directory: gui/src-tauri
+        run: cargo fmt -- --check
+
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@cargo-deny
+
+      # advisories left out until the pinned dcpdoctor-core/postkit deps move off
+      # quick-xml 0.37 (RUSTSEC dos advisories). don't add an ignore, it hides the vuln.
+      - name: Cargo deny
+        working-directory: rust
+        run: cargo deny check bans licenses sources

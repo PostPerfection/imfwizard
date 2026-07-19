@@ -3,14 +3,13 @@ targets = []
 all-features = true
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 yanked = "deny"
-notice = "warn"
 
 [licenses]
-unlicensed = "deny"
 allow = [
+    # imfwizard, postkit and dcpdoctor are all GPL-3.0-or-later themselves
+    "GPL-3.0-or-later",
     "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
@@ -20,8 +19,9 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "OpenSSL",
+    "CC0-1.0",  # notify
+    "MPL-2.0",  # option-ext
 ]
-copyleft = "deny"
 
 [[licenses.clarify]]
 name = "ring"

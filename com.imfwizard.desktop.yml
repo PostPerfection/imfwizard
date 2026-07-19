@@ -35,17 +35,20 @@ modules:
         sha256: d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed
 
   - name: imfwizard
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DCMAKE_BUILD_TYPE=Release
-      - -DBUILD_TESTING=OFF
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --manifest-path rust/Cargo.toml -p imfwizard-cli
+      - install -Dm755 rust/target/release/imfwizard /app/bin/imfwizard
+      - install -Dm644 debian/imfwizard.desktop /app/share/applications/com.imfwizard.desktop.desktop
+      # flatpak only exports files named after the app id, so the icon key has to match
+      - sed -i 's/^Icon=.*/Icon=com.imfwizard.desktop/' /app/share/applications/com.imfwizard.desktop.desktop
+      - install -Dm644 gui/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.imfwizard.desktop.png
     sources:
       - type: dir
         path: .
-    post-install:
-      - install -Dm644 docs/com.imfwizard.desktop.desktop /app/share/applications/com.imfwizard.desktop.desktop
-      - install -Dm644 docs/com.imfwizard.desktop.metainfo.xml /app/share/metainfo/com.imfwizard.desktop.metainfo.xml
-      - install -Dm644 gui/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.imfwizard.desktop.png
+    build-options:
+      env:
+        CARGO_HOME: /run/build/imfwizard/.cargo
 
   - name: imfwizard-gui
     buildsystem: simple

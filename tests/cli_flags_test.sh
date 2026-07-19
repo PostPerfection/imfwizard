@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-BINARY="${1:-./build/imfwizard}"
+BINARY="${1:-./rust/target/release/imfwizard}"
 JS_FILE="gui/src/main.js"
 FAILURES=0
 
