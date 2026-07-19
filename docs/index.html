@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IMF Wizard &mdash; Open Source IMF Package Creator</title>
+    <title>IMF Wizard: Open Source IMF Package Creator</title>
     <meta name="description" content="Open-source Interoperable Master Format (IMF) package creator. Create App#2E IMPs from JPEG 2000 and WAV. CLI tool and desktop GUI with dark theme.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -422,7 +422,7 @@
 
 <section class="hero">
     <h1>Create IMF Packages<br>with <span>IMF Wizard</span></h1>
-    <p>Open-source CLI tool and desktop GUI for creating standards-compliant Interoperable Master Format packages. Supports encoding, transcoding, Dolby Vision, ACES, subtitles, loudness metering, and Netflix Photon validation.</p>
+    <p>Version 1.1 creates App 2E packages with complete CPL, PKL, and ASSETMAP references, base64 hashes, and validated picture constraints.</p>
     <div class="hero-buttons">
         <a href="https://github.com/PostPerfection/imfwizard" class="btn btn-primary">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -445,7 +445,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🎬</div>
             <h3>Image Encoding Pipeline</h3>
-            <p>Accept DPX, TIFF, EXR, PNG, BMP, JPEG input &mdash; auto-encode to JPEG 2000 via grok (GPU and CPU).</p>
+            <p>Accept supported video input and encode 12-bit JPEG 2000 through OpenJPEG. Incompatible App 2E dimensions fail before packaging.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🎞️</div>
@@ -595,7 +595,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🎬</div>
             <h3>Slate &amp; Leader Generation</h3>
-            <p>Countdown, SMPTE bars, academy leader, text slate, and black — as TIFF image sequences with optional tone.</p>
+            <p>Countdown, SMPTE bars, academy leader, text slate, and black, as TIFF image sequences with optional tone.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⏩</div>
@@ -643,11 +643,11 @@
         <div class="prereq"><span class="tag required">Required</span><span>CMake (for asdcplib FFI build)</span></div>
         <div class="prereq"><span class="tag required">Required</span><span>OpenSSL, Xerces-C (for asdcplib)</span></div>
         <div class="prereq"><span class="tag required">Runtime</span><span>ffmpeg / ffprobe (transcode, loudness)</span></div>
-        <div class="prereq"><span class="tag required">Runtime</span><span>grk_compress (J2K encoding)</span></div>
+        <div class="prereq"><span class="tag required">Built in</span><span>OpenJPEG (J2K encoding)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>dovi_tool (Dolby Vision RPU injection)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>ctlrender (ACES CTL transforms)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>Java + Netflix Photon (validation)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>Node.js + Rust (GUI build)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>Node.js 24 + pnpm 11 + Rust (GUI build)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>xmllint / libxml2-utils (XSD schema validation)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>wkhtmltopdf or weasyprint (PDF reports)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>GStreamer + DeckLink plugin (SDI output)</span></div>
@@ -675,7 +675,7 @@
         <div class="install-step">
             <div class="step-num">4</div>
             <h4>GUI (Optional)</h4>
-            <p><code>cd gui && npm install && npm run tauri dev</code></p>
+            <p><code>cd gui &amp;&amp; pnpm install &amp;&amp; pnpm tauri dev</code></p>
         </div>
     </div>
 </section>
@@ -759,7 +759,7 @@
         </div>
         <div class="gui-feature">
             <h4>🔤 Burn-In</h4>
-            <p>Burn SRT/TTML subtitles permanently into video — for festival screeners.</p>
+            <p>Burn SRT/TTML subtitles permanently into video, for festival screeners.</p>
         </div>
         <div class="gui-feature">
             <h4>🚀 Batch Deliver</h4>
@@ -819,11 +819,11 @@
 
 <section class="section" id="compare">
     <h2 class="section-title">How Does IMF Wizard Compare?</h2>
-    <p class="section-subtitle">Feature comparison with easyDCP IMF Studio &mdash; the industry-standard commercial tool.</p>
+    <p class="section-subtitle">Feature comparison with easyDCP IMF Studio: the industry-standard commercial tool.</p>
 
     <div style="display:flex; gap:24px; justify-content:center; margin-bottom:1.5rem;">
-        <span class="compare-price free">IMF Wizard &mdash; Free &amp; Open Source</span>
-        <span class="compare-price paid">easyDCP IMF Studio &mdash; &euro;138/mo or &euro;2,998</span>
+        <span class="compare-price free">IMF Wizard: Free &amp; Open Source</span>
+        <span class="compare-price paid">easyDCP IMF Studio: &euro;138/mo or &euro;2,998</span>
     </div>
 
     <div style="overflow-x:auto;">
@@ -887,7 +887,7 @@
 
 <section class="section" id="roadmap">
     <h2 class="section-title">Capabilities</h2>
-    <p class="section-subtitle">Comprehensive IMF workflow &mdash; from raw footage to validated delivery.</p>
+    <p class="section-subtitle">Comprehensive IMF workflow: from raw footage to validated delivery.</p>
 
     <div class="roadmap">
         <div class="roadmap-item active">

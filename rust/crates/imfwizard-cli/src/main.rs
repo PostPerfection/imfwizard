@@ -921,25 +921,14 @@ fn run() {
                         .unwrap_or(false);
 
                 if is_video_file {
-                    use postkit::encode::{StreamEncodeOptions, find_compressor, stream_encode};
+                    use postkit::grok_encoder::{CompressParams, EncodeProgress};
                     use std::sync::Arc;
                     use std::sync::atomic::AtomicBool;
-
-                    let (compressor_path, lib_dir) = match find_compressor() {
-                        Some(c) => c,
-                        None => {
-                            eprintln!(
-                                "Error: grk_compress not found (required for video encoding)"
-                            );
-                            std::process::exit(1);
-                        }
-                    };
 
                     let j2k_out = output.join("j2k");
                     let _ = std::fs::create_dir_all(&j2k_out);
 
                     tracing::info!("Detected video file — encoding to J2K");
-                    tracing::info!("Compressor: {}", compressor_path.display());
 
                     // Probe for actual frame rate
                     let probed = imfwizard_core::probe::probe_video(&video_path);
@@ -955,45 +944,62 @@ fn run() {
                             info.fps_num,
                             info.fps_den
                         );
+                        if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_picture(
+                            info.width,
+                            info.height,
+                            12,
+                        ) {
+                            eprintln!("Error: {error}");
+                            std::process::exit(1);
+                        }
                     }
 
-                    let opts = StreamEncodeOptions {
-                        input: video_path.clone(),
-                        output_dir: j2k_out.clone(),
-                        compression_ratio: 10.0,
-                        num_resolutions: 6,
-                        codeblock_size: 32,
-                        progression: "CPRL".to_string(),
-                        fps: actual_fps,
-                        compressor_path,
-                        lib_dir,
-                    };
-
                     let cancel = Arc::new(AtomicBool::new(false));
-                    let pause = Arc::new(AtomicBool::new(false));
                     let cancel_clone = cancel.clone();
                     let _ = ctrlc::set_handler(move || {
                         cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     });
 
-                    let result = stream_encode(&opts, &cancel, &pause, |p| {
-                        let percent = if p.total_frames > 0 {
-                            (p.frame as f64 / p.total_frames as f64) * 100.0
-                        } else {
-                            0.0
-                        };
-                        eprint!(
-                            "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
-                            p.frame, p.total_frames, percent, p.fps
-                        );
-                    });
+                    tracing::info!("Compressor: OpenJPEG");
+                    let params = CompressParams {
+                        compression_ratio: 10.0,
+                        frame_rate: actual_fps as u16,
+                        ..CompressParams::default()
+                    };
+                    let (width, height, total_frames) = probed
+                        .as_ref()
+                        .map(|info| (info.width, info.height, info.total_frames as u64))
+                        .unwrap_or((2048, 1080, 0));
+                    let result = postkit::openjpeg_encoder::encode_video_pipeline_opj(
+                        &video_path,
+                        &j2k_out,
+                        &params,
+                        total_frames,
+                        width,
+                        height,
+                        &cancel,
+                        |p: EncodeProgress| {
+                            let percent = if p.total_frames > 0 {
+                                (p.frames_encoded as f64 / p.total_frames as f64) * 100.0
+                            } else {
+                                0.0
+                            };
+                            eprint!(
+                                "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+                                p.frames_encoded, p.total_frames, percent, p.fps
+                            );
+                        },
+                    );
+                    let encode_success = result.success;
+                    let encode_error = result.error;
+                    let frames_encoded = result.frames_encoded;
                     eprintln!();
 
-                    if !result.success {
-                        eprintln!("Error: Encode failed: {}", result.error);
+                    if !encode_success {
+                        eprintln!("Error: Encode failed: {encode_error}");
                         std::process::exit(1);
                     }
-                    tracing::info!("Encoded {} frames", result.frames_encoded);
+                    tracing::info!("Encoded {frames_encoded} frames");
 
                     // Auto-demux audio
                     let audio_files = if let Some(a) = audio {

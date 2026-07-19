@@ -18,9 +18,12 @@ pub fn write_cpl(
     writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
     writeln!(
         f,
-        r#"<CompositionPlaylist xmlns="http://www.smpte-ra.org/schemas/2067-3/2016">"#
+        r#"<CompositionPlaylist xmlns="http://www.smpte-ra.org/schemas/2067-3/2016" xmlns:cc="http://www.smpte-ra.org/schemas/2067-2/2016">"#
     )?;
     writeln!(f, "  <Id>urn:uuid:{cpl_uuid}</Id>")?;
+    writeln!(f, "  <IssueDate>{}</IssueDate>", crate::issue_date())?;
+    writeln!(f, "  <Issuer>IMF Wizard</Issuer>")?;
+    writeln!(f, "  <Creator>IMF Wizard</Creator>")?;
     writeln!(
         f,
         "  <ContentTitle>{}</ContentTitle>",
@@ -36,6 +39,12 @@ pub fn write_cpl(
         }
     )?;
     writeln!(f, "  <EditRate>{fps_num} {fps_den}</EditRate>")?;
+    writeln!(f, "  <ExtensionProperties>")?;
+    writeln!(
+        f,
+        "    <cc:ApplicationIdentification>http://www.smpte-ra.org/schemas/2067-21/2016</cc:ApplicationIdentification>"
+    )?;
+    writeln!(f, "  </ExtensionProperties>")?;
     writeln!(f, "  <SegmentList>")?;
     writeln!(f, "    <Segment>")?;
     writeln!(f, "      <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4())?;
@@ -141,4 +150,24 @@ fn xml_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_cpl_identifies_app_2e() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CPL_test.xml");
+        let opts = ImpOptions {
+            title: "Test".into(),
+            ..ImpOptions::default()
+        };
+
+        write_cpl(&path, "cpl", &opts, &[]).unwrap();
+        let xml = std::fs::read_to_string(path).unwrap();
+        assert!(xml.contains("<IssueDate>"));
+        assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/schemas/2067-21/2016</cc:ApplicationIdentification>"));
+    }
 }

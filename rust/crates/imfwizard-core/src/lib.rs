@@ -65,6 +65,12 @@ pub mod signature;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub(crate) fn issue_date() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC 3339 formatting supports UTC timestamps")
+}
+
 /// Essence type for MXF wrapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EssenceType {

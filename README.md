@@ -4,7 +4,9 @@
 
 [Documentation](https://postperfection.github.io/imfwizard/)
 
-Interoperable Master Format (IMF) package creator — CLI tool and desktop GUI. Written in Rust.
+Interoperable Master Format (IMF) package creator, CLI tool and desktop GUI. Written in Rust.
+
+Version 1.1 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
 
 ## Overview
 
@@ -16,123 +18,123 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Packaging & Wrapping
 - **Original Version IMP creation** from J2K + WAV
 - **Supplemental IMP** creation with segment replacement
-- **Multi-CPL IMP** — multiple compositions sharing a track pool
+- **Multi-CPL IMP**, multiple compositions sharing a track pool
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
-- **Closed captions** — SCC (CEA-608) and SRT → TTML conversion
-- **Accessibility tracks** — Audio Description, Hearing Impaired, Sign Language, Commentary
+- **Closed captions**, SCC (CEA-608) and SRT → TTML conversion
+- **Accessibility tracks**, Audio Description, Hearing Impaired, Sign Language, Commentary
 - **Multi-language audio** with RFC 5646 language tags and MCA labels
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** and optional **XML-DSIG signing**
 
 ### Encoding & Transcoding
-- **Image encoding pipeline** — DPX, TIFF, EXR, PNG, BMP, JPEG → JPEG 2000 (via grok, GPU and CPU)
-- **ProRes / DNxHR / H.264 / H.265 transcoding** — video files → image sequence → J2K (via ffmpeg)
-- **ProRes IMF packaging** — create App#2E IMPs directly from ProRes .mov files
-- **ACES (App#5) colour management** — ACES transforms during encode
+- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via OpenJPEG
+- **ProRes / DNxHR / H.264 / H.265 transcoding**, video files → image sequence → J2K (via ffmpeg)
+- **ProRes IMF packaging**, create App#2E IMPs directly from ProRes .mov files
+- **ACES (App#5) colour management**, ACES transforms during encode
 - **Scale / crop / letterbox** options for resolution adaptation
-- **Subtitle burn-in** — permanently render SRT/TTML/SCC into video frames (for festivals)
+- **Subtitle burn-in**, permanently render SRT/TTML/SCC into video frames (for festivals)
 
 ### HDR & Advanced
 - **Dolby Vision 4.0** RPU metadata injection (via dovi_tool)
 - **HDR10+ dynamic metadata** injection (via hdr10plus_tool)
-- **HDR/WCG color metadata** — ST 2067-21 (PQ, HLG, BT.2020, P3-D65)
+- **HDR/WCG color metadata**, ST 2067-21 (PQ, HLG, BT.2020, P3-D65)
 - **IAB / Dolby Atmos** immersive audio packaging
 
 ### Quality Control
-- **Loudness analysis** — EBU R128 / ATSC A/85 measurement and normalization
-- **Photon validation** — validate output IMPs using Netflix Photon
-- **Native XSD schema validation** — validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
-- **Frame-level QC** — per-frame bitrate analysis with over/under-budget detection
+- **Loudness analysis**, EBU R128 / ATSC A/85 measurement and normalization
+- **Photon validation**, validate output IMPs using Netflix Photon
+- **Native XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
+- **Frame-level QC**, per-frame bitrate analysis with over/under-budget detection
 - **VMAF / PSNR / SSIM** quality metrics (via ffmpeg libvmaf)
-- **Bitrate analytics** — per-second throughput, histogram, standard deviation (JSON output for dashboards)
+- **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
 - **QC HTML report** generation
-- **PDF QC report** — generate PDF QC reports using wkhtmltopdf or weasyprint
-- **Frame-accurate comparison** — PSNR/SSIM comparison between two IMPs with diff report
-- **Platform compliance checking** — validate against Netflix, Disney+, Amazon, Apple, Cinema, Broadcast specs
-- **Detailed QC report** — HTML report with package info, track listing, loudness, thumbnails
+- **PDF QC report**, generate PDF QC reports using wkhtmltopdf or weasyprint
+- **Frame-accurate comparison**, PSNR/SSIM comparison between two IMPs with diff report
+- **Platform compliance checking**, validate against Netflix, Disney+, Amazon, Apple, Cinema, Broadcast specs
+- **Detailed QC report**, HTML report with package info, track listing, loudness, thumbnails
 
 ### Color & Audio Processing
-- **3D LUT application** — apply .cube LUTs to image sequences via ffmpeg lut3d
-- **ACES pipeline** — full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
-- **Audio description mixing** — combine AD narration with main mix using ducking
-- **MCA label generation** — SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
-- **Dolby Atmos ADM BWF import** — import ADM Broadcast Wave Format to IAB MXF
-- **A/V sync detection & repair** — detect audio/video drift and auto-fix with trim/pad
+- **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
+- **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
+- **Audio description mixing**, combine AD narration with main mix using ducking
+- **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
+- **Dolby Atmos ADM BWF import**, import ADM Broadcast Wave Format to IAB MXF
+- **A/V sync detection & repair**, detect audio/video drift and auto-fix with trim/pad
 
 ### Versioning & Annotation
-- **CPL annotation** — add revision notes and author metadata to CPL XML
-- **Partial version creation** — create supplemental IMPs replacing specific reel segments
-- **Subtitle retiming** — convert TTML/SRT timing between framerates (24→25, 23.976→24, etc.)
+- **CPL annotation**, add revision notes and author metadata to CPL XML
+- **Partial version creation**, create supplemental IMPs replacing specific reel segments
+- **Subtitle retiming**, convert TTML/SRT timing between framerates (24→25, 23.976→24, etc.)
 
 ### Pre-roll & Leaders
-- **Slate generation** — countdown, SMPTE bars, academy leader, text slate, black (as TIFF image sequence)
-- **Reference tone** — optional 1kHz WAV tone paired with visual pre-roll
+- **Slate generation**, countdown, SMPTE bars, academy leader, text slate, black (as TIFF image sequence)
+- **Reference tone**, optional 1kHz WAV tone paired with visual pre-roll
 
 ### Integration & Extensibility
-- **REST API server** — HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume
-- **Webhook notifications** — POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
-- **EDL/FCP XML import** — parse CMX 3600 EDL and Final Cut Pro XML timelines
-- **Plugin system** — discover and execute Python plugin scripts with pre/post hooks
-- **SDI output (Blackmagic DeckLink)** — play J2K frames over HD-SDI via mpv DeckLink output
-- **Dependency management (`doctor`)** — check all external tool dependencies with version detection and JSON output
+- **REST API server**, HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume
+- **Webhook notifications**, POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
+- **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro XML timelines
+- **Plugin system**, discover and execute Python plugin scripts with pre/post hooks
+- **SDI output (Blackmagic DeckLink)**, play J2K frames over HD-SDI via mpv DeckLink output
+- **Dependency management (`doctor`)**, check all external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
-- **Delivery presets** — Netflix, Disney+, Amazon, Apple TV+, Cinema 2K/4K, Broadcast, Archival
-- **Batch delivery** — create IMPs for multiple platforms in a single pass
-- **IMF-to-DCP conversion** — repackage IMF as Digital Cinema Package for theatrical playback
-- **Job queue daemon** — background processing with Unix socket / Windows named pipe IPC
-- **Watch folder** — auto-IMP creation when files appear
-- **EDL/AAF conform** — import CMX3600 edit decisions to auto-build CPL timelines
-- **S3 cloud upload** — push completed IMPs to AWS S3
-- **Aspera FASP** — high-speed delivery via IBM Aspera
-- **Partial restore** — extract tracks/segments from existing IMPs back to raw files
+- **Delivery presets**, Netflix, Disney+, Amazon, Apple TV+, Cinema 2K/4K, Broadcast, Archival
+- **Batch delivery**, create IMPs for multiple platforms in a single pass
+- **IMF-to-DCP conversion**, repackage IMF as Digital Cinema Package for theatrical playback
+- **Job queue daemon**, background processing with Unix socket / Windows named pipe IPC
+- **Watch folder**, auto-IMP creation when files appear
+- **EDL/AAF conform**, import CMX3600 edit decisions to auto-build CPL timelines
+- **S3 cloud upload**, push completed IMPs to AWS S3
+- **Aspera FASP**, high-speed delivery via IBM Aspera
+- **Partial restore**, extract tracks/segments from existing IMPs back to raw files
 
 ### Comparison & Analysis
-- **IMF package diff** — compare two IMPs and show track/segment changes
-- **MXF playback/probe** — inspect MXF files, extract frames, generate thumbnails (via GStreamer/ffmpeg)
-- **OTIOZ import** — import OpenTimelineIO zip bundles with timeline-to-CPL conversion
+- **IMF package diff**, compare two IMPs and show track/segment changes
+- **MXF playback/probe**, inspect MXF files, extract frames, generate thumbnails (via GStreamer/ffmpeg)
+- **OTIOZ import**, import OpenTimelineIO zip bundles with timeline-to-CPL conversion
 
 ### Distributed & Advanced
-- **KDM generation** — generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
-- **Dolby Vision Profile 8.1** — HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
-- **Prometheus metrics** — `/metrics` endpoint on REST API for monitoring (jobs, frames, bytes, uptime)
-- **Shell tab completion** — bash, zsh, and fish completion scripts (`imfwizard completions --bash`)
+- **KDM generation**, generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
+- **Dolby Vision Profile 8.1**, HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
+- **Prometheus metrics**, `/metrics` endpoint on REST API for monitoring (jobs, frames, bytes, uptime)
+- **Shell tab completion**, bash, zsh, and fish completion scripts (`imfwizard completions --bash`)
 
 ### Desktop GUI (Tauri 2)
 - **Dark theme** by default with optional light mode toggle
 - **Drag-and-drop** file import (WAV, TTML, image sequences)
-- **Timeline editor** — visual segment arrangement for multi-track compositions
-- **Asset browser** — browse IMP track files with thumbnails and metadata inspection
-- **Keyboard shortcuts** — full shortcut overlay (`?` key), tab navigation (1-9), preview controls
-- **Progress bars** — real-time progress tracking for encode/wrap jobs
-- **Supplemental IMP wizard** — guided workflow for versioned supplements
-- **Loudness metering panel** — EBU R128 / ATSC A/85 compliance badges
-- **IMP metadata editor** — edit CPL annotations, content versioning, locale info
-- **Delivery preset selector** — one-click configuration for major platforms
-- **Preview player** — mpv-based frame-accurate playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
-- **Multi-CPL composition tabs** — switch, add, remove compositions in a single IMP
-- **Target resolution conversion panel** — scale/crop to 2K/4K scope/flat/full
-- **GPU encoding toggle** — enable/disable grok GPU acceleration
-- **Bitrate analytics dashboard** — per-second charts, histogram, statistics
-- **Subtitle burn-in** — GUI for hardcoding subs into video
-- **Batch delivery panel** — deliver to multiple platforms with checkboxes
-- **IMF-to-DCP converter** — one-click conversion for cinema delivery
-- **Job queue manager** — submit, monitor, cancel background jobs
-- **Progress notifications** — system notifications when jobs complete
-- **Recent projects** — quick access to previously created IMPs
+- **Timeline editor**, visual segment arrangement for multi-track compositions
+- **Asset browser**, browse IMP track files with thumbnails and metadata inspection
+- **Keyboard shortcuts**, full shortcut overlay (`?` key), tab navigation (1-9), preview controls
+- **Progress bars**, real-time progress tracking for encode/wrap jobs
+- **Supplemental IMP wizard**, guided workflow for versioned supplements
+- **Loudness metering panel**, EBU R128 / ATSC A/85 compliance badges
+- **IMP metadata editor**, edit CPL annotations, content versioning, locale info
+- **Delivery preset selector**, one-click configuration for major platforms
+- **Preview player**, mpv-based frame-accurate playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
+- **Multi-CPL composition tabs**, switch, add, remove compositions in a single IMP
+- **Target resolution conversion panel**, scale/crop to 2K/4K scope/flat/full
+- **GPU encoding toggle**, enable/disable grok GPU acceleration
+- **Bitrate analytics dashboard**, per-second charts, histogram, statistics
+- **Subtitle burn-in**, GUI for hardcoding subs into video
+- **Batch delivery panel**, deliver to multiple platforms with checkboxes
+- **IMF-to-DCP converter**, one-click conversion for cinema delivery
+- **Job queue manager**, submit, monitor, cancel background jobs
+- **Progress notifications**, system notifications when jobs complete
+- **Recent projects**, quick access to previously created IMPs
 
 ### Packaging & Deployment
-- **Docker image** — headless batch processing (`docker run imfwizard create ...`)
-- **Flatpak** — Linux desktop distribution via Flathub
-- **macOS .dmg** — universal binary with code signing and notarization
+- **Docker image**, headless batch processing (`docker run imfwizard create ...`)
+- **Flatpak**, Linux desktop distribution via Flathub
+- **macOS .dmg**, universal binary with code signing and notarization
 - REST API mode with Prometheus-compatible `/metrics` endpoint
 
 ### Mastering & Compliance
-- **DCDM creation** — Digital Cinema Distribution Master (X'Y'Z' 12/16-bit) as intermediate format
-- **Forensic watermarking** — NexGuard, Civolution, or internal spatial watermark embedding
-- **Trailer packaging** — ratings cards (MPAA/BBFC/FSK), green/red band, countdown leaders
-- **Content version tracker** — SQLite database tracking version history and delivery destinations
-- **Accessibility compliance** — verify AD/HI/SL tracks against CVAA, EAA, AODA, Ofcom standards
+- **DCDM creation**, Digital Cinema Distribution Master (X'Y'Z' 12/16-bit) as intermediate format
+- **Forensic watermarking**, NexGuard, Civolution, or internal spatial watermark embedding
+- **Trailer packaging**, ratings cards (MPAA/BBFC/FSK), green/red band, countdown leaders
+- **Content version tracker**, SQLite database tracking version history and delivery destinations
+- **Accessibility compliance**, verify AD/HI/SL tracks against CVAA, EAA, AODA, Ofcom standards
 
 ## Installation
 
@@ -221,9 +223,9 @@ The desktop app uses a single-window layout with sidebar navigation, inspired by
 
 ```bash
 cd gui
-npm install
-npm run tauri dev      # development mode
-npm run tauri build    # production build
+pnpm install
+pnpm tauri dev
+pnpm tauri build
 ```
 
 The built app will be in `gui/src-tauri/target/release/bundle/`.
@@ -256,7 +258,7 @@ imfwizard create \
 ### Create an IMP from non-J2K images (auto-encode)
 
 ```bash
-# Input can be DPX, TIFF, EXR, PNG — automatically encoded to J2K
+# Input can be DPX, TIFF, EXR, PNG, automatically encoded to J2K
 imfwizard create \
   --title "My Film" \
   --video /path/to/dpx_frames/ \
@@ -405,19 +407,19 @@ imfwizard preview -d /path/to/j2k/ -o /tmp/thumbs/ --strip
 imfwizard rest-api --port 9090 --api-key "my-secret" --max-jobs 8
 
 # Endpoints:
-#   GET  /api/v1/health        — health check
-#   POST /api/v1/create        — submit IMP creation job
-#   POST /api/v1/validate      — submit validation job
-#   POST /api/v1/encode        — submit encoding job
-#   POST /api/v1/transcode     — submit transcode job
-#   GET  /api/v1/jobs          — list all jobs
-#   GET  /api/v1/jobs/<id>     — job status
-#   DELETE /api/v1/jobs/<id>   — cancel job
-#   GET  /api/v1/profiles      — list delivery presets
-#   GET  /api/v1/tools         — dependency check
-#   POST /api/v1/pause         — pause job queue
-#   POST /api/v1/resume        — resume job queue
-#   GET  /metrics              — Prometheus metrics
+#   GET  /api/v1/health       , health check
+#   POST /api/v1/create       , submit IMP creation job
+#   POST /api/v1/validate     , submit validation job
+#   POST /api/v1/encode       , submit encoding job
+#   POST /api/v1/transcode    , submit transcode job
+#   GET  /api/v1/jobs         , list all jobs
+#   GET  /api/v1/jobs/<id>    , job status
+#   DELETE /api/v1/jobs/<id>  , cancel job
+#   GET  /api/v1/profiles     , list delivery presets
+#   GET  /api/v1/tools        , dependency check
+#   POST /api/v1/pause        , pause job queue
+#   POST /api/v1/resume       , resume job queue
+#   GET  /metrics             , Prometheus metrics
 ```
 
 ### Dependency check (doctor)
@@ -530,7 +532,7 @@ imfwizard slate --type countdown -o /pre_roll/ --width 1920 --height 1080
 imfwizard slate --type bars -o /bars/ --tone --tone-output reference.wav
 
 # Text slate
-imfwizard slate --type slate -o /slate/ --title "MY FILM — Final Master"
+imfwizard slate --type slate -o /slate/ --title "MY FILM, Final Master"
 ```
 
 ### Subtitle retiming
@@ -565,7 +567,7 @@ imfwizard sdi-preview -i video.mxf --device 0
 imfwizard/
 ├── rust/                # Rust workspace
 │   ├── crates/
-│   │   ├── imfwizard-core/  # Core library — packaging, encoding, tools, REST API, Atmos
+│   │   ├── imfwizard-core/  # Core library, packaging, encoding, tools, REST API, Atmos
 │   │   └── imfwizard-cli/   # CLI binary (imfwizard)
 │   └── Cargo.toml
 ├── gui/                 # Tauri 2 desktop application
@@ -581,4 +583,4 @@ job queue, preferences, REST API, watch folders, and more).
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE)
+GPL-3.0, see [LICENSE](LICENSE)

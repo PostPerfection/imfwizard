@@ -36,6 +36,19 @@ pub struct ImpResult {
 
 /// Create an IMP (Interoperable Master Package).
 pub fn create_imp(opts: &ImpOptions) -> ImpResult {
+    let Some(j2k_dir) = opts.j2k_dir.as_ref() else {
+        return ImpResult {
+            error: "A J2K input directory is required".into(),
+            ..Default::default()
+        };
+    };
+    if !j2k_dir.is_dir() {
+        return ImpResult {
+            error: format!("J2K input directory not found: {}", j2k_dir.display()),
+            ..Default::default()
+        };
+    }
+
     // 1. Create output directory
     if let Err(e) = std::fs::create_dir_all(&opts.output_dir) {
         return ImpResult {
@@ -47,8 +60,6 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
     // 2. Wrap J2K codestreams into MXF track file
     let mut track_files = Vec::new();
-    if let Some(j2k_dir) = &opts.j2k_dir
-        && j2k_dir.is_dir()
     {
         let video_uuid = uuid::Uuid::new_v4().to_string();
         let mxf_path = opts.output_dir.join(format!("VIDEO_{video_uuid}.mxf"));
@@ -87,11 +98,13 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             duration: opts.duration,
         };
         let wrap_result = crate::mxf_wrap::wrap_mxf(&wrap_opts);
-        if wrap_result.success {
-            track_files.push(wrap_result.track_file);
-        } else {
-            tracing::warn!("Audio wrap failed: {}", wrap_result.error);
+        if !wrap_result.success {
+            return ImpResult {
+                error: format!("Audio wrap failed: {}", wrap_result.error),
+                ..Default::default()
+            };
         }
+        track_files.push(wrap_result.track_file);
     }
 
     // 3. Generate UUIDs
@@ -110,7 +123,8 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
     // 5. Write PKL
     let pkl_path = opts.output_dir.join(format!("PKL_{pkl_uuid}.xml"));
-    if let Err(e) = crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpl_uuid, &cpl_path) {
+    if let Err(e) = crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpl_uuid, &cpl_path, &track_files)
+    {
         return ImpResult {
             success: false,
             error: format!("Failed to write PKL: {e}"),
@@ -120,7 +134,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
     // 6. Write ASSETMAP
     let am_path = opts.output_dir.join("ASSETMAP.xml");
-    if let Err(e) = crate::assetmap::write_assetmap(&am_path, &pkl_uuid, &cpl_uuid) {
+    if let Err(e) = crate::assetmap::write_assetmap(&am_path, &pkl_uuid, &cpl_uuid, &track_files) {
         return ImpResult {
             success: false,
             error: format!("Failed to write ASSETMAP: {e}"),
@@ -144,7 +158,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_imp() {
+    fn test_create_imp_requires_picture_input() {
         let dir = tempfile::tempdir().unwrap();
         let opts = ImpOptions {
             output_dir: dir.path().to_path_buf(),
@@ -155,28 +169,14 @@ mod tests {
             ..Default::default()
         };
         let result = create_imp(&opts);
-        assert!(result.success, "create_imp failed: {}", result.error);
-        assert!(result.cpl_path.exists());
-        assert!(result.pkl_path.exists());
-        assert!(result.assetmap_path.exists());
-
-        // Verify CPL contains title
-        let cpl_xml = std::fs::read_to_string(&result.cpl_path).unwrap();
-        assert!(cpl_xml.contains("Test Feature"));
-        assert!(cpl_xml.contains("CompositionPlaylist"));
-
-        // Verify PKL references CPL
-        let pkl_xml = std::fs::read_to_string(&result.pkl_path).unwrap();
-        assert!(pkl_xml.contains("PackingList"));
-
-        // Verify ASSETMAP exists and is valid XML
-        let am_xml = std::fs::read_to_string(&result.assetmap_path).unwrap();
-        assert!(am_xml.contains("AssetMap"));
+        assert!(!result.success);
+        assert!(result.error.contains("J2K input directory is required"));
     }
 
     #[test]
     fn test_create_imp_xml_escape() {
         let dir = tempfile::tempdir().unwrap();
+        let cpl_path = dir.path().join("CPL_test.xml");
         let opts = ImpOptions {
             output_dir: dir.path().to_path_buf(),
             title: "Test & <Special> \"Film\"".into(),
@@ -184,9 +184,8 @@ mod tests {
             fps_den: 1,
             ..Default::default()
         };
-        let result = create_imp(&opts);
-        assert!(result.success);
-        let cpl_xml = std::fs::read_to_string(&result.cpl_path).unwrap();
+        crate::cpl::write_cpl(&cpl_path, "test", &opts, &[]).unwrap();
+        let cpl_xml = std::fs::read_to_string(cpl_path).unwrap();
         assert!(cpl_xml.contains("Test &amp; &lt;Special&gt; &quot;Film&quot;"));
     }
 }

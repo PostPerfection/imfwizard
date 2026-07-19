@@ -31,28 +31,29 @@ fn make_writer_info() -> asdcplib::WriterInfo {
 }
 
 fn compute_hash_and_size(path: &std::path::Path) -> (String, u64) {
-    use sha1::Digest;
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(_) => return (String::new(), 0),
+    let Ok(hash) = postkit::hash::hash_file(path, postkit::hash::HashAlgorithm::Sha1) else {
+        return (String::new(), 0);
     };
-    let hash = sha1::Sha1::digest(&data);
-    (
-        hash.iter().map(|b| format!("{b:02x}")).collect::<String>(),
-        data.len() as u64,
-    )
+    let size = std::fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    (hash.base64, size)
 }
 
-fn collect_input_files(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| format!("cannot read input dir {}: {e}", dir.display()))?
+fn collect_input_files(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(path)
+        .map_err(|e| format!("cannot read input {}: {e}", path.display()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.is_file())
         .collect();
     files.sort();
     if files.is_empty() {
-        return Err(format!("no files found in {}", dir.display()));
+        return Err(format!("no files found in {}", path.display()));
     }
     Ok(files)
 }
@@ -91,15 +92,31 @@ fn wrap_j2k(opts: &MxfWrapOptions) -> MxfWrapResult {
         }
     }
 
+    let Some(header) = frames
+        .first()
+        .and_then(|frame| postkit::j2k::parse_j2k_header(frame))
+    else {
+        return MxfWrapResult {
+            error: format!("invalid JPEG 2000 codestream: {}", files[0].display()),
+            ..Default::default()
+        };
+    };
+    if let Err(error) = validate_app2e_picture(header.width, header.height, header.bit_depth) {
+        return MxfWrapResult {
+            error,
+            ..Default::default()
+        };
+    }
+
     let info = make_writer_info();
     let desc = asdcplib::jp2k::PictureDescriptor {
         edit_rate: asdcplib::Rational::new(opts.edit_rate_num as i32, opts.edit_rate_den as i32),
         sample_rate: asdcplib::Rational::new(opts.edit_rate_num as i32, opts.edit_rate_den as i32),
-        stored_width: 2048,
-        stored_height: 1080,
-        aspect_ratio: asdcplib::Rational::new(2048, 1080),
+        stored_width: header.width,
+        stored_height: header.height,
+        aspect_ratio: asdcplib::Rational::new(header.width as i32, header.height as i32),
         container_duration: frames.len() as u32,
-        component_count: 3,
+        component_count: header.num_components,
     };
 
     let mut writer = asdcplib::jp2k::MxfWriter::new();
@@ -143,6 +160,21 @@ fn wrap_j2k(opts: &MxfWrapOptions) -> MxfWrapResult {
             duration: frames.len() as u64,
         },
     }
+}
+
+pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<(), String> {
+    let valid_resolutions = [(1920, 1080), (2048, 1080), (3840, 2160), (4096, 2160)];
+    if !valid_resolutions.contains(&(width, height)) {
+        return Err(format!(
+            "App 2E requires 1920x1080, 2048x1080, 3840x2160, or 4096x2160 picture essence, got {width}x{height}"
+        ));
+    }
+    if !matches!(bit_depth, 8 | 10 | 12) {
+        return Err(format!(
+            "App 2E requires 8, 10, or 12-bit picture essence, got {bit_depth}-bit"
+        ));
+    }
+    Ok(())
 }
 
 fn wrap_pcm(opts: &MxfWrapOptions) -> MxfWrapResult {
@@ -419,5 +451,17 @@ fn wrap_atmos(opts: &MxfWrapOptions) -> MxfWrapResult {
             size,
             duration: frames.len() as u64,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app2e_picture_constraints_reject_invalid_essence() {
+        assert!(validate_app2e_picture(1920, 1080, 12).is_ok());
+        assert!(validate_app2e_picture(2048, 872, 12).is_err());
+        assert!(validate_app2e_picture(2048, 1080, 16).is_err());
     }
 }

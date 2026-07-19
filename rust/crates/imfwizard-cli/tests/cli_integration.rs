@@ -8,11 +8,10 @@ fn cmd() -> Command {
 
 #[test]
 fn version_flag() {
-    cmd()
-        .arg("--version")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("imfwizard").and(predicate::str::contains("0.1.0")));
+    cmd().arg("--version").assert().success().stdout(
+        predicate::str::contains("imfwizard")
+            .and(predicate::str::contains(env!("CARGO_PKG_VERSION"))),
+    );
 }
 
 #[test]

@@ -84,3 +84,36 @@ jobs:
           ./rust/target/release/imfwizard --version
           ./rust/target/release/imfwizard --help
           ./rust/target/release/imfwizard doctor --json || true
+
+  gui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
+        with:
+          version: 11.8.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: gui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
+      - name: Build frontend
+        working-directory: gui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Check Tauri backend
+        run: cargo check --manifest-path gui/src-tauri/Cargo.toml
