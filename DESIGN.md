@@ -17,6 +17,7 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 - encode, transcode (basic), subtitle-convert SRT to TTML, hash, timecode.
 - Structural validate (dcpdoctor-core) plus XSD via xmllint; loudness measure; info; doctor. Optional `validate --photon` shells out to Netflix Photon (JRE + jar) and merges its findings.
 - kdm, dcdm, colour, lut, aces CTL pipeline, dv-extract/dv-inject/dv-convert, watermark, trailer, restore (asdcp-unwrap).
+- `supplement`: real ST 2067-2/-3 OV+supplemental IMP. Reads the OV CPL (edit rate, content kind, per-kind track-file UUIDs), wraps only the new/changed assets (`--replace`/`--add`, `<path>@<track>` selectors), and writes a CPL referencing the OV UUIDs for unchanged tracks plus the new UUIDs for changed ones. ASSETMAP/PKL cover only the physically-present assets (new CPL + new track files). Fails loud when nothing changes or a `--replace` target does not exist in the OV.
 - sign/verify-sig: real enveloped XML-DSIG via postkit (needs a cert + key). to-dcp: rewraps a single-composition IMP (one picture, optional one sound) to a DCP; multi-reel errors.
 - compare: PSNR/SSIM (`--pixel`) plus optional VMAF (`--vmaf`, shells out to ffmpeg's libvmaf filter); JSON output carries both.
 - deliver upload (s3/aspera/rsync) with real SQLite tracker; target-convert with real 2k/4k mappings; compliance ffprobe checks; atmos ADM import (PCM); mca CPL injection; EDL/FCP7-xmeml parse; analytics with per-second bitrate histogram.
@@ -25,7 +26,6 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 
 ## Deliberately not implemented (fails loud, de-advertised)
 
-- `supplement`: errors instead of building a mislabelled standalone IMP.
 - `daemon` / `batch` CLI commands: removed. An in-memory cross-process queue with no IPC could never run or persist jobs; use `serve` (real worker) or the direct per-operation commands.
 - `webhook`, `plugin`, `otioz_import` modules are unused. Photon and VMAF are optional shell-out integrations (off by default, no build deps), not core features.
 

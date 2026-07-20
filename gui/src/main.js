@@ -657,13 +657,17 @@ document.getElementById("sup-browse-ov")?.addEventListener("click", async () => 
 document.getElementById("sup-browse-video")?.addEventListener("click", async () => {
   const d = await open({ directory: true }); if (d) { document.getElementById("sup-video").value = d; checkSupReady(); }
 });
+document.getElementById("sup-browse-audio")?.addEventListener("click", async () => {
+  const f = await open({ filters: [{ name: "WAV", extensions: ["wav"] }] }); if (f) { document.getElementById("sup-audio").value = f; checkSupReady(); }
+});
 document.getElementById("sup-browse-output")?.addEventListener("click", async () => {
   const d = await open({ directory: true }); if (d) { document.getElementById("sup-output").value = d; checkSupReady(); }
 });
 
 function checkSupReady() {
   const btn = document.getElementById("sup-create");
-  if (btn) btn.disabled = !(document.getElementById("sup-ov")?.value && document.getElementById("sup-title")?.value && document.getElementById("sup-output")?.value);
+  const hasChange = document.getElementById("sup-video")?.value || document.getElementById("sup-audio")?.value;
+  if (btn) btn.disabled = !(document.getElementById("sup-ov")?.value && document.getElementById("sup-title")?.value && document.getElementById("sup-output")?.value && hasChange);
 }
 document.getElementById("sup-title")?.addEventListener("input", checkSupReady);
 
@@ -671,16 +675,14 @@ document.getElementById("sup-create")?.addEventListener("click", async () => {
   const ov = document.getElementById("sup-ov").value;
   const title = document.getElementById("sup-title").value;
   const video = document.getElementById("sup-video").value;
+  const audio = document.getElementById("sup-audio").value;
   const output = document.getElementById("sup-output").value;
-  const entryPoint = document.getElementById("sup-entry-point").value;
-  const duration = document.getElementById("sup-duration").value;
   const box = document.getElementById("sup-results");
   box.classList.add("visible");
   box.textContent = "Creating supplemental IMP...";
   const args = ["supplement", "--ov", ov, "-t", title, "-o", output];
-  if (video) args.push("-v", video);
-  if (entryPoint && parseInt(entryPoint) > 0) args.push("--entry-point", entryPoint);
-  if (duration) args.push("--duration", duration);
+  if (video) args.push("--replace", video + "@video");
+  if (audio) args.push("--replace", audio + "@audio");
   const cmd = Command.sidecar("imfwizard", args);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? "✓ Supplemental IMP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);

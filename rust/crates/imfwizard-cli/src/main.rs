@@ -233,17 +233,13 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Video directory (J2K codestreams)
-        #[arg(short, long)]
-        video: Option<String>,
+        /// Replace an OV track: <path>@<track> where track is video, audio[:N], subtitle[:N] (repeatable)
+        #[arg(long = "replace")]
+        replace: Vec<String>,
 
-        /// Entry point (frame offset)
-        #[arg(long, default_value = "0")]
-        entry_point: u64,
-
-        /// Duration
-        #[arg(long)]
-        duration: Option<String>,
+        /// Add a new track: <path>@<track> where track is audio or subtitle (repeatable)
+        #[arg(long = "add")]
+        add: Vec<String>,
     },
 
     /// Convert IMP to DCP
@@ -1426,17 +1422,15 @@ fn run() {
             ov,
             title,
             output,
-            video,
-            entry_point,
-            duration,
+            replace,
+            add,
         } => {
             let opts = imfwizard_core::supplement::SupplementOptions {
                 ov_dir: PathBuf::from(ov),
                 title,
                 output_dir: PathBuf::from(output),
-                video: video.map(PathBuf::from),
-                entry_point,
-                duration,
+                replace,
+                add,
             };
             let result = imfwizard_core::supplement::create_supplement(&opts);
             if result.success {

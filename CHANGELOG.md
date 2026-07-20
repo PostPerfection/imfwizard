@@ -12,6 +12,7 @@
 - **GUI audio/subtitle/bandwidth** — GUI builds now wrap the selected audio and subtitle into the IMP and convert the bandwidth setting to a J2K compression ratio for the encode. Previously all three were dropped.
 - **VMAF** — `compare --vmaf` computes VMAF via ffmpeg's libvmaf filter (in `--json` too); errors clearly if the local ffmpeg has no libvmaf.
 - **Photon validation** — `validate --photon` (off by default) shells out to Netflix Photon (`--photon-jar` or `PHOTON_JAR`) and merges its per-file errors/warnings; errors with an install hint if java or the jar is missing.
+- **Supplemental IMP** — `supplement` builds a real ST 2067-2/-3 OV+supplemental package: `--replace`/`--add <path>@<track>` wraps only the new/changed track files, and the CPL references the OV's unchanged track files by UUID (ASSETMAP/PKL cover only present assets). Fails loud when nothing changes or a replace target is absent from the OV.
 
 ### Changed
 - **MXF wrapping** — imfwizard-core delegates J2K/TimedText/Atmos wrapping to postkit's AS-02 writers. PCM now parses the real WAV header (channels/bits/sample rate) instead of hardcoding 5.1/24-bit/48k.
@@ -24,7 +25,6 @@
 
 ### Removed
 - **`daemon` and `batch` commands** — an in-memory, cross-process queue with no IPC could never run or persist jobs; removed in favour of the real `serve` worker.
-- **Supplemental IMP** — `supplement` silently built a standalone IMP that did not reference the OV; it now fails loud (not implemented).
 
 ## [1.1.0] — 2026-05-28
 

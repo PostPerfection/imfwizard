@@ -12,7 +12,11 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
   types fail loud. Wired into `serve`, which also gained `--api-key`. Queue is
   in-memory (documented).
 - `daemon` and `batch` CLI commands removed (unrunnable in-memory cross-process queue).
-- `supplement` fails loud instead of building a mislabelled standalone IMP.
+- `supplement` implements the real ST 2067-2/-3 OV+supplemental IMP (`supplement.rs`):
+  parses the OV CPL, wraps only new/changed track files (`--replace`/`--add`
+  `<path>@<track>` selectors), writes a CPL referencing the OV's unchanged UUIDs
+  plus the new ones, and ASSETMAP/PKL over only present assets. Fails loud when
+  nothing changes or a replace target is absent from the OV. Was previously de-advertised.
 - Python bindings call real CLI flags; `__doc__.py` and all three examples rewritten
   to the actual subprocess API (the fictional SWIG API is gone).
 - Docs (README, docs/index.html, CHANGELOG, Dockerfile): removed daemon/batch/IAB/AV1/

@@ -55,6 +55,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **A/V sync detection**, compare the first audio/video presentation timestamp for drift
 
 ### Versioning & Annotation
+- **Supplemental IMP** (`supplement`), package only the new/changed track files with a CPL that references the unchanged OV track files by UUID (ST 2067-2/-3 OV+supplemental)
 - **CPL annotation**, add revision/text notes to a CPL XML
 - **Partial version creation**, copy the files a given CPL UUID references into a new IMP
 - **Video retiming** (`retime`), change a video file's frame rate via ffmpeg
@@ -261,6 +262,29 @@ imfwizard encode \
 ```bash
 imfwizard loudness /path/to/audio.wav
 ```
+
+### Supplemental IMP (OV + supplemental)
+
+Package only the new or changed track files against an existing OV. The new CPL
+references the OV's unchanged track files by their UUIDs (present in the OV, not
+duplicated); the supplemental's ASSETMAP/PKL list only the files physically here.
+Track selector is `<path>@<track>` where track is `video`, `audio[:N]`, or
+`subtitle[:N]` (N is the 0-based track index within that kind).
+
+```bash
+# replace the OV audio with a French dub, keep the OV video by reference
+imfwizard supplement --ov /path/to/OV --title "French Dub" -o /path/to/SUPP \
+  --replace french_dub.wav@audio
+
+# add a new subtitle track and replace the second audio track
+imfwizard supplement --ov /path/to/OV --title "v2" -o /path/to/SUPP \
+  --add subs_de.ttml@subtitle --replace commentary.wav@audio:1
+```
+
+Video input is a J2K codestream directory; audio is WAV; subtitle is TTML/IMSC
+(same essence inputs as `create`). Deliver the supplemental alongside its OV: a
+validator resolves the CPL's OV references against the OV's ASSETMAP, so
+validating the supplemental on its own reports the OV track files as missing.
 
 ### Validate an IMP
 
