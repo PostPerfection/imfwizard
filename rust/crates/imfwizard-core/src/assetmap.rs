@@ -41,7 +41,9 @@ pub fn write_assetmap(
     let am = AssetMap {
         uuid: uuid::Uuid::new_v4().to_string(),
         namespace: ns::AM_SMPTE.to_string(),
+        issuer: "IMF Wizard".to_string(),
         creator: "IMF Wizard".to_string(),
+        issue_date: crate::issue_date(),
         include_volume_count: false,
         assets,
     };
