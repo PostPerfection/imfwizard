@@ -26,7 +26,7 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
 - Dedup onto postkit: cpl.rs/pkl.rs/assetmap.rs use `postkit::packaging`
   (ImfCpl/PackingList/AssetMap); subtitle_convert.rs uses `postkit::subtitle_retime::parse_srt`;
   to_dcp.rs uses `postkit::packaging::escape_xml`. dcpdoctor-core bumped to ce050e5.
-  imfwizard now points at the shared `../../postkit`.
+  imfwizard builds against the `extern/postkit` submodule; bump the pin when postkit changes.
 
 ## Still overstated or unimplemented (implement or keep de-advertised)
 

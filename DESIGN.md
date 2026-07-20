@@ -31,4 +31,4 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 
 ## Layout note
 
-imfwizard builds against the shared `../../postkit` checkout (not the stale `extern/postkit` submodule) so the `postkit::packaging` dedup work is available. dcpdoctor-core is pinned at rev ce050e5.
+imfwizard builds against the `extern/postkit` submodule (pinned to the postkit commit with the `postkit::packaging` dedup work); bump the pin when postkit changes. dcpdoctor-core is pinned at rev ce050e5.
