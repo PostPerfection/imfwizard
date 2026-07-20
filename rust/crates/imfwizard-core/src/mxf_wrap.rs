@@ -100,6 +100,7 @@ fn delegate(
         fps_num: opts.edit_rate_num,
         fps_den: opts.edit_rate_den,
         partition_size: 0,
+        encryption: None,
     });
 
     if !pk.success {

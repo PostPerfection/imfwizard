@@ -441,6 +441,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
 
   const video = seg.picture.path;
   const audio = seg.sound?.path || null;
+  const subtitles = seg.subtitle?.path ? [seg.subtitle.path] : [];
   let output = document.getElementById("prop-output")?.value;
   if (!output) {
     const docs = await documentDir();
@@ -485,7 +486,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
 
   try {
     currentJobId = await invoke("submit_job", {
-      videoPath: video, title, outputDir: output, audioPath: audio,
+      videoPath: video, title, outputDir: output, audioPath: audio, subtitles,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
       contentKind: document.getElementById("prop-content-kind")?.value || "feature",
       bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,

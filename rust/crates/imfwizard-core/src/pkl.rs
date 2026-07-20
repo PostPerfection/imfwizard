@@ -1,9 +1,10 @@
-use std::io::Write;
 use std::path::Path;
+
+use postkit::packaging::{PackingList, PklAsset, ns};
 
 use crate::MxfTrackFile;
 
-/// Write a PKL (Packing List) XML file.
+/// Write an IMF PKL (ST 2067-2) using the shared postkit writer.
 pub fn write_pkl(
     path: &Path,
     pkl_uuid: &str,
@@ -16,34 +17,30 @@ pub fn write_pkl(
         .unwrap_or_default();
     let cpl_size = std::fs::metadata(cpl_path).map(|m| m.len()).unwrap_or(0);
 
-    let mut f = std::fs::File::create(path)?;
-    writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
-    writeln!(
-        f,
-        r#"<PackingList xmlns="http://www.smpte-ra.org/schemas/2067-2/2016/PKL">"#
-    )?;
-    writeln!(f, "  <Id>urn:uuid:{pkl_uuid}</Id>")?;
-    writeln!(f, "  <IssueDate>{}</IssueDate>", crate::issue_date())?;
-    writeln!(f, "  <Issuer>IMF Wizard</Issuer>")?;
-    writeln!(f, "  <Creator>IMF Wizard</Creator>")?;
-    writeln!(f, "  <AssetList>")?;
-    writeln!(f, "    <Asset>")?;
-    writeln!(f, "      <Id>urn:uuid:{cpl_uuid}</Id>")?;
-    writeln!(f, "      <Hash>{cpl_hash}</Hash>")?;
-    writeln!(f, "      <Size>{cpl_size}</Size>")?;
-    writeln!(f, "      <Type>text/xml</Type>")?;
-    writeln!(f, "    </Asset>")?;
-    for track_file in track_files {
-        writeln!(f, "    <Asset>")?;
-        writeln!(f, "      <Id>urn:uuid:{}</Id>", track_file.uuid)?;
-        writeln!(f, "      <Hash>{}</Hash>", track_file.hash)?;
-        writeln!(f, "      <Size>{}</Size>", track_file.size)?;
-        writeln!(f, "      <Type>application/mxf</Type>")?;
-        writeln!(f, "    </Asset>")?;
+    let mut assets = vec![PklAsset {
+        id: cpl_uuid.to_string(),
+        hash: cpl_hash,
+        size: cpl_size,
+        asset_type: "text/xml".to_string(),
+    }];
+    for tf in track_files {
+        assets.push(PklAsset {
+            id: tf.uuid.clone(),
+            hash: tf.hash.clone(),
+            size: tf.size,
+            asset_type: "application/mxf".to_string(),
+        });
     }
-    writeln!(f, "  </AssetList>")?;
-    writeln!(f, "</PackingList>")?;
-    Ok(())
+
+    let pkl = PackingList {
+        uuid: pkl_uuid.to_string(),
+        namespace: ns::PKL_IMF.to_string(),
+        issuer: "IMF Wizard".to_string(),
+        creator: "IMF Wizard".to_string(),
+        issue_date: crate::issue_date(),
+        assets,
+    };
+    std::fs::write(path, pkl.to_xml())
 }
 
 #[cfg(test)]

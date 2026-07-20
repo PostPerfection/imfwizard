@@ -17,41 +17,34 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Packaging & Wrapping
 - **Original Version IMP creation** from J2K + WAV
-- **Supplemental IMP** creation with segment replacement
-- **Multi-CPL IMP**, multiple compositions sharing a track pool
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
-- **Closed captions**, SCC (CEA-608) and SRT → TTML conversion
-- **Accessibility tracks**, Audio Description, Hearing Impaired, Sign Language, Commentary
-- **Multi-language audio** with RFC 5646 language tags and MCA labels
+- **Subtitle conversion**, SRT → TTML
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
+- **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
+- **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via OpenJPEG
-- **ProRes / DNxHR / H.264 / H.265 transcoding**, video files → image sequence → J2K (via ffmpeg)
-- **ProRes IMF packaging**, create App#2E IMPs directly from ProRes .mov files
-- **ACES (App#5) colour management**, ACES transforms during encode
-- **Scale / crop / letterbox** options for resolution adaptation
-- **Subtitle burn-in**, permanently render SRT/TTML/SCC into video frames (for festivals)
+- **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
+- **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
+- **Subtitle burn-in**, render SRT/TTML into video frames via ffmpeg
 
 ### HDR & Advanced
-- **Dolby Vision 4.0** RPU metadata injection (via dovi_tool)
-- **HDR10+ dynamic metadata** injection (via hdr10plus_tool)
-- **HDR/WCG color metadata**, ST 2067-21 (PQ, HLG, BT.2020, P3-D65)
+- **Dolby Vision** RPU metadata injection (via dovi_tool)
+- **HDR10+ dynamic metadata** injection, re-encodes with libx265 to write SEI (via hdr10plus_tool)
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
 
 ### Quality Control
-- **Loudness analysis**, EBU R128 / ATSC A/85 measurement and normalization
-- **Photon validation**, validate output IMPs using Netflix Photon
+- **Loudness analysis**, EBU R128 integrated/true-peak measurement (measure only, no normalization)
 - **Native XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
-- **Frame-level QC**, per-frame bitrate analysis with over/under-budget detection
-- **VMAF / PSNR / SSIM** quality metrics (via ffmpeg libvmaf)
+- **Structural validation** via dcpdoctor-core (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification
+- **Netflix Photon validation** (optional), gated behind `validate --photon` (needs a JRE + Photon jar)
+- **PSNR / SSIM** frame comparison between two image sequences
+- **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
-- **QC HTML report** generation
-- **PDF QC report**, generate PDF QC reports using wkhtmltopdf or weasyprint
-- **Frame-accurate comparison**, PSNR/SSIM comparison between two IMPs with diff report
-- **Platform compliance checking**, validate against Netflix, Disney+, Amazon, Apple, Cinema, Broadcast specs
-- **Detailed QC report**, HTML report with package info, track listing, loudness, thumbnails
+- **QC report** generation (text / JSON / HTML)
+- **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
 
 ### Color & Audio Processing
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
@@ -59,64 +52,48 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
 - **Dolby Atmos ADM BWF import**, parse ADM metadata and wrap the PCM essence to MXF (not a Dolby IAB bitstream)
-- **A/V sync detection & repair**, detect audio/video drift and auto-fix with trim/pad
+- **A/V sync detection**, compare the first audio/video presentation timestamp for drift
 
 ### Versioning & Annotation
-- **CPL annotation**, add revision notes and author metadata to CPL XML
-- **Partial version creation**, create supplemental IMPs replacing specific reel segments
-- **Subtitle retiming**, convert TTML/SRT timing between framerates (24→25, 23.976→24, etc.)
+- **CPL annotation**, add revision/text notes to a CPL XML
+- **Partial version creation**, copy the files a given CPL UUID references into a new IMP
+- **Video retiming** (`retime`), change a video file's frame rate via ffmpeg
 
 ### Pre-roll & Leaders
-- **Slate generation**, countdown, SMPTE bars, academy leader, text slate, black (as TIFF image sequence)
-- **Reference tone**, optional 1kHz WAV tone paired with visual pre-roll
+- **Slate generation**, prepend a black text slate as an image sequence
 
 ### Integration & Extensibility
-- **REST API server**, HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume
-- **Webhook notifications**, POST to external endpoints on job completion/failure (Slack, Teams, CI/CD)
-- **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro XML timelines
-- **Plugin system**, discover and execute Python plugin scripts with pre/post hooks
-- **SDI output (Blackmagic DeckLink)**, play J2K frames over HD-SDI via mpv DeckLink output
-- **Dependency management (`doctor`)**, check all external tool dependencies with version detection and JSON output
+- **REST API server**, HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
+- **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro 7 XML timelines
+- **SDI preview (Blackmagic DeckLink)**, play J2K frames via mpv DeckLink output
+- **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
-- **Delivery presets**, Netflix, Disney+, Amazon, Apple TV+, Cinema 2K/4K, Broadcast, Archival
-- **Batch delivery**, create IMPs for multiple platforms in a single pass
-- **Job queue daemon**, background processing with Unix socket / Windows named pipe IPC
-- **Watch folder**, auto-IMP creation when files appear
-- **EDL/AAF conform**, import CMX3600 edit decisions to auto-build CPL timelines
-- **S3 cloud upload**, push completed IMPs to AWS S3
-- **Aspera FASP**, high-speed delivery via IBM Aspera
-- **Partial restore**, extract tracks/segments from existing IMPs back to raw files
+- **Delivery presets**, listed profiles (Netflix, Amazon, Cinema 2K/4K, ...) for reference
+- **Watch folder**, print filesystem events for a directory
+- **EDL conform**, import CMX3600/FCP7 edit decisions to build a CPL timeline
+- **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
+- **Partial restore**, extract tracks from existing IMPs back to raw files (asdcp-unwrap)
 
 ### Comparison & Analysis
-- **IMF package diff**, compare two IMPs and show track/segment changes
-- **MXF playback/probe**, inspect MXF files, extract frames, generate thumbnails (via GStreamer/ffmpeg)
-- **OTIOZ import**, import OpenTimelineIO zip bundles with timeline-to-CPL conversion
+- **IMF package diff**, compare two IMPs and show track changes
+- **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
 - **KDM generation**, generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
 - **Dolby Vision Profile 8.1**, HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
-- **Prometheus metrics**, `/metrics` endpoint on REST API for monitoring (jobs, frames, bytes, uptime)
-- **Shell tab completion**, bash, zsh, and fish completion scripts (`imfwizard completions --bash`)
+- **Prometheus metrics**, `/metrics` endpoint on REST API exposing job-state gauges
+- **Shell tab completion**, bash, zsh, and fish completion scripts (`imfwizard completion bash`)
 
 ### Desktop GUI (Tauri 2)
 - **Dark theme** by default with optional light mode toggle
-- **Drag-and-drop** file import (WAV, TTML, image sequences)
-- **Timeline editor**, visual segment arrangement for multi-track compositions
-- **Asset browser**, browse IMP track files with thumbnails and metadata inspection
-- **Keyboard shortcuts**, full shortcut overlay (`?` key), tab navigation (1-9), preview controls
+- **File import** (video, WAV, TTML/subtitle) via file picker; builds package the selected picture, audio, and subtitle
+- **Timeline editor**, visual segment arrangement
+- **Keyboard shortcuts**, preview controls and Ctrl+1..7 tab navigation
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
-- **Supplemental IMP wizard**, guided workflow for versioned supplements
-- **Loudness metering panel**, EBU R128 / ATSC A/85 compliance badges
-- **IMP metadata editor**, edit CPL annotations, content versioning, locale info
-- **Delivery preset selector**, one-click configuration for major platforms
-- **Preview player**, mpv-based frame-accurate playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
-- **Multi-CPL composition tabs**, switch, add, remove compositions in a single IMP
-- **Target resolution conversion panel**, scale/crop to 2K/4K scope/flat/full
-- **GPU encoding toggle**, enable/disable grok GPU acceleration
-- **Bitrate analytics dashboard**, per-second charts, histogram, statistics
+- **IMP metadata editor**, edit CPL title/annotation
+- **Preview player**, mpv-based playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
 - **Subtitle burn-in**, GUI for hardcoding subs into video
-- **Batch delivery panel**, deliver to multiple platforms with checkboxes
 - **Job queue manager**, submit, monitor, cancel background jobs
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs
@@ -198,11 +175,9 @@ cargo build --release
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
 | `ctlrender` | ACES CTL transforms (IDT/RRT/ODT) | [GitHub](https://github.com/ampas/CTL) |
 | `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
-| `wkhtmltopdf` | PDF report generation | `apt install wkhtmltopdf` / [wkhtmltopdf.org](https://wkhtmltopdf.org/) |
-| `weasyprint` | PDF report generation (alternative) | `pip install weasyprint` |
-| `gst-inspect-1.0` | GStreamer (DeckLink SDI output) | `apt install gstreamer1.0-tools` / `brew install gstreamer` |
+| ffmpeg with `libvmaf` | VMAF in `compare --vmaf` | ffmpeg built `--enable-libvmaf` (check `ffmpeg -filters \| grep libvmaf`) |
+| JRE + Photon jar | `validate --photon` (Netflix Photon) | `apt install default-jre`; jar from [Netflix/photon releases](https://github.com/Netflix/photon/releases) |
 | `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
-| Java + Photon | IMF validation via Netflix Photon | `apt install default-jre` / `brew install openjdk` |
 | AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 
 Use `imfwizard doctor` to check which tools are installed and which are missing.
@@ -241,15 +216,14 @@ imfwizard create \
   --fps-num 24 --fps-den 1
 ```
 
-### Create an IMP with subtitles and HDR
+### Create an IMP with subtitles
 
 ```bash
 imfwizard create \
-  --title "My HDR Film" \
+  --title "My Film" \
   --video /path/to/j2k_frames/ \
   --audio /path/to/audio.wav \
   --subtitle /path/to/subs.ttml \
-  --color-space bt2020-pq \
   --output /path/to/output/
 ```
 
@@ -264,13 +238,13 @@ imfwizard create \
   --output /path/to/output/
 ```
 
-### Transcode ProRes to image sequence
+### Transcode via ffmpeg
 
 ```bash
 imfwizard transcode \
   -i input.mov \
-  -o /path/to/frames/ \
-  -f tiff --bit-depth 16
+  -o output.mov \
+  -c prores_ks
 ```
 
 ### Encode image sequence to JPEG 2000
@@ -280,17 +254,6 @@ imfwizard encode \
   -i /path/to/tiff_frames/ \
   -o /path/to/j2k_output/ \
   --bitrate 250
-```
-
-### Create a Supplemental IMP
-
-```bash
-imfwizard supplement \
-  --title "Version 2" \
-  --ov /path/to/original_imp/ \
-  --video /path/to/replacement_frames/ \
-  --output /path/to/supplemental_imp/ \
-  --entry-point 100 --duration 50
 ```
 
 ### Measure loudness
@@ -304,8 +267,12 @@ imfwizard loudness /path/to/audio.wav
 ```bash
 imfwizard validate /path/to/imp/
 
-# With deep IMF conformance (requires Photon)
-PHOTON_JAR=/opt/photon/photon.jar imfwizard validate /path/to/imp/
+# Also validate XML against the SMPTE ST 2067 schemas
+imfwizard validate /path/to/imp/ --xsd
+
+# Also run Netflix Photon (needs a JRE + Photon jar)
+imfwizard validate /path/to/imp/ --photon --photon-jar /opt/photon/photon-all.jar
+# or set PHOTON_JAR=/opt/photon/photon-all.jar
 ```
 
 ### Display IMP info
@@ -314,36 +281,20 @@ PHOTON_JAR=/opt/photon/photon.jar imfwizard validate /path/to/imp/
 imfwizard info /path/to/existing_imp/
 ```
 
-### Delivery presets
+### List delivery presets
 
 ```bash
-# Use a preset to auto-configure encoding parameters
-imfwizard create \
-  --title "Netflix Delivery" \
-  --preset netflix \
-  --video /path/to/dpx_frames/ \
-  --audio /path/to/audio.wav \
-  --output /path/to/output/
+# Presets are reference profiles; they are listed, not auto-applied by `create`
+imfwizard profiles
 ```
 
-### Batch delivery to multiple platforms
-
-```bash
-imfwizard deliver \
-  --video /path/to/j2k_frames/ \
-  --audio /path/to/audio.wav \
-  --title "My Feature" \
-  --output /path/to/deliveries/ \
-  --targets netflix disney amazon apple
-```
-
-### Create IMP from ProRes
+### Encode to ProRes
 
 ```bash
 imfwizard prores \
   -i /path/to/master.mov \
-  -o /path/to/output_imp/ \
-  -t "ProRes Master"
+  -o /path/to/master_prores.mov \
+  -p hq
 ```
 
 ### Burn subtitles into video
@@ -352,8 +303,7 @@ imfwizard prores \
 imfwizard burn-in \
   -i /path/to/video.mp4 \
   -s /path/to/subs.srt \
-  -o /path/to/output_burned.mp4 \
-  --font-size 56
+  -o /path/to/output_burned.mp4
 ```
 
 ### Scale/crop an IMP to a target resolution
@@ -374,27 +324,17 @@ imfwizard target-convert \
 
 ```bash
 # Human-readable summary
-imfwizard analytics -d /path/to/j2k_frames/
+imfwizard analytics -d /path/to/imp/
 
 # JSON output for dashboards
-imfwizard analytics -d /path/to/j2k_frames/ --json -o report.json
-```
-
-### Generate preview thumbnails
-
-```bash
-# Single frame
-imfwizard preview -d /path/to/j2k/ -o /tmp/thumbs/ -f 42
-
-# Thumbnail strip (10 evenly spaced frames)
-imfwizard preview -d /path/to/j2k/ -o /tmp/thumbs/ --strip
+imfwizard analytics -d /path/to/imp/ --json
 ```
 
 ### REST API server
 
 ```bash
-# Start on port 9090 with API key auth
-imfwizard rest-api --port 9090 --api-key "my-secret" --max-jobs 8
+# Start on host:port, optionally requiring an API key
+imfwizard rest-api --bind 0.0.0.0:9090 --api-key "my-secret"
 
 # Endpoints:
 #   GET  /api/v1/health       , health check
@@ -435,8 +375,11 @@ imfwizard edl-import -i project.fcpxml
 ### Frame comparison
 
 ```bash
-# Compare two IMPs (PSNR + SSIM)
-imfwizard compare --imp-a /path/to/imp_v1/ --imp-b /path/to/imp_v2/ --ssim -o report/
+# Compare two IMPs or video files (add --pixel for per-frame PSNR/SSIM on video MXF)
+imfwizard compare -a /path/to/imp_v1/ -b /path/to/imp_v2/ --pixel --json
+
+# VMAF score (needs an ffmpeg built with libvmaf); combine with --pixel and --json
+imfwizard compare -a reference.mxf -b encoded.mxf --vmaf --json
 ```
 
 ### Dolby Atmos import
@@ -448,17 +391,17 @@ imfwizard atmos -i atmos_master.bwf -o output_dir/
 ### MCA label generation
 
 ```bash
-# Generate 5.1 surround MCA labels
-imfwizard mca --soundfield 5.1 --language en -o mca_labels.xml
+# Inject 5.1 surround MCA labels into an audio MXF's CPL
+imfwizard mca -i audio.mxf -l 51 -L en
 
 # 7.1 surround
-imfwizard mca --soundfield 7.1 --language en -o mca_71.xml
+imfwizard mca -i audio.mxf -l 71 -L en
 ```
 
-### Audio description
+### Audio description mixing
 
 ```bash
-imfwizard audio-desc --main mix_51.wav --description ad_narration.wav -o combined.wav --duck-level -12
+imfwizard audio-desc -i mix_51.wav --narration ad_narration.wav -o combined.wav --duck-level -12
 ```
 
 ### Apply 3D LUT
@@ -473,82 +416,52 @@ imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/
 imfwizard aces -i /log_frames/ -o /aces_frames/ --idt ARRI_LogC4 --odt P3D65_PQ_1000nits
 ```
 
-### A/V sync check and fix
+### A/V sync check
 
 ```bash
-# Detect drift
-imfwizard av-sync --video /frames/ --audio mix.wav
-
-# Auto-fix
-imfwizard av-sync --video /frames/ --audio mix.wav --fix -o fixed.wav
+# Compare the first audio and video presentation timestamps for drift
+imfwizard av-sync -i /path/to/video.mxf
 ```
 
 ### Platform compliance
 
 ```bash
-# Check Netflix compliance
-imfwizard compliance --imp /path/to/imp/ --target netflix
-
-# Check Disney+ compliance
-imfwizard compliance --imp /path/to/imp/ --target disney
-```
-
-### QC report
-
-```bash
-imfwizard qc-report --imp /path/to/imp/ -o report.html --title "Final QC" --client "Studio X"
+# Check Netflix compliance (standards: smpte, netflix, dolby, amazon)
+imfwizard compliance -i /path/to/imp/ -s netflix
 ```
 
 ### CPL annotation
 
 ```bash
-imfwizard annotate --cpl /path/to/CPL.xml --text "Color correction pass 2" --author "Jane" --revision "v1.2"
+imfwizard annotate -i /path/to/imp/ -t "Color correction pass 2"
 ```
 
-### Partial version (Supplemental IMP)
+### Partial version
 
 ```bash
-imfwizard partial-version --ov /orig_imp/ --video new_reel2.mxf -o /supplement/ \
-  --reel 1 --start-frame 1200 --end-frame 2400 --title "Reel 2 fix"
+# Copy the files a given CPL UUID references into a new IMP
+imfwizard partial-version -i /orig_imp/ -o /partial/ --cpl <cpl-uuid>
 ```
 
-### Slate / countdown generation
+### Slate
 
 ```bash
-# 10-second countdown
-imfwizard slate --type countdown -o /pre_roll/ --width 1920 --height 1080
-
-# SMPTE color bars with 1kHz tone
-imfwizard slate --type bars -o /bars/ --tone --tone-output reference.wav
-
-# Text slate
-imfwizard slate --type slate -o /slate/ --title "MY FILM, Final Master"
+# Prepend a black text slate as image frames
+imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 48
 ```
 
-### Subtitle retiming
+### Video retiming
 
 ```bash
-# Retime TTML from 24fps to 25fps
-imfwizard retime -i subs_24.ttml -o subs_25.ttml --src-fps-num 24 --tgt-fps-num 25
-
-# Retime SRT from 23.976 to 24fps
-imfwizard retime -i subs.srt -o subs_24.srt --src-fps-num 24000 --src-fps-den 1001 --tgt-fps-num 24
+# Retime a video file to 25 fps via ffmpeg
+imfwizard retime -i input.mov -o output_25.mov -f 25
 ```
 
 ### SDI output (Blackmagic DeckLink)
 
 ```bash
-# List available DeckLink devices
-imfwizard sdi-preview --list-devices
-
-# Play J2K frames out over SDI on device 0 at 24fps
-imfwizard sdi-preview -i /path/to/j2k_frames/ --device 0 --fps-num 24
-
-# Play with embedded audio, loop, UHD mode
-imfwizard sdi-preview -i /path/to/j2k/ --audio mix.wav --loop --width 3840 --height 2160
-
-# Play from MXF directly
-imfwizard sdi-preview -i video.mxf --device 0
+# Play an IMP or MXF via mpv DeckLink output on device 0
+imfwizard sdi-preview -i /path/to/imp/ -d 0
 ```
 
 ## Architecture

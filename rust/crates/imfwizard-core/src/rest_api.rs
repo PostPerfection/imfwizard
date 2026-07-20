@@ -57,6 +57,10 @@ pub fn start_server(config: &ApiConfig) -> Result<(), String> {
     let queue = JobQueue::new();
     let paused = Arc::new(AtomicBool::new(false));
 
+    // Background worker runs submitted jobs. The queue is in-memory, so jobs
+    // live only for the lifetime of this server process.
+    let _worker_stop = crate::executor::spawn_worker(&queue);
+
     for stream in listener.incoming() {
         let mut stream = match stream {
             Ok(s) => s,

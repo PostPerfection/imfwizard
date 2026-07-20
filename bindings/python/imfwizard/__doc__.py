@@ -1,15 +1,28 @@
 """IMF Wizard Python Bindings
 
-Python scripting interface for creating SMPTE ST 2067 IMF packages.
-Built with SWIG from the C++ library.
+A thin subprocess wrapper around the `imfwizard` CLI for creating SMPTE ST 2067
+IMF packages. There is no compiled extension: every function shells out to the
+`imfwizard` binary (found on PATH or via the IMFWIZARD_BIN environment variable).
+
+Functions:
+    create(title, video, output, audio=None, subtitle=None, kind="feature")
+        Build an IMP from a video file or J2K directory. Returns the output Path.
+    validate(imp_dir, xsd=False) -> {"valid": bool, "output": str}
+    info(imp_dir) -> str
+    loudness(audio_path) -> str
+    compliance(imp_dir, standard="smpte") -> {"compliant": bool, "output": str}
+    encode(input_dir, output_dir, bitrate=250) -> Path
+    transcode(input_file, output_file, codec="libx264") -> Path
+    subtitle_convert(input_file, output_ttml) -> Path
 
 Example:
     >>> import imfwizard
-    >>> opts = imfwizard.ImpOptions()
-    >>> opts.title = "My Feature"
-    >>> opts.video_dir = "/path/to/j2k_frames"
-    >>> opts.audio_file = "/path/to/audio.wav"
-    >>> opts.output_dir = "/path/to/output"
-    >>> result = imfwizard.create_ov_imp(opts)
-    >>> print(result.cpl_uuid)
+    >>> out = imfwizard.create(
+    ...     title="My Feature",
+    ...     video="/path/to/master.mov",
+    ...     output="/path/to/output_imp",
+    ...     audio="/path/to/audio.wav",
+    ... )
+    >>> imfwizard.validate(out)
+    {'valid': True, 'output': 'IMP validation PASSED\\n'}
 """

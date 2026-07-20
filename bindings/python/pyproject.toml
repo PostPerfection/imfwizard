@@ -1,6 +1,6 @@
 [project]
 name = "imfwizard"
-version = "1.0.0"
+version = "1.1.0"
 description = "Python bindings for IMF Wizard"
 requires-python = ">=3.8"
 

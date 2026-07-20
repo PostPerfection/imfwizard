@@ -33,6 +33,7 @@ pub mod subtitle_convert;
 pub mod subtitle_retime;
 
 // Infrastructure
+pub mod executor;
 pub mod job_queue;
 pub mod plugin;
 pub mod preferences;
@@ -50,6 +51,7 @@ pub mod analytics;
 pub mod frame_compare;
 pub mod imp_diff;
 pub mod info;
+pub mod photon;
 pub mod prores;
 pub mod report;
 pub mod supplement;

@@ -127,6 +127,7 @@ fn build_dcp(
         fps_num: pic.fps_num,
         fps_den: pic.fps_den,
         partition_size: 0,
+        encryption: None,
     });
     if !wrapped.success {
         return Err(format!(
@@ -159,6 +160,7 @@ fn build_dcp(
             fps_num: pic.fps_num,
             fps_den: pic.fps_den,
             partition_size: 0,
+            encryption: None,
         });
         if !wrapped.success {
             return Err(format!(
@@ -457,12 +459,7 @@ fn write_wav(
     std::fs::write(path, w).map_err(|e| format!("writing WAV {}: {e}", path.display()))
 }
 
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
+use postkit::packaging::escape_xml as xml_escape;
 
 fn write_cpl(
     path: &Path,

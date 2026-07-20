@@ -6,6 +6,12 @@
 - **KDM generation** — `kdm` command now generates signed SMPTE 430-1 KDMs via postkit (xmlsec1-verified). New `--signer-cert`/`--signer-key`/`--signer-chain` flags.
 - **Subtitle packaging** — `create --subtitle` wraps TTML/IMSC files as AS-02 timed-text MXF and adds a SubtitlesSequence to the CPL.
 - **GUI metadata save** — the Metadata panel Save button now calls `metadata-edit` instead of showing a placeholder.
+- **XML-DSIG signing** — `sign`/`verify-sig` implement standard enveloped signatures via postkit (needs a cert + key).
+- **IMF-to-DCP** — `to-dcp` rewraps a single-composition IMP (one picture, optional one sound) to a DCP; multi-reel errors.
+- **REST job executor** — `serve` now runs a background worker that executes submitted encode/transcode/validate/loudness/create jobs (in-memory, process-lifetime only). Added `serve --api-key`.
+- **GUI audio/subtitle/bandwidth** — GUI builds now wrap the selected audio and subtitle into the IMP and convert the bandwidth setting to a J2K compression ratio for the encode. Previously all three were dropped.
+- **VMAF** — `compare --vmaf` computes VMAF via ffmpeg's libvmaf filter (in `--json` too); errors clearly if the local ffmpeg has no libvmaf.
+- **Photon validation** — `validate --photon` (off by default) shells out to Netflix Photon (`--photon-jar` or `PHOTON_JAR`) and merges its per-file errors/warnings; errors with an install hint if java or the jar is missing.
 
 ### Changed
 - **MXF wrapping** — imfwizard-core delegates J2K/TimedText/Atmos wrapping to postkit's AS-02 writers. PCM now parses the real WAV header (channels/bits/sample rate) instead of hardcoding 5.1/24-bit/48k.
@@ -14,10 +20,11 @@
 - **Watermark** — visible burn-in only via postkit; removed NexGuard/Civolution options and the `--backend` flag.
 - **Atmos import** — wraps essence via asdcplib instead of shelling ffmpeg for the MXF; ADM XML parsed with quick-xml.
 - **Timeline/ASSETMAP parsing** — replaced hand-rolled line scanners with quick-xml.
+- **Packaging XML** — CPL/PKL/ASSETMAP writers and the SRT parser now use the shared `postkit::packaging` / `postkit::subtitle_retime` writers instead of hand-rolled copies.
 
 ### Removed
-- **IMF-to-DCP conversion** — the CLI/GUI paths only ran `ffmpeg -c copy` and never built a DCP; `to-dcp` now fails loud ("IMF to DCP conversion is not implemented").
-- **XML-DSIG signing** — `sign_document`/`verify_signature` emitted an empty signature; they now fail loud (postkit's signer is KDM-specific and not exposed for arbitrary IMF XML).
+- **`daemon` and `batch` commands** — an in-memory, cross-process queue with no IPC could never run or persist jobs; removed in favour of the real `serve` worker.
+- **Supplemental IMP** — `supplement` silently built a standalone IMP that did not reference the OV; it now fails loud (not implemented).
 
 ## [1.1.0] — 2026-05-28
 

@@ -38,6 +38,7 @@ struct JobConfig {
     title: String,
     output_dir: PathBuf,
     audio_path: Option<String>,
+    subtitles: Vec<String>,
     fps_num: u32,
     fps_den: u32,
     content_kind: String,
@@ -80,6 +81,7 @@ pub async fn submit_job(
     title: String,
     output_dir: String,
     audio_path: Option<String>,
+    subtitles: Option<Vec<String>>,
     framerate: Option<String>,
     content_kind: Option<String>,
     bandwidth: Option<u32>,
@@ -103,6 +105,7 @@ pub async fn submit_job(
         title: title.clone(),
         output_dir: PathBuf::from(&output_dir),
         audio_path,
+        subtitles: subtitles.unwrap_or_default(),
         fps_num,
         fps_den,
         content_kind: content_kind.unwrap_or_else(|| "feature".to_string()),
@@ -267,13 +270,27 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         ),
     );
 
+    // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
+    // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
+    // input; image/J2K sequences fall back to the encoder default.
+    let compression_ratio = imfwizard_core::probe::probe_video(&job.video_path)
+        .map(|info| {
+            let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
+            let raw_bits = info.width as f64 * info.height as f64 * 36.0;
+            let target_bits = (job.bandwidth as f64 * 1_000_000.0) / fps;
+            (raw_bits / target_bits).max(1.0)
+        })
+        .unwrap_or(10.0);
+
     // Encode using shared pipeline
     let job_id = job.id;
     let app_ref = app.clone();
     let log_ref = log_file.clone();
-    let encode_result = postkit::pipeline::run_encode(
+    let encode_result = postkit::pipeline::run_encode_with_ratio(
         &job.video_path,
         output,
+        compression_ratio,
+        job.fps_num,
         &cancel,
         &pause,
         |p| {
@@ -313,6 +330,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         fps_den: job.fps_den,
         content_kind: job.content_kind.clone(),
         j2k_dir: Some(encode_result.j2k_dir.clone()),
+        audio_files: job.audio_path.iter().map(PathBuf::from).collect(),
+        timed_text_files: job.subtitles.iter().map(PathBuf::from).collect(),
         ..Default::default()
     };
 

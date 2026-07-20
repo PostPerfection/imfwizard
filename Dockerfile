@@ -4,7 +4,7 @@
 #   docker run -v /path/to/media:/data imfwizard create --video /data/j2k --audio /data/audio.wav --output /data/out
 #
 # For REST API mode:
-#   docker run -p 8080:8080 -v /path/to/media:/data imfwizard serve --port 8080
+#   docker run -p 8081:8081 -v /path/to/media:/data imfwizard serve --bind 0.0.0.0:8081
 
 FROM rust:1-bookworm AS builder
 

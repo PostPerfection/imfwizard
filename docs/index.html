@@ -449,18 +449,18 @@
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🎞️</div>
-            <h3>ProRes / DNxHR Transcode</h3>
-            <p>Transcode ProRes, DNxHR, H.264, H.265, and AV1 video files to image sequences via ffmpeg.</p>
+            <h3>ffmpeg Transcode</h3>
+            <p>Transcode video files via ffmpeg (pick the output codec, e.g. libx264 or ProRes).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">📋</div>
-            <h3>Multi-CPL &amp; Supplemental</h3>
-            <p>Create multi-composition IMPs and supplemental versions with segment replacement workflows.</p>
+            <h3>IMF Packaging</h3>
+            <p>Write complete CPL, PKL, and ASSETMAP references with base64 hashes, identifying App 2E.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">📝</div>
-            <h3>TTML Subtitles &amp; Captions</h3>
-            <p>Package TTML / IMSC subtitles as AS-02 timed text MXF. Convert SCC and SRT to TTML.</p>
+            <h3>TTML Subtitles</h3>
+            <p>Package TTML / IMSC subtitles as AS-02 timed text MXF. Convert SRT to TTML.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎥</div>
@@ -469,18 +469,18 @@
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">🎨</div>
-            <h3>ACES (App#5) Colour</h3>
-            <p>BT.709, BT.2020 PQ/HLG, P3-D65, and ACES colour spaces with proper metadata signaling.</p>
+            <h3>ACES Colour Pipeline</h3>
+            <p>IDT → RRT → ODT conversion via ctlrender (with an ffmpeg fallback).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">📊</div>
             <h3>Loudness Analysis</h3>
-            <p>EBU R128 and ATSC A/85 loudness measurement with compliance badges and normalization.</p>
+            <p>EBU R128 integrated and true-peak measurement (measurement only, no normalization).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">✅</div>
-            <h3>Photon Validation</h3>
-            <p>Validate output IMPs using Netflix Photon via integrated DCP Doctor validation engine. SMPTE conformance checking and error reporting.</p>
+            <h3>Structural Validation</h3>
+            <p>Validate IMPs via the DCP Doctor engine (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification, optional XSD schema checks, and optional Netflix Photon (<code>--photon</code>, needs a JRE + jar).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">⚡</div>
@@ -495,17 +495,17 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">🖥️</div>
             <h3>Desktop GUI</h3>
-            <p>Tauri 2 desktop app with dark theme. Timeline scrubber with timecode display, multi-CPL composition tabs, target resolution conversion panel, GPU encoding toggle, subtitle burn-in, drag-and-drop import, keyboard shortcuts, and desktop notifications.</p>
+            <p>Tauri 2 desktop app with dark theme. Timeline scrubber with timecode display, mpv preview player, subtitle burn-in, file import, keyboard shortcuts, and desktop notifications.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎞️</div>
-            <h3>ProRes IMF</h3>
-            <p>Create IMF packages directly from ProRes .mov files. Apple TV+ delivery ready.</p>
+            <h3>ProRes Encode</h3>
+            <p>Encode a video or image sequence to a ProRes .mov master (proxy/lt/standard/hq/xq).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🔤</div>
             <h3>Subtitle Burn-In</h3>
-            <p>Permanently render SRT/TTML/SCC subtitles into video frames for festival delivery.</p>
+            <p>Render SRT/TTML subtitles into video frames via ffmpeg.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">🎬</div>
@@ -535,17 +535,12 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,243,208,0.15);">🔍</div>
             <h3>Frame Comparison</h3>
-            <p>PSNR/SSIM frame-accurate comparison between two video files or IMPs. Per-frame metrics with JSON export.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon" style="background: rgba(196,181,253,0.15);">🔌</div>
-            <h3>Plugin System</h3>
-            <p>Discover and execute Python plugin scripts with pre/post hooks for extensible workflows.</p>
+            <p>PSNR/SSIM comparison between two video files or IMPs, plus optional VMAF (<code>--vmaf</code>, needs an ffmpeg with libvmaf). Per-frame metrics with JSON export.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,186,116,0.15);">🎵</div>
             <h3>Dolby Atmos ADM Import</h3>
-            <p>Import ADM Broadcast Wave Format files and wrap to IAB MXF for immersive audio delivery.</p>
+            <p>Import ADM Broadcast Wave Format files and wrap the PCM essence to MXF (not a Dolby IAB bitstream).</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(134,239,172,0.15);">🏷️</div>
@@ -570,7 +565,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(252,211,77,0.15);">⏱️</div>
             <h3>A/V Sync Detection</h3>
-            <p>Detect audio/video drift and auto-fix with precision trimming or padding.</p>
+            <p>Compare the first audio and video presentation timestamps to detect drift.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(248,113,113,0.15);">✅</div>
@@ -579,8 +574,8 @@
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(129,140,248,0.15);">📊</div>
-            <h3>Detailed QC Report</h3>
-            <p>HTML report with package info, track listing, loudness measurements, and compliance status.</p>
+            <h3>QC Report</h3>
+            <p>Generate a QC report in text, JSON, or HTML with package info.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(192,132,252,0.15);">📝</div>
@@ -590,27 +585,22 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
             <h3>Partial Version</h3>
-            <p>Create supplemental IMPs replacing specific reel segments while referencing the Original Version.</p>
+            <p>Copy the files a given CPL UUID references into a new IMP.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🎬</div>
-            <h3>Slate &amp; Leader Generation</h3>
-            <p>Countdown, SMPTE bars, academy leader, text slate, and black, as TIFF image sequences with optional tone.</p>
+            <h3>Slate Generation</h3>
+            <p>Prepend a black text slate as image frames.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⏩</div>
-            <h3>Subtitle Retiming</h3>
-            <p>Convert TTML/SRT timing between framerates (24→25, 23.976→24, etc.) with stretch or recount modes.</p>
+            <h3>Video Retiming</h3>
+            <p>Change a video file's frame rate via ffmpeg.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(239,68,68,0.15);">📺</div>
-            <h3>SDI Output (Blackmagic DeckLink)</h3>
-            <p>Play J2K frames over HD-SDI to reference monitors via GStreamer + decklinkvideosink. Supports 1080p, 2K, and UHD.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon" style="background: rgba(251,146,60,0.15);">🔔</div>
-            <h3>Webhook Notifications</h3>
-            <p>POST to external endpoints on job completion or failure. Integrates with Slack, Teams, and CI/CD pipelines.</p>
+            <h3>SDI Preview (Blackmagic DeckLink)</h3>
+            <p>Play J2K frames via mpv DeckLink output.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">⌨️</div>
@@ -646,11 +636,11 @@
         <div class="prereq"><span class="tag required">Built in</span><span>OpenJPEG (J2K encoding)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>dovi_tool (Dolby Vision RPU injection)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>ctlrender (ACES CTL transforms)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>Java + Netflix Photon (validation)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>Node.js 24 + pnpm 11 + Rust (GUI build)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>xmllint / libxml2-utils (XSD schema validation)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>wkhtmltopdf or weasyprint (PDF reports)</span></div>
-        <div class="prereq"><span class="tag optional">Optional</span><span>GStreamer + DeckLink plugin (SDI output)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>mpv (GUI/SDI preview)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>ffmpeg with libvmaf (compare --vmaf)</span></div>
+        <div class="prereq"><span class="tag optional">Optional</span><span>JRE + Photon jar (validate --photon)</span></div>
         <div class="prereq"><span class="tag optional">Optional</span><span>ascp (Aspera FASP high-speed transfer)</span></div>
     </div>
     <p style="color: var(--text-tertiary); font-size: 0.85rem; margin-top: 1rem;">Run <code style="font-family:'JetBrains Mono',monospace;background:var(--bg-primary);padding:2px 6px;border-radius:4px;font-size:0.8rem;color:var(--cyan);">imfwizard doctor</code> to check which tools are installed.</p>
@@ -715,7 +705,7 @@
         </div>
         <div class="gui-feature">
             <h4>📋 Job Queue</h4>
-            <p>Background daemon for batch processing. Submit, monitor, and cancel jobs from the GUI.</p>
+            <p>In-process worker queue. Submit, monitor, and cancel encode/build jobs from the GUI.</p>
         </div>
         <div class="gui-feature">
             <h4>🕐 Recent Projects</h4>
@@ -726,44 +716,20 @@
             <p>mpv-based frame-accurate playback with timeline scrubber, click-to-seek, drag-to-scrub, and HH:MM:SS:FF timecode display.</p>
         </div>
         <div class="gui-feature">
-            <h4>📑 Multi-CPL Tabs</h4>
-            <p>Switch between multiple compositions in a single IMP. Add, remove, and rename CPLs with tabbed interface.</p>
-        </div>
-        <div class="gui-feature">
-            <h4>🎯 Target Convert</h4>
-            <p>Scale/crop video to DCI targets (2K/4K scope, flat, full) with aspect-ratio-aware letterboxing.</p>
-        </div>
-        <div class="gui-feature">
-            <h4>⚙️ GPU Toggle</h4>
-            <p>Enable or disable grok GPU acceleration for JPEG 2000 encoding directly from the GUI.</p>
-        </div>
-        <div class="gui-feature">
             <h4>⌨️ Keyboard Shortcuts</h4>
-            <p>Ctrl+N/O/B/P/I, Ctrl+Shift+S for supplement, Ctrl+1–7 for view switching. Tooltips show hints.</p>
+            <p>Ctrl+N/O/B/P/I and Ctrl+1–7 for view switching. Tooltips show hints.</p>
         </div>
         <div class="gui-feature">
             <h4>🔍 Asset Filter</h4>
             <p>Type-to-filter search box for finding assets quickly in large projects.</p>
         </div>
         <div class="gui-feature">
-            <h4>🔀 Supplemental</h4>
-            <p>Guided workflow for creating versioned supplemental IMPs with segment replacement.</p>
-        </div>
-        <div class="gui-feature">
             <h4>✅ Validation</h4>
-            <p>One-click Netflix Photon validation with detailed error reporting in the GUI.</p>
-        </div>
-        <div class="gui-feature">
-            <h4>📊 Analytics Dashboard</h4>
-            <p>Per-second bitrate charts, histograms, and statistics for J2K streams.</p>
+            <p>One-click structural validation with error reporting in the GUI.</p>
         </div>
         <div class="gui-feature">
             <h4>🔤 Burn-In</h4>
             <p>Burn SRT/TTML subtitles permanently into video, for festival screeners.</p>
-        </div>
-        <div class="gui-feature">
-            <h4>🚀 Batch Deliver</h4>
-            <p>Select target platforms with checkboxes and deliver to all in one click.</p>
         </div>
         <div class="gui-feature">
             <h4>🎬 IMF → DCP</h4>
@@ -793,13 +759,13 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--color-space</span> <span class="val">bt2020-pq</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--output</span> <span class="val">/path/to/output/</span><br>
 <br>
-<span class="comment"># Use a delivery preset</span><br>
-<span class="cmd">$</span> ./imfwizard create <span class="flag">--preset</span> <span class="val">netflix</span> <span class="flag">--video</span> <span class="val">frames/</span> <span class="flag">--audio</span> <span class="val">audio.wav</span> <span class="flag">-o</span> <span class="val">out/</span><br>
+<span class="comment"># List delivery presets</span><br>
+<span class="cmd">$</span> ./imfwizard profiles<br>
 <br>
 <span class="comment"># Measure loudness</span><br>
 <span class="cmd">$</span> ./imfwizard loudness <span class="val">/path/to/audio.wav</span><br>
 <br>
-<span class="comment"># Validate with Netflix Photon</span><br>
+<span class="comment"># Validate an IMP (add --xsd for schema checks)</span><br>
 <span class="cmd">$</span> ./imfwizard validate <span class="val">/path/to/imp/</span><br>
 <br>
 <span class="comment"># Scale video to target resolution (2K/4K scope/flat/full)</span><br>
@@ -836,46 +802,32 @@
             </tr>
         </thead>
         <tbody>
-            <tr><td>Create IMF packages (App#2 / App#2E)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Supplemental / Versioned IMPs</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Multi-CPL timeline</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Create IMF packages (App#2E)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Command-line interface (CLI)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Netflix Photon validation</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Dolby Vision 4.0 packaging</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Structural + signature validation</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Dolby Vision packaging</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>TTML / IMSC subtitles</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Wide framerate support (23.98&ndash;120 fps)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>JPEG 2000 encoding / transcoding</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Desktop GUI</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>HD-SDI output (Blackmagic)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Subtitle burn-in</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>ProRes IMF profiles</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard Advantages</td></tr>
             <tr><td>HDR10+ metadata packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Job queue daemon (batch processing)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Watch folder automation</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Cloud delivery (AWS S3 / Aspera)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Forensic watermarking</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Accessibility (AD, HoH)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>Watch folder events</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>Cloud delivery (AWS S3 / Aspera / rsync)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>Visible watermarking</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>ACES colour management</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Digital signatures (SMPTE 430-6)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Delivery presets (Netflix, Disney+, Amazon, Apple)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Batch multi-platform delivery</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>IMF-to-DCP conversion</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Bitrate analytics dashboard</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>XML-DSIG signing / verification</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>IMF-to-DCP conversion (single composition)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Linux support</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Open source (GPL-3.0)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td colspan="3" style="color:var(--text-tertiary);font-weight:700;padding-top:20px;">IMF Wizard Premium</td></tr>
+            <tr><td colspan="3" style="color:var(--text-tertiary);font-weight:700;padding-top:20px;">More</td></tr>
             <tr><td>IMF package diff (compare IMPs)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>OTIOZ / OpenTimelineIO import</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Multi-node distributed render</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>KDM generation (SMPTE 430-1)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Dolby Vision Profile 8.1</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>MXF playback &amp; probe</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Forensic watermarking</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Asset browser with thumbnails</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td>Prometheus metrics endpoint</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>MXF probe</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>Prometheus job-state metrics</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Docker / Flatpak / .dmg packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td colspan="3" style="color:var(--text-tertiary);font-weight:700;padding-top:20px;">easyDCP Exclusives</td></tr>
             <tr><td>GPU / CUDA acceleration</td><td class="no">Planned</td><td class="yes">&#10003; (Windows)</td></tr>
@@ -892,28 +844,28 @@
     <div class="roadmap">
         <div class="roadmap-item active">
             <div class="phase">Input</div>
-            <h4>Any Source Format</h4>
-            <p>J2K, DPX, TIFF, EXR, PNG, ProRes, DNxHR, H.264, H.265, AV1. Auto-detects and converts.</p>
+            <h4>Common Source Formats</h4>
+            <p>J2K, DPX, TIFF, EXR, PNG, and video files (via ffmpeg). Auto-detects and converts.</p>
         </div>
         <div class="roadmap-item active">
             <div class="phase">Packaging</div>
             <h4>Full IMP Creation</h4>
-            <p>OV &amp; Supplemental IMPs, multi-CPL, TTML subtitles, XML signing, SHA-1 hashing.</p>
+            <p>OV IMPs, TTML subtitles, XML-DSIG signing, SHA-1 hashing.</p>
         </div>
         <div class="roadmap-item active">
             <div class="phase">Colour</div>
-            <h4>HDR &amp; ACES</h4>
-            <p>Dolby Vision 4.0, HDR10+, BT.2020 PQ/HLG, P3-D65, ACES App#5 colour management.</p>
+            <h4>HDR</h4>
+            <p>Dolby Vision RPU, HDR10+, and an ACES CTL pipeline via ctlrender.</p>
         </div>
         <div class="roadmap-item active">
             <div class="phase">QC</div>
             <h4>Validation &amp; Metrics</h4>
-            <p>Netflix Photon, loudness metering, VMAF/PSNR/SSIM, bitrate analysis, QC reports.</p>
+            <p>Structural + signature validation (optional Photon), loudness measurement, PSNR/SSIM + optional VMAF, bitrate analysis, QC reports.</p>
         </div>
         <div class="roadmap-item active">
             <div class="phase">Workflow</div>
             <h4>Automation</h4>
-            <p>Job queue daemon, watch folder, delivery presets, EDL/AAF conform, S3 upload.</p>
+            <p>REST API worker queue, watch folder, EDL/FCP7 conform, S3/Aspera/rsync upload.</p>
         </div>
         <div class="roadmap-item active">
             <div class="phase">GUI</div>

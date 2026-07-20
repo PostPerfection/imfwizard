@@ -181,6 +181,14 @@ enum Commands {
         /// Directory containing SMPTE XSD schema files
         #[arg(long)]
         schema_dir: Option<String>,
+
+        /// Also run Netflix Photon (needs a JRE + Photon jar)
+        #[arg(long)]
+        photon: bool,
+
+        /// Path to the Photon jar (else PHOTON_JAR env var)
+        #[arg(long)]
+        photon_jar: Option<String>,
     },
 
     /// Measure audio loudness (EBU R128)
@@ -331,15 +339,9 @@ enum Commands {
         /// Listen address (host:port)
         #[arg(short, long, default_value = "127.0.0.1:8081")]
         bind: String,
-    },
-
-    /// Start job queue daemon
-    Daemon,
-
-    /// Manage job queue
-    Batch {
-        #[command(subcommand)]
-        action: BatchAction,
+        /// Require this key on requests (X-Api-Key or Authorization: Bearer)
+        #[arg(long)]
+        api_key: Option<String>,
     },
 
     /// Generate shell completions
@@ -592,6 +594,10 @@ enum Commands {
         /// Enable pixel-level PSNR/SSIM comparison (requires video MXF inputs)
         #[arg(long)]
         pixel: bool,
+
+        /// Compute VMAF via ffmpeg's libvmaf filter (requires video inputs)
+        #[arg(long)]
+        vmaf: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -879,26 +885,6 @@ enum Commands {
         /// Target DV profile (8.1, 8.4)
         #[arg(long, default_value = "8.1")]
         target_profile: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum BatchAction {
-    /// List all jobs
-    List,
-    /// Submit a new job
-    Add {
-        /// Job type (create|encode|transcode|validate|loudness)
-        #[arg(short = 'T', long)]
-        r#type: String,
-        /// Job parameters (JSON string)
-        #[arg(short, long)]
-        params: String,
-    },
-    /// Cancel a job
-    Cancel {
-        /// Job ID to cancel
-        id: String,
     },
 }
 
@@ -1308,25 +1294,24 @@ fn run() {
             dir,
             xsd,
             schema_dir,
+            photon,
+            photon_jar,
         } => {
+            let mut failed = false;
             let result = imfwizard_core::validate::validate_imp(std::path::Path::new(&dir));
             if result.valid {
                 println!("IMP validation PASSED");
-                if !result.warnings.is_empty() {
-                    for w in &result.warnings {
-                        println!("  warning: {w}");
-                    }
+                for w in &result.warnings {
+                    println!("  warning: {w}");
                 }
             } else {
+                failed = true;
                 eprintln!("IMP validation FAILED");
                 for e in &result.errors {
                     eprintln!("  error: {e}");
                 }
                 for w in &result.warnings {
                     eprintln!("  warning: {w}");
-                }
-                if !xsd {
-                    std::process::exit(1);
                 }
             }
 
@@ -1337,20 +1322,16 @@ fn run() {
                     sd,
                 ) {
                     Ok(results) => {
-                        let mut all_valid = true;
                         for r in &results {
                             if r.valid {
                                 println!("  XSD {}: PASS", r.file);
                             } else {
-                                all_valid = false;
+                                failed = true;
                                 eprintln!("  XSD {}: FAIL", r.file);
                                 for err in &r.errors {
                                     eprintln!("    {err}");
                                 }
                             }
-                        }
-                        if !all_valid {
-                            std::process::exit(1);
                         }
                     }
                     Err(e) => {
@@ -1358,6 +1339,32 @@ fn run() {
                         std::process::exit(1);
                     }
                 }
+            }
+
+            if photon {
+                let jar = photon_jar.as_deref().map(std::path::Path::new);
+                match imfwizard_core::photon::run_photon(std::path::Path::new(&dir), jar) {
+                    Ok(p) => {
+                        if p.errors.is_empty() && p.warnings.is_empty() {
+                            println!("  Photon: PASS");
+                        }
+                        for e in &p.errors {
+                            failed = true;
+                            eprintln!("  error: {e}");
+                        }
+                        for w in &p.warnings {
+                            println!("  warning: {w}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Photon error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            if failed {
+                std::process::exit(1);
             }
         }
 
@@ -1572,66 +1579,18 @@ fn run() {
             }
         }
 
-        Commands::Serve { bind } => {
+        Commands::Serve { bind, api_key } => {
             let parts: Vec<&str> = bind.split(':').collect();
             let config = imfwizard_core::rest_api::ApiConfig {
                 host: parts.first().unwrap_or(&"127.0.0.1").to_string(),
                 port: parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8081),
-                api_key: None,
+                api_key,
             };
             if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             }
         }
-
-        Commands::Daemon => {
-            println!("Starting imfwizard job queue daemon...");
-            let queue = imfwizard_core::job_queue::JobQueue::new();
-            loop {
-                if let Some(job) = queue.next_runnable() {
-                    tracing::info!("Processing job {}: {:?}", job.id, job.job_type);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-
-        Commands::Batch { action } => match action {
-            BatchAction::List => {
-                let queue = imfwizard_core::job_queue::JobQueue::new();
-                for job in queue.list() {
-                    println!(
-                        "[{}] {:?} — {:?} ({}%)",
-                        job.id,
-                        job.job_type,
-                        job.state,
-                        (job.progress * 100.0) as u32
-                    );
-                }
-            }
-            BatchAction::Add { r#type, params } => {
-                let queue = imfwizard_core::job_queue::JobQueue::new();
-                let job_type = match r#type.as_str() {
-                    "encode" => imfwizard_core::job_queue::JobType::Encode,
-                    "transcode" => imfwizard_core::job_queue::JobType::Transcode,
-                    "validate" => imfwizard_core::job_queue::JobType::Validate,
-                    "loudness" => imfwizard_core::job_queue::JobType::Loudness,
-                    _ => imfwizard_core::job_queue::JobType::Create,
-                };
-                let id = queue.submit(imfwizard_core::job_queue::Job {
-                    job_type,
-                    description: params,
-                    ..Default::default()
-                });
-                println!("Job submitted: {id}");
-            }
-            BatchAction::Cancel { id } => {
-                let queue = imfwizard_core::job_queue::JobQueue::new();
-                let job_id: u64 = id.parse().unwrap_or(0);
-                queue.cancel(job_id);
-                println!("Job {id} cancelled");
-            }
-        },
 
         Commands::Completion { shell } => {
             use clap::CommandFactory;
@@ -1961,7 +1920,28 @@ fn run() {
             }
         }
 
-        Commands::Compare { a, b, pixel, json } => {
+        Commands::Compare {
+            a,
+            b,
+            pixel,
+            vmaf,
+            json,
+        } => {
+            let vmaf_score = if vmaf {
+                match imfwizard_core::frame_compare::compute_vmaf(
+                    std::path::Path::new(&a),
+                    std::path::Path::new(&b),
+                ) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
             if pixel {
                 // Pixel-level PSNR/SSIM comparison
                 match imfwizard_core::frame_compare::compare_frames(
@@ -1970,7 +1950,11 @@ fn run() {
                 ) {
                     Ok(result) => {
                         if json {
-                            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                            let out = serde_json::json!({
+                                "psnr_ssim": result,
+                                "vmaf": vmaf_score,
+                            });
+                            println!("{}", serde_json::to_string_pretty(&out).unwrap());
                         } else {
                             println!("Frame Comparison: {} vs {}", a, b);
                             println!("  Frames compared: {}", result.frames_compared);
@@ -1982,12 +1966,32 @@ fn run() {
                                 "  SSIM (avg/min/max): {:.6} / {:.6} / {:.6}",
                                 result.avg_ssim, result.min_ssim, result.max_ssim
                             );
+                            if let Some(v) = &vmaf_score {
+                                println!(
+                                    "  VMAF (mean/min/max): {:.2} / {:.2} / {:.2}",
+                                    v.mean, v.min, v.max
+                                );
+                            }
                         }
                     }
                     Err(e) => {
                         eprintln!("Error: {e}");
                         std::process::exit(1);
                     }
+                }
+            } else if let Some(v) = vmaf_score {
+                // VMAF-only comparison
+                if json {
+                    let out = serde_json::json!({ "vmaf": v });
+                    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+                } else {
+                    println!("VMAF: {} vs {}", a, b);
+                    println!("  Frames: {}", v.frames);
+                    println!(
+                        "  VMAF (mean/min/max): {:.2} / {:.2} / {:.2}",
+                        v.mean, v.min, v.max
+                    );
+                    println!("  Harmonic mean: {:.2}", v.harmonic_mean);
                 }
             } else {
                 // Metadata-level comparison
@@ -2732,6 +2736,7 @@ fn run() {
                 valid_from,
                 valid_to,
                 formulation,
+                content_keys: Vec::new(),
             };
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),
