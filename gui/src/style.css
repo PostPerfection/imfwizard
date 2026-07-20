@@ -311,6 +311,18 @@ body {
   color: var(--text-muted);
 }
 
+.asset-item .asset-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0;
+}
+
+.asset-item:hover .asset-remove { opacity: 0.7; }
+.asset-item .asset-remove:hover { opacity: 1; }
+
 /* Reels */
 /* CPL Tabs */
 .compositions-panel {

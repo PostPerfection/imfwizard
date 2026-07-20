@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Command } from "@tauri-apps/plugin-shell";
-import { open as _open } from "@tauri-apps/plugin-dialog";
+import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp } from "./preview.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
@@ -254,11 +254,15 @@ function renderAssets() {
       <span class="asset-icon">${icons[a.type]}</span>
       <span class="asset-name" title="${a.path}">${a.name}</span>
       <span class="asset-meta">${a.meta || a.type}</span>
+      <button class="asset-remove" data-remove-id="${a.id}" title="Remove from project">✕</button>
     </div>
   `).join('');
   list.querySelectorAll('.asset-item').forEach(el => {
     el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.assetId); });
     el.addEventListener('contextmenu', (e) => { showContextMenu(e, parseInt(el.dataset.assetId)); });
+  });
+  list.querySelectorAll('.asset-remove').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); removeAsset(parseInt(el.dataset.removeId)); });
   });
   // Re-apply filter
   const q = document.getElementById("asset-filter")?.value?.toLowerCase() || "";
@@ -416,7 +420,7 @@ document.getElementById("btn-open-project")?.addEventListener("click", async () 
 document.getElementById("btn-preview")?.addEventListener("click", () => {
   const seg = project.segments[0];
   if (seg?.picture) { previewFile(seg.picture.path); }
-  else { alert("Import a video asset first"); }
+  else { tauriMessage("Import a video asset first"); }
 });
 
 // === Supplement ===
@@ -434,10 +438,10 @@ let currentJobId = null;
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {
   const title = document.getElementById("prop-title")?.value?.trim();
-  if (!title) { alert("Enter a content title in Properties"); return; }
+  if (!title) { tauriMessage("Enter a content title in Properties"); return; }
 
   const seg = project.segments[0];
-  if (!seg?.picture) { alert("Import a video asset first"); return; }
+  if (!seg?.picture) { tauriMessage("Import a video asset first"); return; }
 
   const video = seg.picture.path;
   const audio = seg.sound?.path || null;
@@ -863,9 +867,9 @@ if ("Notification" in window && Notification.permission === "default") {
 }
 
 // === Confirmation Dialogs ===
-document.getElementById("btn-new-project")?.addEventListener("click", () => {
+document.getElementById("btn-new-project")?.addEventListener("click", async () => {
   if (project.assets.length > 0) {
-    if (!confirm("Clear current project and start new? Unsaved changes will be lost.")) return;
+    if (!(await tauriConfirm("Clear current project and start new? Unsaved changes will be lost."))) return;
   }
   project.title = "";
   project.assets = [];
@@ -935,6 +939,21 @@ function showContextMenu(e, assetId) {
 
 document.addEventListener("click", () => { if (ctxMenu) ctxMenu.hidden = true; });
 
+async function removeAsset(assetId) {
+  const asset = project.assets.find(a => a.id === assetId);
+  if (!asset) return;
+  if (!(await tauriConfirm(`Remove "${asset.name}" from project?`))) return;
+  project.assets = project.assets.filter(a => a.id !== assetId);
+  project.segments.forEach(s => {
+    if (s.picture?.id === assetId) s.picture = null;
+    if (s.sound?.id === assetId) s.sound = null;
+    if (s.subtitle?.id === assetId) s.subtitle = null;
+  });
+  renderAssets();
+  renderSegments();
+  updateStatusStats();
+}
+
 ctxMenu?.querySelectorAll("button").forEach(btn => {
   btn.addEventListener("click", () => {
     const action = btn.dataset.action;
@@ -943,16 +962,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
     if (action === "preview") {
       previewFile(asset.path);
     } else if (action === "remove") {
-      if (!confirm(`Remove "${asset.name}" from project?`)) return;
-      project.assets = project.assets.filter(a => a.id !== ctxAssetId);
-      project.segments.forEach(s => {
-        if (s.picture?.id === ctxAssetId) s.picture = null;
-        if (s.sound?.id === ctxAssetId) s.sound = null;
-        if (s.subtitle?.id === ctxAssetId) s.subtitle = null;
-      });
-      renderAssets();
-      renderSegments();
-      updateStatusStats();
+      removeAsset(ctxAssetId);
     } else if (action === "reveal") {
       invoke("plugin:shell|open", { path: asset.path.replace(/[/\\][^/\\]*$/, '') });
     }

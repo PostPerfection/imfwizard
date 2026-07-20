@@ -38,6 +38,8 @@
     "shell:allow-stdin-write",
     "shell:allow-kill",
     "dialog:allow-open",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
     "notification:default",
     {
       "identifier": "fs:allow-read-file",
