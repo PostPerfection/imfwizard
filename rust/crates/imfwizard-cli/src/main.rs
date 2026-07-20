@@ -258,6 +258,41 @@ enum Commands {
         title: Option<String>,
     },
 
+    /// Sign an IMF XML document (CPL/PKL/OPL) with an enveloped XML signature
+    Sign {
+        /// Input XML file
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Output signed XML file (defaults to overwriting the input)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Signer certificate PEM file
+        #[arg(long)]
+        cert: PathBuf,
+
+        /// Signer private key PEM file
+        #[arg(long)]
+        key: PathBuf,
+
+        /// CA chain PEM file (repeatable, leaf to root)
+        #[arg(long = "chain")]
+        chain: Vec<PathBuf>,
+    },
+
+    /// Verify an IMF XML document's enveloped signature
+    #[command(name = "verify-sig")]
+    VerifySig {
+        /// Input signed XML file
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Trusted certificate PEM (the embedded signing cert must match it)
+        #[arg(long)]
+        trusted_cert: Option<PathBuf>,
+    },
+
     /// Convert IMP to a delivery target format
     #[command(name = "target-convert")]
     TargetConvert {
@@ -1428,6 +1463,34 @@ fn run() {
                 std::process::exit(1);
             }
         }
+
+        Commands::Sign {
+            input,
+            output,
+            cert,
+            key,
+            chain,
+        } => {
+            let out = output.unwrap_or_else(|| input.clone());
+            match imfwizard_core::signature::sign_document(&input, &out, &cert, &key, &chain) {
+                Ok(()) => println!("Signed {} -> {}", input.display(), out.display()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::VerifySig {
+            input,
+            trusted_cert,
+        } => match imfwizard_core::signature::verify_signature(&input, trusted_cert.as_deref()) {
+            Ok(()) => println!("Signature valid: {}", input.display()),
+            Err(e) => {
+                eprintln!("Signature invalid: {e}");
+                std::process::exit(1);
+            }
+        },
 
         Commands::TargetConvert {
             input,

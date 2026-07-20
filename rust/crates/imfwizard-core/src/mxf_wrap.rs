@@ -39,12 +39,16 @@ fn collect_input_files(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>
 
 /// Wrap essence into an MXF track file.
 ///
-/// IMF track files use the AS-02 (ST 2067) writers. J2K/TimedText/Atmos delegate to
-/// postkit's asdcplib-backed wrappers. PCM is handled here because postkit's PCM wrapper
-/// hardcodes 5.1/24-bit/48k instead of reading the WAV header, so we parse it ourselves.
+/// IMF track files use the AS-02 (ST 2067) writers. Every essence type delegates to
+/// postkit's asdcplib-backed wrappers; postkit's PCM wrapper now parses the real WAV
+/// header, so there is one WAV-parsing implementation.
 pub fn wrap_mxf(opts: &MxfWrapOptions) -> MxfWrapResult {
     match opts.essence_type {
-        crate::EssenceType::Wav => wrap_pcm(opts),
+        crate::EssenceType::Wav => delegate(
+            opts,
+            postkit::mxf_wrap::EssenceType::Pcm,
+            postkit::mxf_wrap::MxfStandard::As02,
+        ),
         crate::EssenceType::J2k => {
             if let Err(error) = precheck_j2k(&opts.input_dir) {
                 return MxfWrapResult {
@@ -146,187 +150,6 @@ pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<
     Ok(())
 }
 
-/// Parsed WAV `fmt ` fields plus the byte range of the `data` chunk.
-struct WavInfo {
-    channels: u32,
-    bits: u32,
-    sample_rate: u32,
-    data_offset: usize,
-    data_len: usize,
-}
-
-/// Parse a canonical/extensible RIFF-WAVE header by walking its chunks.
-fn parse_wav(data: &[u8]) -> Result<WavInfo, String> {
-    if data.len() < 12 || &data[0..4] != b"RIFF" || &data[8..12] != b"WAVE" {
-        return Err("not a RIFF/WAVE file".into());
-    }
-    let mut pos = 12;
-    let mut fmt: Option<(u32, u32, u32)> = None; // channels, bits, sample_rate
-    let mut data_range: Option<(usize, usize)> = None;
-    while pos + 8 <= data.len() {
-        let id = &data[pos..pos + 4];
-        let size = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
-            as usize;
-        let body = pos + 8;
-        if id == b"fmt " {
-            if body + 16 > data.len() {
-                return Err("truncated fmt chunk".into());
-            }
-            let channels = u16::from_le_bytes([data[body + 2], data[body + 3]]) as u32;
-            let sample_rate = u32::from_le_bytes([
-                data[body + 4],
-                data[body + 5],
-                data[body + 6],
-                data[body + 7],
-            ]);
-            let bits = u16::from_le_bytes([data[body + 14], data[body + 15]]) as u32;
-            fmt = Some((channels, bits, sample_rate));
-        } else if id == b"data" {
-            let end = (body + size).min(data.len());
-            data_range = Some((body, end));
-        }
-        // chunks are word-aligned
-        pos = body + size + (size & 1);
-    }
-    let (channels, bits, sample_rate) = fmt.ok_or("missing fmt chunk")?;
-    let (data_offset, data_end) = data_range.ok_or("missing data chunk")?;
-    if channels == 0 || bits == 0 || sample_rate == 0 {
-        return Err("invalid fmt chunk (zero channels/bits/rate)".into());
-    }
-    Ok(WavInfo {
-        channels,
-        bits,
-        sample_rate,
-        data_offset,
-        data_len: data_end.saturating_sub(data_offset),
-    })
-}
-
-fn wrap_pcm(opts: &MxfWrapOptions) -> MxfWrapResult {
-    let files = match collect_input_files(&opts.input_dir) {
-        Ok(f) => f,
-        Err(e) => {
-            return MxfWrapResult {
-                error: e,
-                ..Default::default()
-            };
-        }
-    };
-
-    let wav_data = match std::fs::read(&files[0]) {
-        Ok(d) => d,
-        Err(e) => {
-            return MxfWrapResult {
-                error: format!("failed to read WAV: {e}"),
-                ..Default::default()
-            };
-        }
-    };
-
-    let wav = match parse_wav(&wav_data) {
-        Ok(w) => w,
-        Err(e) => {
-            return MxfWrapResult {
-                error: format!("WAV parse ({}): {e}", files[0].display()),
-                ..Default::default()
-            };
-        }
-    };
-
-    let asset_uuid = *uuid::Uuid::new_v4().as_bytes();
-    let info = asdcplib::WriterInfo {
-        asset_uuid,
-        context_id: *uuid::Uuid::new_v4().as_bytes(),
-        label_set: asdcplib::LabelSet::Smpte,
-        ..Default::default()
-    };
-
-    let block_align = (wav.bits / 8) * wav.channels;
-    let samples_per_frame = (wav.sample_rate as f64
-        / (opts.edit_rate_num as f64 / opts.edit_rate_den as f64))
-        .ceil() as u32;
-    let frame_size = samples_per_frame * block_align;
-    if frame_size == 0 {
-        return MxfWrapResult {
-            error: "computed zero PCM frame size".into(),
-            ..Default::default()
-        };
-    }
-
-    let pcm_data = &wav_data[wav.data_offset..wav.data_offset + wav.data_len];
-    let num_frames = (pcm_data.len() as u32) / frame_size;
-
-    let desc = asdcplib::pcm::AudioDescriptor {
-        edit_rate: asdcplib::Rational::new(opts.edit_rate_num as i32, opts.edit_rate_den as i32),
-        audio_sampling_rate: asdcplib::Rational::new(wav.sample_rate as i32, 1),
-        locked: true,
-        channel_count: wav.channels,
-        quantization_bits: wav.bits,
-        block_align,
-        avg_bps: wav.sample_rate * block_align,
-        linked_track_id: 0,
-        container_duration: num_frames,
-        channel_format: if wav.channels == 6 {
-            asdcplib::pcm::ChannelFormat::Cfg1
-        } else {
-            asdcplib::pcm::ChannelFormat::None
-        },
-    };
-
-    let mut writer = asdcplib::as02::pcm::MxfWriter::new();
-    let output_str = opts.output_file.to_string_lossy().to_string();
-    if let Err(e) = writer.open_write(&output_str, &info, &desc, 16384) {
-        return MxfWrapResult {
-            error: format!("PCM open_write: {e}"),
-            ..Default::default()
-        };
-    }
-
-    for i in 0..num_frames {
-        let start = (i * frame_size) as usize;
-        let end = start + frame_size as usize;
-        if end > pcm_data.len() {
-            break;
-        }
-        if let Err(e) = writer.write_frame(&pcm_data[start..end], None, None) {
-            return MxfWrapResult {
-                error: format!("PCM write_frame: {e}"),
-                ..Default::default()
-            };
-        }
-    }
-
-    if let Err(e) = writer.finalize() {
-        return MxfWrapResult {
-            error: format!("PCM finalize: {e}"),
-            ..Default::default()
-        };
-    }
-
-    let (hash, size) =
-        match postkit::hash::hash_file(&opts.output_file, postkit::hash::HashAlgorithm::Sha1) {
-            Ok(h) => (
-                h.base64,
-                std::fs::metadata(&opts.output_file)
-                    .map(|m| m.len())
-                    .unwrap_or(0),
-            ),
-            Err(_) => (String::new(), 0),
-        };
-
-    MxfWrapResult {
-        success: true,
-        error: String::new(),
-        track_file: crate::MxfTrackFile {
-            path: opts.output_file.clone(),
-            uuid: uuid::Uuid::from_bytes(asset_uuid).hyphenated().to_string(),
-            hash,
-            size,
-            duration: num_frames as u64,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,35 +161,55 @@ mod tests {
         assert!(validate_app2e_picture(2048, 1080, 16).is_err());
     }
 
+    /// A non-default (2ch/16-bit) WAV wraps into an AS-02 PCM MXF via postkit,
+    /// and the wrapped descriptor reflects the real header, not a 5.1 default.
     #[test]
-    fn parse_wav_reads_real_header() {
-        // minimal 2ch/16-bit/44100 WAV with 4 sample frames of silence
-        let mut d = Vec::new();
-        d.extend_from_slice(b"RIFF");
-        d.extend_from_slice(&[0, 0, 0, 0]); // riff size (ignored)
-        d.extend_from_slice(b"WAVE");
-        d.extend_from_slice(b"fmt ");
-        d.extend_from_slice(&16u32.to_le_bytes());
-        d.extend_from_slice(&1u16.to_le_bytes()); // pcm
-        d.extend_from_slice(&2u16.to_le_bytes()); // channels
-        d.extend_from_slice(&44100u32.to_le_bytes());
-        d.extend_from_slice(&(44100u32 * 4).to_le_bytes()); // byte rate
-        d.extend_from_slice(&4u16.to_le_bytes()); // block align
-        d.extend_from_slice(&16u16.to_le_bytes()); // bits
-        d.extend_from_slice(b"data");
-        let payload = [0u8; 16];
-        d.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        d.extend_from_slice(&payload);
+    fn wrap_wav_delegates_and_preserves_channel_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav_path = dir.path().join("stereo.wav");
+        std::fs::write(&wav_path, make_wav(2, 48000, 16, 48000)).unwrap();
+        let out = dir.path().join("AUDIO.mxf");
 
-        let w = parse_wav(&d).unwrap();
-        assert_eq!(w.channels, 2);
-        assert_eq!(w.bits, 16);
-        assert_eq!(w.sample_rate, 44100);
-        assert_eq!(w.data_len, 16);
+        let opts = MxfWrapOptions {
+            input_dir: wav_path,
+            output_file: out.clone(),
+            essence_type: crate::EssenceType::Wav,
+            edit_rate_num: 24,
+            edit_rate_den: 1,
+            duration: 0,
+        };
+        let result = wrap_mxf(&opts);
+        assert!(result.success, "wrap failed: {}", result.error);
+
+        let mut reader = asdcplib::as02::pcm::MxfReader::new();
+        reader
+            .open_read(&out.to_string_lossy(), asdcplib::Rational::new(24, 1))
+            .expect("open wrapped MXF");
+        let desc = reader.audio_descriptor().expect("audio descriptor");
+        assert_eq!(desc.channel_count, 2);
+        assert_eq!(desc.quantization_bits, 16);
+        assert_eq!(desc.audio_sampling_rate.numerator, 48000);
     }
 
-    #[test]
-    fn parse_wav_rejects_non_riff() {
-        assert!(parse_wav(b"not a wav file at all").is_err());
+    /// Build a minimal PCM WAV (fmt + data chunks) with the given parameters.
+    fn make_wav(channels: u16, sample_rate: u32, bits: u16, sample_frames: u32) -> Vec<u8> {
+        let block_align = (bits / 8) as u32 * channels as u32;
+        let data_len = block_align * sample_frames;
+        let mut w = Vec::new();
+        w.extend_from_slice(b"RIFF");
+        w.extend_from_slice(&(36 + data_len).to_le_bytes());
+        w.extend_from_slice(b"WAVE");
+        w.extend_from_slice(b"fmt ");
+        w.extend_from_slice(&16u32.to_le_bytes());
+        w.extend_from_slice(&1u16.to_le_bytes()); // WAVE_FORMAT_PCM
+        w.extend_from_slice(&channels.to_le_bytes());
+        w.extend_from_slice(&sample_rate.to_le_bytes());
+        w.extend_from_slice(&(sample_rate * block_align).to_le_bytes()); // byte rate
+        w.extend_from_slice(&(block_align as u16).to_le_bytes());
+        w.extend_from_slice(&bits.to_le_bytes());
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&data_len.to_le_bytes());
+        w.resize(w.len() + data_len as usize, 0);
+        w
     }
 }
