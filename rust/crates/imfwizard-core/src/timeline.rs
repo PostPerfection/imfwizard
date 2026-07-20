@@ -1,3 +1,6 @@
+use quick_xml::events::Event;
+use quick_xml::name::QName;
+use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,6 +19,22 @@ pub struct SegmentEntry {
     pub audio_file: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CplInfo {
+    pub id: String,
+    pub file_path: String,
+    pub title: String,
+}
+
+/// The local part of an element name (drops any `cc:` style namespace prefix).
+fn local_name(qname: QName) -> String {
+    String::from_utf8_lossy(qname.local_name().as_ref()).into_owned()
+}
+
+fn strip_urn(s: &str) -> String {
+    s.replace("urn:uuid:", "")
+}
+
 /// Parse an IMF CPL and return its segment/resource timeline.
 pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
     let imp_dir = cpl_path.parent().unwrap_or(Path::new("."));
@@ -31,116 +50,117 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
     let mut entries = Vec::new();
     let mut segment_number = 0u32;
 
-    // IMF CPL structure: SegmentList > Segment > SequenceList > MainImageSequence/MainAudioSequence > ResourceList > Resource
+    let mut reader = Reader::from_str(&content);
+    reader.config_mut().trim_text(true);
+
+    // state mirrors the CPL nesting: SegmentList > Segment > SequenceList > *Sequence > ResourceList > Resource
     let mut in_segment = false;
-    let mut segment_id = String::new();
     let mut in_image_seq = false;
     let mut in_audio_seq = false;
     let mut in_resource = false;
-    let mut edit_rate = String::new();
-    let mut duration = 0u64;
-    let mut entry_point = 0u64;
-    let mut video_track_file_id = String::new();
-    let mut audio_track_file_id = String::new();
+    let mut seg = SegmentEntry::default();
+    // the element we are currently reading text for
+    let mut cur: String = String::new();
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.contains("<Segment>") || trimmed.contains("<Segment ") {
-            in_segment = true;
-            segment_number += 1;
-            segment_id.clear();
-            video_track_file_id.clear();
-            audio_track_file_id.clear();
-            duration = 0;
-            entry_point = 0;
-            edit_rate.clear();
-        } else if trimmed.contains("</Segment>") {
-            if in_segment {
-                let video_file = asset_map
-                    .get(&video_track_file_id)
-                    .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let audio_file = asset_map
-                    .get(&audio_track_file_id)
-                    .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                entries.push(SegmentEntry {
-                    segment_id: segment_id.clone(),
-                    segment_number,
-                    duration_frames: duration,
-                    entry_point,
-                    edit_rate: edit_rate.clone(),
-                    video_track_file_id: video_track_file_id.clone(),
-                    audio_track_file_id: audio_track_file_id.clone(),
-                    video_file,
-                    audio_file,
-                });
-            }
-            in_segment = false;
-        } else if in_segment {
-            if trimmed.contains("MainImageSequence") && !trimmed.contains('/') {
-                in_image_seq = true;
-                in_audio_seq = false;
-            } else if trimmed.contains("MainAudioSequence") && !trimmed.contains('/') {
-                in_audio_seq = true;
-                in_image_seq = false;
-            } else if trimmed.contains("</MainImageSequence")
-                || trimmed.contains("/>") && trimmed.contains("MainImageSequence")
-            {
-                in_image_seq = false;
-            } else if trimmed.contains("</MainAudioSequence")
-                || trimmed.contains("/>") && trimmed.contains("MainAudioSequence")
-            {
-                in_audio_seq = false;
-            }
-
-            if trimmed.contains("<Resource>") || trimmed.contains("<Resource ") {
-                in_resource = true;
-            } else if trimmed.contains("</Resource>") {
-                in_resource = false;
-            }
-
-            if in_segment
-                && !in_image_seq
-                && !in_audio_seq
-                && let Some(id) = extract_xml_value(trimmed, "Id")
-                && segment_id.is_empty()
-            {
-                segment_id = id.replace("urn:uuid:", "");
-            }
-
-            if in_resource {
-                if let Some(id) = extract_xml_value(trimmed, "TrackFileId") {
-                    let clean_id = id.replace("urn:uuid:", "");
-                    if in_image_seq && video_track_file_id.is_empty() {
-                        video_track_file_id = clean_id;
-                    } else if in_audio_seq && audio_track_file_id.is_empty() {
-                        audio_track_file_id = clean_id;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let name = local_name(e.name());
+                cur = name.clone();
+                match name.as_str() {
+                    "Segment" => {
+                        in_segment = true;
+                        segment_number += 1;
+                        seg = SegmentEntry {
+                            segment_number,
+                            ..Default::default()
+                        };
                     }
-                }
-                if let Some(d) = extract_xml_value(trimmed, "SourceDuration") {
-                    if let Ok(v) = d.parse::<u64>() {
-                        duration = v;
+                    "MainImageSequence" => {
+                        in_image_seq = true;
+                        in_audio_seq = false;
                     }
-                } else if duration == 0
-                    && let Some(d) = extract_xml_value(trimmed, "IntrinsicDuration")
-                    && let Ok(v) = d.parse::<u64>()
-                {
-                    duration = v;
-                }
-                if let Some(ep) = extract_xml_value(trimmed, "EntryPoint")
-                    && let Ok(v) = ep.parse::<u64>()
-                {
-                    entry_point = v;
+                    "MainAudioSequence" => {
+                        in_audio_seq = true;
+                        in_image_seq = false;
+                    }
+                    "Resource" => in_resource = true,
+                    _ => {}
                 }
             }
-
-            if let Some(er) = extract_xml_value(trimmed, "EditRate")
-                && edit_rate.is_empty()
-            {
-                edit_rate = er;
+            Ok(Event::Text(t)) => {
+                if !in_segment {
+                    continue;
+                }
+                let text = t.unescape().unwrap_or_default().trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                match cur.as_str() {
+                    // segment id lives directly under Segment, before any sequence/resource
+                    "Id" if !in_image_seq
+                        && !in_audio_seq
+                        && !in_resource
+                        && seg.segment_id.is_empty() =>
+                    {
+                        seg.segment_id = strip_urn(&text);
+                    }
+                    "EditRate" if seg.edit_rate.is_empty() => seg.edit_rate = text,
+                    "TrackFileId" if in_resource => {
+                        let id = strip_urn(&text);
+                        if in_image_seq && seg.video_track_file_id.is_empty() {
+                            seg.video_track_file_id = id;
+                        } else if in_audio_seq && seg.audio_track_file_id.is_empty() {
+                            seg.audio_track_file_id = id;
+                        }
+                    }
+                    "SourceDuration" if in_resource => {
+                        if let Ok(v) = text.parse::<u64>() {
+                            seg.duration_frames = v;
+                        }
+                    }
+                    "IntrinsicDuration" if in_resource && seg.duration_frames == 0 => {
+                        if let Ok(v) = text.parse::<u64>() {
+                            seg.duration_frames = v;
+                        }
+                    }
+                    "EntryPoint" if in_resource => {
+                        if let Ok(v) = text.parse::<u64>() {
+                            seg.entry_point = v;
+                        }
+                    }
+                    _ => {}
+                }
             }
+            Ok(Event::End(e)) => {
+                cur.clear();
+                match local_name(e.name()).as_str() {
+                    "Resource" => in_resource = false,
+                    "MainImageSequence" => in_image_seq = false,
+                    "MainAudioSequence" => in_audio_seq = false,
+                    "Segment" => {
+                        if in_segment {
+                            seg.video_file = asset_map
+                                .get(&seg.video_track_file_id)
+                                .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            seg.audio_file = asset_map
+                                .get(&seg.audio_track_file_id)
+                                .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            entries.push(std::mem::take(&mut seg));
+                        }
+                        in_segment = false;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                tracing::error!("CPL parse error: {e}");
+                break;
+            }
+            _ => {}
         }
     }
 
@@ -149,101 +169,98 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
 
 /// List CPLs in an IMP directory by scanning ASSETMAP.
 pub fn list_cpls(imp_dir: &Path) -> Vec<CplInfo> {
-    let assetmap_path = find_assetmap(imp_dir);
-    let assetmap_path = match assetmap_path {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let content = match std::fs::read_to_string(&assetmap_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut cpls = Vec::new();
-    let mut in_asset = false;
-    let mut current_id = String::new();
-    let mut current_path = String::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<Asset>") || trimmed.starts_with("<Asset ") {
-            in_asset = true;
-            current_id.clear();
-            current_path.clear();
-        } else if trimmed == "</Asset>" {
-            if in_asset && !current_id.is_empty() && !current_path.is_empty() {
-                let full_path = imp_dir.join(&current_path);
-                if full_path.exists()
-                    && let Ok(file_content) = std::fs::read_to_string(&full_path)
-                    && file_content.contains("CompositionPlaylist")
-                {
-                    let title =
-                        extract_xml_value(&file_content, "ContentTitle").unwrap_or_default();
-                    cpls.push(CplInfo {
-                        id: current_id.clone(),
-                        file_path: current_path.clone(),
-                        title,
-                    });
-                }
+    read_assetmap_assets(imp_dir)
+        .into_iter()
+        .filter_map(|(id, rel_path)| {
+            let full_path = imp_dir.join(&rel_path);
+            let file_content = std::fs::read_to_string(&full_path).ok()?;
+            if !file_content.contains("CompositionPlaylist") {
+                return None;
             }
-            in_asset = false;
-        } else if in_asset {
-            if let Some(id) = extract_xml_value(trimmed, "Id") {
-                current_id = id.replace("urn:uuid:", "");
-            }
-            if let Some(path) = extract_xml_value(trimmed, "Path") {
-                current_path = path;
-            }
-        }
-    }
-
-    cpls
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CplInfo {
-    pub id: String,
-    pub file_path: String,
-    pub title: String,
+            Some(CplInfo {
+                id,
+                title: first_element_text(&file_content, "ContentTitle").unwrap_or_default(),
+                file_path: rel_path,
+            })
+        })
+        .collect()
 }
 
 fn parse_assetmap(imp_dir: &Path) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    let assetmap_path = match find_assetmap(imp_dir) {
-        Some(p) => p,
-        None => return map,
+    read_assetmap_assets(imp_dir).into_iter().collect()
+}
+
+/// Read (id, path) pairs from an ASSETMAP, with ids stripped of the `urn:uuid:` prefix.
+fn read_assetmap_assets(imp_dir: &Path) -> Vec<(String, String)> {
+    let Some(assetmap_path) = find_assetmap(imp_dir) else {
+        return Vec::new();
     };
-    let content = match std::fs::read_to_string(&assetmap_path) {
-        Ok(c) => c,
-        Err(_) => return map,
+    let Ok(content) = std::fs::read_to_string(&assetmap_path) else {
+        return Vec::new();
     };
 
+    let mut reader = Reader::from_str(&content);
+    reader.config_mut().trim_text(true);
+
+    let mut assets = Vec::new();
     let mut in_asset = false;
-    let mut current_id = String::new();
-    let mut current_path = String::new();
+    let mut cur = String::new();
+    let mut id = String::new();
+    let mut path = String::new();
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<Asset>") || trimmed.starts_with("<Asset ") {
-            in_asset = true;
-            current_id.clear();
-            current_path.clear();
-        } else if trimmed == "</Asset>" {
-            if in_asset && !current_id.is_empty() && !current_path.is_empty() {
-                map.insert(current_id.clone(), current_path.clone());
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let name = local_name(e.name());
+                if name == "Asset" {
+                    in_asset = true;
+                    id.clear();
+                    path.clear();
+                }
+                cur = name;
             }
-            in_asset = false;
-        } else if in_asset {
-            if let Some(id) = extract_xml_value(trimmed, "Id") {
-                current_id = id.replace("urn:uuid:", "");
+            Ok(Event::Text(t)) if in_asset => {
+                let text = t.unescape().unwrap_or_default().trim().to_string();
+                match cur.as_str() {
+                    "Id" if id.is_empty() => id = strip_urn(&text),
+                    "Path" if path.is_empty() => path = text,
+                    _ => {}
+                }
             }
-            if let Some(path) = extract_xml_value(trimmed, "Path") {
-                current_path = path;
+            Ok(Event::End(e)) => {
+                cur.clear();
+                if local_name(e.name()) == "Asset" {
+                    if in_asset && !id.is_empty() && !path.is_empty() {
+                        assets.push((std::mem::take(&mut id), std::mem::take(&mut path)));
+                    }
+                    in_asset = false;
+                }
             }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
         }
     }
 
-    map
+    assets
+}
+
+/// Read the text of the first occurrence of `<tag>` in an XML string.
+fn first_element_text(xml: &str, tag: &str) -> Option<String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut in_tag = false;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) if local_name(e.name()) == tag => in_tag = true,
+            Ok(Event::Text(t)) if in_tag => {
+                return Some(t.unescape().unwrap_or_default().trim().to_string());
+            }
+            Ok(Event::End(e)) if local_name(e.name()) == tag => in_tag = false,
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+    }
 }
 
 fn find_assetmap(dir: &Path) -> Option<std::path::PathBuf> {
@@ -256,14 +273,71 @@ fn find_assetmap(dir: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-fn extract_xml_value(text: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}");
-    let close = format!("</{tag}>");
-    let start_pos = text.find(&open)?;
-    let after_open = &text[start_pos + open.len()..];
-    let content_start = after_open.find('>')?;
-    let content = &after_open[content_start + 1..];
-    let end_pos = content.find(&close)?;
-    let value = content[..end_pos].trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_cpls_reads_assetmap_and_title() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("CPL_abc.xml"),
+            r#"<?xml version="1.0"?><CompositionPlaylist><ContentTitle>My &amp; Film</ContentTitle></CompositionPlaylist>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("ASSETMAP.xml"),
+            r#"<?xml version="1.0"?><AssetMap><AssetList>
+                <Asset><Id>urn:uuid:1111</Id><ChunkList><Chunk><Path>CPL_abc.xml</Path></Chunk></ChunkList></Asset>
+            </AssetList></AssetMap>"#,
+        )
+        .unwrap();
+
+        let cpls = list_cpls(dir.path());
+        assert_eq!(cpls.len(), 1);
+        assert_eq!(cpls[0].id, "1111");
+        assert_eq!(cpls[0].file_path, "CPL_abc.xml");
+        assert_eq!(cpls[0].title, "My & Film");
+    }
+
+    #[test]
+    fn get_timeline_parses_segment_resources() {
+        let dir = tempfile::tempdir().unwrap();
+        let cpl = dir.path().join("CPL.xml");
+        std::fs::write(
+            &cpl,
+            r#"<?xml version="1.0"?>
+<CompositionPlaylist>
+  <SegmentList><Segment>
+    <Id>urn:uuid:seg-1</Id>
+    <SequenceList>
+      <cc:MainImageSequence>
+        <ResourceList><Resource>
+          <TrackFileId>urn:uuid:video-1</TrackFileId>
+          <EditRate>24 1</EditRate>
+          <IntrinsicDuration>240</IntrinsicDuration>
+          <SourceDuration>200</SourceDuration>
+          <EntryPoint>5</EntryPoint>
+        </Resource></ResourceList>
+      </cc:MainImageSequence>
+      <cc:MainAudioSequence>
+        <ResourceList><Resource>
+          <TrackFileId>urn:uuid:audio-1</TrackFileId>
+        </Resource></ResourceList>
+      </cc:MainAudioSequence>
+    </SequenceList>
+  </Segment></SegmentList>
+</CompositionPlaylist>"#,
+        )
+        .unwrap();
+
+        let t = get_timeline(&cpl);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].segment_id, "seg-1");
+        assert_eq!(t[0].video_track_file_id, "video-1");
+        assert_eq!(t[0].audio_track_file_id, "audio-1");
+        assert_eq!(t[0].duration_frames, 200);
+        assert_eq!(t[0].entry_point, 5);
+        assert_eq!(t[0].edit_rate, "24 1");
+    }
 }

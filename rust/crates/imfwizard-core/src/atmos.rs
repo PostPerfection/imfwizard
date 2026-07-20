@@ -1,14 +1,16 @@
 //! Dolby Atmos ADM BWF import.
 //!
-//! Extracts ADM (Audio Definition Model) XML from BWF RIFF "axml" chunks,
-//! parses bed channels and audio objects, splits to per-channel stems,
-//! wraps to MXF, and writes an ADM sidecar XML file.
+//! Extracts ADM (Audio Definition Model) XML from BWF RIFF "axml" chunks, parses bed channels
+//! and audio objects, wraps the PCM essence to an MXF via asdcplib, and writes an ADM sidecar XML.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use quick_xml::events::Event;
+use quick_xml::name::QName;
+use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
 
 /// A bed channel (DirectSpeakers type).
@@ -111,6 +113,29 @@ pub fn extract_axml_chunk(path: &Path) -> Result<String, String> {
     Err("No axml chunk found in BWF file".into())
 }
 
+fn local_name(qname: QName) -> String {
+    String::from_utf8_lossy(qname.local_name().as_ref()).into_owned()
+}
+
+/// Read a named attribute off a start/empty element.
+fn attr_value(e: &quick_xml::events::BytesStart, key: &str) -> Option<String> {
+    e.attributes().flatten().find_map(|a| {
+        (local_name(a.key) == key).then(|| String::from_utf8_lossy(&a.value).into_owned())
+    })
+}
+
+/// Fields accumulated while inside one `<audioChannelFormat>` element.
+#[derive(Default)]
+struct ChannelFormatAcc {
+    id: String,
+    name: String,
+    type_label: String,
+    speaker_label: String,
+    azimuth: Option<f32>,
+    elevation: Option<f32>,
+    distance: Option<f32>,
+}
+
 /// Parse ADM XML into structured metadata.
 pub fn parse_adm_xml(xml: &str) -> AdmMetadata {
     let mut adm = AdmMetadata {
@@ -119,82 +144,79 @@ pub fn parse_adm_xml(xml: &str) -> AdmMetadata {
         objects: Vec::new(),
         total_channels: 0,
     };
-
     if xml.is_empty() {
         return adm;
     }
 
-    // Extract programme name
-    if let Some(start) = xml.find("audioProgrammeName=\"") {
-        let rest = &xml[start + 20..];
-        if let Some(end) = rest.find('"') {
-            adm.programme_name = rest[..end].to_string();
-        }
-    }
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
 
-    // Parse audioChannelFormat entries
     let mut track_idx: u32 = 0;
-    let mut search_from = 0;
+    let mut acc: Option<ChannelFormatAcc> = None;
+    let mut cur = String::new();
 
-    while let Some(pos) = xml[search_from..].find("<audioChannelFormat") {
-        let abs_pos = search_from + pos;
-        let chunk_end = match xml[abs_pos..].find('>') {
-            Some(e) => abs_pos + e,
-            None => break,
-        };
-        let tag = &xml[abs_pos..=chunk_end];
-
-        // Extract attributes
-        let id = extract_attr(tag, "audioChannelFormatID");
-        let name = extract_attr(tag, "audioChannelFormatName");
-        let type_label = extract_attr(tag, "typeLabel");
-
-        // Find scope of this channel format (up to next audioChannelFormat or end)
-        let scope_end = xml[chunk_end..]
-            .find("<audioChannelFormat")
-            .map(|p| chunk_end + p)
-            .unwrap_or(xml.len());
-        let scope = &xml[chunk_end..scope_end];
-
-        match type_label.as_str() {
-            "0001" => {
-                // DirectSpeakers — bed channel
-                let speaker_label = find_in_scope(scope, "speakerLabel");
-                adm.beds.push(BedChannel {
-                    label: name,
-                    speaker_label,
-                    track_index: track_idx,
-                });
-                track_idx += 1;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if adm.programme_name.is_empty()
+                    && let Some(v) = attr_value(&e, "audioProgrammeName")
+                {
+                    adm.programme_name = v;
+                }
+                let name = local_name(e.name());
+                if name == "audioChannelFormat" {
+                    acc = Some(ChannelFormatAcc {
+                        id: attr_value(&e, "audioChannelFormatID").unwrap_or_default(),
+                        name: attr_value(&e, "audioChannelFormatName").unwrap_or_default(),
+                        type_label: attr_value(&e, "typeLabel").unwrap_or_default(),
+                        ..Default::default()
+                    });
+                }
+                cur = name;
             }
-            "0003" => {
-                // Objects — dynamic audio object
-                let azimuth = find_element_value(scope, "azimuth")
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.0);
-                let elevation = find_element_value(scope, "elevation")
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.0);
-                let distance = find_element_value(scope, "distance")
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(1.0);
-
-                adm.objects.push(AudioObject {
-                    id,
-                    name,
-                    track_index: track_idx,
-                    azimuth,
-                    elevation,
-                    distance,
-                });
-                track_idx += 1;
+            Ok(Event::Text(t)) => {
+                if let Some(a) = acc.as_mut() {
+                    let text = t.unescape().unwrap_or_default().trim().to_string();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    match cur.as_str() {
+                        "speakerLabel" if a.speaker_label.is_empty() => a.speaker_label = text,
+                        "azimuth" if a.azimuth.is_none() => a.azimuth = text.parse().ok(),
+                        "elevation" if a.elevation.is_none() => a.elevation = text.parse().ok(),
+                        "distance" if a.distance.is_none() => a.distance = text.parse().ok(),
+                        _ => {}
+                    }
+                }
             }
-            _ => {
-                track_idx += 1;
+            Ok(Event::End(e)) => {
+                cur.clear();
+                if local_name(e.name()) == "audioChannelFormat"
+                    && let Some(a) = acc.take()
+                {
+                    match a.type_label.as_str() {
+                        "0001" => adm.beds.push(BedChannel {
+                            label: a.name,
+                            speaker_label: a.speaker_label,
+                            track_index: track_idx,
+                        }),
+                        "0003" => adm.objects.push(AudioObject {
+                            id: a.id,
+                            name: a.name,
+                            track_index: track_idx,
+                            azimuth: a.azimuth.unwrap_or(0.0),
+                            elevation: a.elevation.unwrap_or(0.0),
+                            distance: a.distance.unwrap_or(1.0),
+                        }),
+                        _ => {}
+                    }
+                    track_idx += 1;
+                }
             }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
         }
-
-        search_from = chunk_end + 1;
     }
 
     adm.total_channels = track_idx;
@@ -249,55 +271,25 @@ pub fn import_atmos(input: &Path, output_dir: &Path) -> AtmosImportResult {
         tracing::warn!("Failed to write ADM sidecar: {e}");
     }
 
-    // Extract individual channel stems and wrap to MXF via ffmpeg
-    let mut channel_files = Vec::new();
-    for i in 0..adm.total_channels {
-        let stem = output_dir.join(format!("ch_{i:03}.wav"));
-        let status = Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-i",
-                &input.to_string_lossy(),
-                "-map_channel",
-                &format!("0.0.{i}"),
-                stem.to_str().unwrap_or(""),
-            ])
-            .output();
-        match status {
-            Ok(o) if o.status.success() => channel_files.push(stem),
-            Ok(o) => {
-                tracing::warn!(
-                    "ffmpeg channel extract failed for ch {i}: {}",
-                    String::from_utf8_lossy(&o.stderr)
-                );
-            }
-            Err(e) => {
-                tracing::warn!("ffmpeg not available for channel extract: {e}");
-            }
-        }
-    }
-
-    // Wrap all channels into a single MXF
-    let mut ffmpeg_args: Vec<String> = vec!["-y".into()];
-    for f in &channel_files {
-        ffmpeg_args.push("-i".into());
-        ffmpeg_args.push(f.to_string_lossy().to_string());
-    }
-    // Map all inputs
-    for i in 0..channel_files.len() {
-        ffmpeg_args.push("-map".into());
-        ffmpeg_args.push(format!("{i}:a"));
-    }
-    ffmpeg_args.extend(["-c:a".into(), "pcm_s24le".into(), "-f".into(), "mxf".into()]);
-    ffmpeg_args.push(mxf_output.to_string_lossy().to_string());
-
-    let wrap_result = Command::new("ffmpeg").args(&ffmpeg_args).output();
-
-    let success = match wrap_result {
-        Ok(o) if o.status.success() => true,
+    // ffmpeg decodes the BWF PCM essence to a single multichannel WAV, then asdcplib (via
+    // postkit's AS-02 writer) wraps it into an MXF. asdcplib has no AS-02 IAB/Atmos writer, so
+    // the immersive channels are carried as PCM rather than re-encoded to a Dolby IAB bitstream.
+    let combined = output_dir.join("atmos_pcm.wav");
+    let extract = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            &input.to_string_lossy(),
+            "-map",
+            "0:a",
+            "-c:a",
+            "pcm_s24le",
+            &combined.to_string_lossy(),
+        ])
+        .output();
+    match extract {
+        Ok(o) if o.status.success() => {}
         Ok(o) => {
-            let err = String::from_utf8_lossy(&o.stderr);
-            tracing::error!("MXF wrap failed: {err}");
             return AtmosImportResult {
                 success: false,
                 bed_count: adm.beds.len(),
@@ -306,8 +298,11 @@ pub fn import_atmos(input: &Path, output_dir: &Path) -> AtmosImportResult {
                 mxf_output,
                 adm_sidecar,
                 error: format!(
-                    "MXF wrap failed: {}",
-                    err.chars().take(200).collect::<String>()
+                    "ffmpeg WAV extract failed: {}",
+                    String::from_utf8_lossy(&o.stderr)
+                        .chars()
+                        .take(200)
+                        .collect::<String>()
                 ),
             };
         }
@@ -322,51 +317,58 @@ pub fn import_atmos(input: &Path, output_dir: &Path) -> AtmosImportResult {
                 error: format!("ffmpeg not found: {e}"),
             };
         }
-    };
-
-    // Cleanup intermediate channel WAVs
-    for f in &channel_files {
-        let _ = std::fs::remove_file(f);
     }
 
+    let wrap = crate::mxf_wrap::wrap_mxf(&crate::mxf_wrap::MxfWrapOptions {
+        input_dir: combined.clone(),
+        output_file: mxf_output.clone(),
+        essence_type: crate::EssenceType::Wav,
+        edit_rate_num: 24,
+        edit_rate_den: 1,
+        duration: 0,
+    });
+    let _ = std::fs::remove_file(&combined);
+
     AtmosImportResult {
-        success,
+        success: wrap.success,
         bed_count: adm.beds.len(),
         object_count: adm.objects.len(),
         total_channels: adm.total_channels,
         mxf_output,
         adm_sidecar,
-        error: String::new(),
+        error: wrap.error,
     }
 }
 
-// Helper: extract XML attribute value from a tag string.
-fn extract_attr(tag: &str, attr: &str) -> String {
-    let needle = format!("{attr}=\"");
-    if let Some(start) = tag.find(&needle) {
-        let rest = &tag[start + needle.len()..];
-        if let Some(end) = rest.find('"') {
-            return rest[..end].to_string();
-        }
-    }
-    String::new()
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-// Helper: find an element value like <speakerLabel>RC_M+030</speakerLabel> in scope.
-fn find_in_scope(scope: &str, element: &str) -> String {
-    let open = format!("<{element}>");
-    let close = format!("</{element}>");
-    if let Some(start) = scope.find(&open) {
-        let rest = &scope[start + open.len()..];
-        if let Some(end) = rest.find(&close) {
-            return rest[..end].trim().to_string();
-        }
+    #[test]
+    fn parse_adm_extracts_beds_and_objects() {
+        let xml = r#"<?xml version="1.0"?>
+<audioFormatExtended>
+  <audioProgramme audioProgrammeName="Main Mix"/>
+  <audioChannelFormat audioChannelFormatID="AC_1" audioChannelFormatName="RoomCentricLeft" typeLabel="0001">
+    <audioBlockFormat><speakerLabel>RC_L</speakerLabel></audioBlockFormat>
+  </audioChannelFormat>
+  <audioChannelFormat audioChannelFormatID="AC_9" audioChannelFormatName="Object1" typeLabel="0003">
+    <audioBlockFormat><azimuth>30</azimuth><elevation>10</elevation><distance>0.5</distance></audioBlockFormat>
+  </audioChannelFormat>
+</audioFormatExtended>"#;
+        let adm = parse_adm_xml(xml);
+        assert_eq!(adm.programme_name, "Main Mix");
+        assert_eq!(adm.total_channels, 2);
+        assert_eq!(adm.beds.len(), 1);
+        assert_eq!(adm.beds[0].speaker_label, "RC_L");
+        assert_eq!(adm.objects.len(), 1);
+        assert_eq!(adm.objects[0].azimuth, 30.0);
+        assert_eq!(adm.objects[0].distance, 0.5);
     }
-    String::new()
-}
 
-// Helper: find element value, returning Option.
-fn find_element_value(scope: &str, element: &str) -> Option<String> {
-    let v = find_in_scope(scope, element);
-    if v.is_empty() { None } else { Some(v) }
+    #[test]
+    fn parse_adm_empty_is_safe() {
+        let adm = parse_adm_xml("");
+        assert_eq!(adm.total_channels, 0);
+    }
 }

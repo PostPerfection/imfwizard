@@ -682,9 +682,11 @@ document.getElementById("sup-create")?.addEventListener("click", async () => {
 });
 
 // === Metadata ===
+let metaImpDir = null;
 document.getElementById("meta-browse")?.addEventListener("click", async () => {
   const d = await open({ directory: true });
   if (d) {
+    metaImpDir = d;
     document.getElementById("meta-fields").style.display = "block";
     setStatus("Loading metadata...");
     const cmd = Command.sidecar("imfwizard", ["info", d]);
@@ -703,9 +705,21 @@ document.getElementById("meta-browse")?.addEventListener("click", async () => {
 });
 
 document.getElementById("meta-save")?.addEventListener("click", async () => {
-  const box = document.getElementById("meta-results") || document.createElement("div");
-  box.classList?.add("visible");
-  setStatus("Metadata editing is not yet supported by the CLI. This feature is under development.");
+  if (!metaImpDir) {
+    setStatus("Browse to an IMP first");
+    return;
+  }
+  const title = document.getElementById("meta-title").value;
+  const annotation = document.getElementById("meta-annotation").value;
+  const issuer = document.getElementById("meta-issuer").value;
+  const args = ["metadata-edit", "-i", metaImpDir];
+  if (title) args.push("-t", title);
+  if (annotation) args.push("-a", annotation);
+  if (issuer) args.push("--issuer", issuer);
+  setStatus("Saving metadata...");
+  const cmd = Command.sidecar("imfwizard", args);
+  const result = await cmd.execute();
+  setStatus(result.code === 0 ? "✓ Metadata saved" : "✗ Failed: " + (result.stderr || result.stdout));
 });
 
 // === Batch Delivery ===

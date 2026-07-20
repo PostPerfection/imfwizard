@@ -24,7 +24,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Accessibility tracks**, Audio Description, Hearing Impaired, Sign Language, Commentary
 - **Multi-language audio** with RFC 5646 language tags and MCA labels
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
-- **SHA-1 hashing** and optional **XML-DSIG signing**
+- **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via OpenJPEG
@@ -38,7 +38,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dolby Vision 4.0** RPU metadata injection (via dovi_tool)
 - **HDR10+ dynamic metadata** injection (via hdr10plus_tool)
 - **HDR/WCG color metadata**, ST 2067-21 (PQ, HLG, BT.2020, P3-D65)
-- **IAB / Dolby Atmos** immersive audio packaging
+- **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
 
 ### Quality Control
 - **Loudness analysis**, EBU R128 / ATSC A/85 measurement and normalization
@@ -58,7 +58,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
-- **Dolby Atmos ADM BWF import**, import ADM Broadcast Wave Format to IAB MXF
+- **Dolby Atmos ADM BWF import**, parse ADM metadata and wrap the PCM essence to MXF (not a Dolby IAB bitstream)
 - **A/V sync detection & repair**, detect audio/video drift and auto-fix with trim/pad
 
 ### Versioning & Annotation
@@ -81,7 +81,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Workflow & Automation
 - **Delivery presets**, Netflix, Disney+, Amazon, Apple TV+, Cinema 2K/4K, Broadcast, Archival
 - **Batch delivery**, create IMPs for multiple platforms in a single pass
-- **IMF-to-DCP conversion**, repackage IMF as Digital Cinema Package for theatrical playback
 - **Job queue daemon**, background processing with Unix socket / Windows named pipe IPC
 - **Watch folder**, auto-IMP creation when files appear
 - **EDL/AAF conform**, import CMX3600 edit decisions to auto-build CPL timelines
@@ -118,7 +117,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Bitrate analytics dashboard**, per-second charts, histogram, statistics
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Batch delivery panel**, deliver to multiple platforms with checkboxes
-- **IMF-to-DCP converter**, one-click conversion for cinema delivery
 - **Job queue manager**, submit, monitor, cancel background jobs
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs
@@ -131,7 +129,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Mastering & Compliance
 - **DCDM creation**, Digital Cinema Distribution Master (X'Y'Z' 12/16-bit) as intermediate format
-- **Forensic watermarking**, NexGuard, Civolution, or internal spatial watermark embedding
+- **Visible watermark burn-in**, burn operator/session text into an image sequence
 - **Trailer packaging**, ratings cards (MPAA/BBFC/FSK), green/red band, countdown leaders
 - **Content version tracker**, SQLite database tracking version history and delivery destinations
 - **Accessibility compliance**, verify AD/HI/SL tracks against CVAA, EAA, AODA, Ofcom standards
@@ -358,26 +356,18 @@ imfwizard burn-in \
   --font-size 56
 ```
 
-### Scale/crop video to target resolution
+### Scale/crop an IMP to a target resolution
 
 ```bash
-# Scale video to 4K scope with letterboxing
+# Rewrap an IMP's essence to a 4K-scope ProRes .mov master
 imfwizard target-convert \
-  -i /path/to/video.mov \
-  -o /path/to/video_4k_scope.mov \
+  -i /path/to/imp/ \
+  -o /path/to/delivery/ \
   -t 4k-scope
 
 # Targets: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
 #          4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
-```
-
-### Convert IMF to DCP
-
-```bash
-imfwizard to-dcp \
-  -i /path/to/imp/ \
-  -o /path/to/dcp_output/ \
-  -t "Cinema Release"
+# An unknown target errors instead of falling back to 1080p.
 ```
 
 ### Bitrate analytics

@@ -13,7 +13,37 @@ pub struct DeliverySpec {
     pub bitrate: String,
     pub hdr: bool,
     pub dolby_vision: bool,
-    pub atmos: bool,
+}
+
+/// Resolve a target-convert preset to a delivery spec, or error on an unknown target.
+///
+/// Presets scale/crop to a standard cinema container and rewrap to a ProRes .mov master;
+/// fps 0 keeps the source rate. Errors rather than silently falling back to 1080p.
+pub fn spec_for_target(target: &str) -> Result<DeliverySpec, String> {
+    let resolution = match target {
+        "2k-scope" => (2048, 858),
+        "2k-flat" => (1998, 1080),
+        "2k-full" => (2048, 1080),
+        "4k-scope" => (4096, 1716),
+        "4k-flat" => (3996, 2160),
+        "4k-full" => (4096, 2160),
+        other => {
+            return Err(format!(
+                "unknown target '{other}' (supported: 2k-scope, 2k-flat, 2k-full, 4k-scope, 4k-flat, 4k-full)"
+            ));
+        }
+    };
+    Ok(DeliverySpec {
+        platform: target.to_string(),
+        video_codec: "prores".to_string(),
+        audio_codec: "pcm_s24le".to_string(),
+        container: "mov".to_string(),
+        resolution,
+        fps: 0.0,
+        bitrate: String::new(),
+        hdr: false,
+        dolby_vision: false,
+    })
 }
 
 /// Deliver an IMP to a target specification.

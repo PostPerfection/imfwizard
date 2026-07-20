@@ -1,1 +1,1 @@
-pub use postkit::watch::{FileWatcher, WatchAction, WatchEvent, WatchEventKind};
+pub use postkit::watch::{FileWatcher, WatchEvent, WatchEventKind};

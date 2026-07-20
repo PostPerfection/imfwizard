@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **KDM generation** — `kdm` command now generates signed SMPTE 430-1 KDMs via postkit (xmlsec1-verified). New `--signer-cert`/`--signer-key`/`--signer-chain` flags.
+- **Subtitle packaging** — `create --subtitle` wraps TTML/IMSC files as AS-02 timed-text MXF and adds a SubtitlesSequence to the CPL.
+- **GUI metadata save** — the Metadata panel Save button now calls `metadata-edit` instead of showing a placeholder.
+
+### Changed
+- **MXF wrapping** — imfwizard-core delegates J2K/TimedText/Atmos wrapping to postkit's AS-02 writers. PCM now parses the real WAV header (channels/bits/sample rate) instead of hardcoding 5.1/24-bit/48k.
+- **target-convert** — maps 2k/4k scope/flat/full to real resolutions and errors on unknown targets instead of always producing 1080p.
+- **metadata-edit** — the `--issuer` value is now written (was discarded).
+- **Watermark** — visible burn-in only via postkit; removed NexGuard/Civolution options and the `--backend` flag.
+- **Atmos import** — wraps essence via asdcplib instead of shelling ffmpeg for the MXF; ADM XML parsed with quick-xml.
+- **Timeline/ASSETMAP parsing** — replaced hand-rolled line scanners with quick-xml.
+
+### Removed
+- **IMF-to-DCP conversion** — the CLI/GUI paths only ran `ffmpeg -c copy` and never built a DCP; `to-dcp` now fails loud ("IMF to DCP conversion is not implemented").
+- **XML-DSIG signing** — `sign_document`/`verify_signature` emitted an empty signature; they now fail loud (postkit's signer is KDM-specific and not exposed for arbitrary IMF XML).
+
 ## [1.1.0] — 2026-05-28
 
 ### Added
@@ -19,7 +38,7 @@
 - **Target conversion** — Removed `Command.create` (would never find bundled binary)
 
 ### Known Limitations
-- Loudness measurement, subtitle burn-in, IMP-to-DCP conversion, supplemental IMP creation, and target conversion show informational messages (CLI support not yet available)
+- Loudness measurement and supplemental IMP creation show informational messages (CLI support not yet available). Metadata save, subtitle packaging, and target conversion are wired to the CLI as of Unreleased.
 
 ## [1.0.0] — 2025-01-20
 

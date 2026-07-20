@@ -50,98 +50,90 @@ pub fn write_cpl(
     writeln!(f, "      <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4())?;
     writeln!(f, "      <SequenceList>")?;
 
-    // Video sequences
-    for tf in track_files {
-        let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-        if fname.starts_with("VIDEO_") {
-            writeln!(
-                f,
-                "        <cc:MainImageSequence xmlns:cc=\"http://www.smpte-ra.org/schemas/2067-2/2016\">"
-            )?;
-            writeln!(f, "          <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4())?;
-            writeln!(
-                f,
-                "          <TrackId>urn:uuid:{}</TrackId>",
-                uuid::Uuid::new_v4()
-            )?;
-            writeln!(f, "          <EditRate>{fps_num} {fps_den}</EditRate>")?;
-            writeln!(f, "          <ResourceList>")?;
-            writeln!(f, "            <Resource>")?;
-            writeln!(
-                f,
-                "              <Id>urn:uuid:{}</Id>",
-                uuid::Uuid::new_v4()
-            )?;
-            writeln!(
-                f,
-                "              <TrackFileId>urn:uuid:{}</TrackFileId>",
-                tf.uuid
-            )?;
-            writeln!(f, "              <EditRate>{fps_num} {fps_den}</EditRate>")?;
-            writeln!(
-                f,
-                "              <IntrinsicDuration>{}</IntrinsicDuration>",
-                tf.duration
-            )?;
-            writeln!(
-                f,
-                "              <SourceDuration>{}</SourceDuration>",
-                tf.duration
-            )?;
-            writeln!(f, "            </Resource>")?;
-            writeln!(f, "          </ResourceList>")?;
-            writeln!(f, "        </cc:MainImageSequence>")?;
-        }
-    }
-
-    // Audio sequences
-    for tf in track_files {
-        let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-        if fname.starts_with("AUDIO_") {
-            writeln!(
-                f,
-                "        <cc:MainAudioSequence xmlns:cc=\"http://www.smpte-ra.org/schemas/2067-2/2016\">"
-            )?;
-            writeln!(f, "          <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4())?;
-            writeln!(
-                f,
-                "          <TrackId>urn:uuid:{}</TrackId>",
-                uuid::Uuid::new_v4()
-            )?;
-            writeln!(f, "          <EditRate>{fps_num} {fps_den}</EditRate>")?;
-            writeln!(f, "          <ResourceList>")?;
-            writeln!(f, "            <Resource>")?;
-            writeln!(
-                f,
-                "              <Id>urn:uuid:{}</Id>",
-                uuid::Uuid::new_v4()
-            )?;
-            writeln!(
-                f,
-                "              <TrackFileId>urn:uuid:{}</TrackFileId>",
-                tf.uuid
-            )?;
-            writeln!(f, "              <EditRate>{fps_num} {fps_den}</EditRate>")?;
-            writeln!(
-                f,
-                "              <IntrinsicDuration>{}</IntrinsicDuration>",
-                tf.duration
-            )?;
-            writeln!(
-                f,
-                "              <SourceDuration>{}</SourceDuration>",
-                tf.duration
-            )?;
-            writeln!(f, "            </Resource>")?;
-            writeln!(f, "          </ResourceList>")?;
-            writeln!(f, "        </cc:MainAudioSequence>")?;
-        }
-    }
+    // one virtual track per essence kind, matched by track-file name prefix
+    write_sequences(
+        &mut f,
+        track_files,
+        "VIDEO_",
+        "MainImageSequence",
+        fps_num,
+        fps_den,
+    )?;
+    write_sequences(
+        &mut f,
+        track_files,
+        "AUDIO_",
+        "MainAudioSequence",
+        fps_num,
+        fps_den,
+    )?;
+    write_sequences(
+        &mut f,
+        track_files,
+        "SUBTITLE_",
+        "SubtitlesSequence",
+        fps_num,
+        fps_den,
+    )?;
 
     writeln!(f, "      </SequenceList>")?;
     writeln!(f, "    </Segment>")?;
     writeln!(f, "  </SegmentList>")?;
     writeln!(f, "</CompositionPlaylist>")?;
+    Ok(())
+}
+
+fn write_sequences(
+    f: &mut std::fs::File,
+    track_files: &[MxfTrackFile],
+    prefix: &str,
+    seq_element: &str,
+    fps_num: u32,
+    fps_den: u32,
+) -> std::io::Result<()> {
+    for tf in track_files {
+        let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+        if !fname.starts_with(prefix) {
+            continue;
+        }
+        writeln!(
+            f,
+            "        <cc:{seq_element} xmlns:cc=\"http://www.smpte-ra.org/schemas/2067-2/2016\">"
+        )?;
+        writeln!(f, "          <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4())?;
+        writeln!(
+            f,
+            "          <TrackId>urn:uuid:{}</TrackId>",
+            uuid::Uuid::new_v4()
+        )?;
+        writeln!(f, "          <EditRate>{fps_num} {fps_den}</EditRate>")?;
+        writeln!(f, "          <ResourceList>")?;
+        writeln!(f, "            <Resource>")?;
+        writeln!(
+            f,
+            "              <Id>urn:uuid:{}</Id>",
+            uuid::Uuid::new_v4()
+        )?;
+        writeln!(
+            f,
+            "              <TrackFileId>urn:uuid:{}</TrackFileId>",
+            tf.uuid
+        )?;
+        writeln!(f, "              <EditRate>{fps_num} {fps_den}</EditRate>")?;
+        writeln!(
+            f,
+            "              <IntrinsicDuration>{}</IntrinsicDuration>",
+            tf.duration
+        )?;
+        writeln!(
+            f,
+            "              <SourceDuration>{}</SourceDuration>",
+            tf.duration
+        )?;
+        writeln!(f, "            </Resource>")?;
+        writeln!(f, "          </ResourceList>")?;
+        writeln!(f, "        </cc:{seq_element}>")?;
+    }
     Ok(())
 }
 

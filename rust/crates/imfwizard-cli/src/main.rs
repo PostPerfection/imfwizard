@@ -36,6 +36,10 @@ enum Commands {
         #[arg(long)]
         audio: Option<String>,
 
+        /// TTML/IMSC subtitle file to package (repeatable)
+        #[arg(long = "subtitle")]
+        subtitles: Vec<String>,
+
         /// Content kind (feature, trailer, etc.)
         #[arg(short, long, default_value = "feature")]
         kind: String,
@@ -463,7 +467,7 @@ enum Commands {
         max_fall: u16,
     },
 
-    /// Apply forensic watermark to image sequence
+    /// Burn a visible operator/session watermark into an image sequence
     Watermark {
         /// Input image sequence directory
         #[arg(short, long)]
@@ -480,6 +484,10 @@ enum Commands {
         /// Session ID for watermark payload
         #[arg(long)]
         session_id: String,
+
+        /// Burn-in opacity (0.0 to 1.0)
+        #[arg(long, default_value = "0.5")]
+        strength: f32,
     },
 
     /// Package a trailer (ratings card + countdown + content)
@@ -774,6 +782,18 @@ enum Commands {
         #[arg(long)]
         cert: PathBuf,
 
+        /// Signer certificate PEM file
+        #[arg(long)]
+        signer_cert: PathBuf,
+
+        /// Signer private key PEM file
+        #[arg(long)]
+        signer_key: PathBuf,
+
+        /// Signer certificate chain PEM file (repeatable, leaf to root)
+        #[arg(long = "signer-chain")]
+        signer_chain: Vec<PathBuf>,
+
         /// Output KDM XML file
         #[arg(short, long)]
         output: PathBuf,
@@ -899,6 +919,7 @@ fn run() {
             title,
             video,
             audio,
+            subtitles,
             kind,
             fps_num,
             fps_den,
@@ -1049,6 +1070,7 @@ fn run() {
                 fps_den,
                 j2k_dir,
                 audio_files,
+                timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
                 ..Default::default()
             };
             let result = imfwizard_core::imp::create_imp(&opts);
@@ -1417,17 +1439,12 @@ fn run() {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(format!("{input}_delivery")));
 
-            let spec = imfwizard_core::delivery::DeliverySpec {
-                platform: target.clone(),
-                video_codec: "h264".to_string(),
-                audio_codec: "aac".to_string(),
-                container: "mp4".to_string(),
-                resolution: (1920, 1080),
-                fps: 24.0,
-                bitrate: "20M".to_string(),
-                hdr: false,
-                dolby_vision: false,
-                atmos: false,
+            let spec = match imfwizard_core::delivery::spec_for_target(&target) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
             };
 
             match imfwizard_core::delivery::deliver(&imp_dir, &output_dir, &spec) {
@@ -1569,7 +1586,7 @@ fn run() {
             imp,
             title,
             annotation,
-            issuer: _,
+            issuer,
         } => {
             let imp_dir = std::path::Path::new(&imp);
             let cpls = imfwizard_core::timeline::list_cpls(imp_dir);
@@ -1582,7 +1599,7 @@ fn run() {
                 .or(annotation)
                 .unwrap_or_else(|| "Updated by imfwizard".to_string());
             let ann = imfwizard_core::cpl_annotation::CplAnnotation {
-                author: "imfwizard".to_string(),
+                author: issuer.unwrap_or_else(|| "imfwizard".to_string()),
                 timestamp: String::new(),
                 text,
                 revision: String::new(),
@@ -1649,7 +1666,13 @@ fn run() {
         }
 
         Commands::Conform { input, json } => {
-            let timeline = postkit::conform::parse_timeline(std::path::Path::new(&input));
+            let timeline = match postkit::conform::parse_timeline(std::path::Path::new(&input)) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
             } else {
@@ -1755,15 +1778,14 @@ fn run() {
             output,
             operator_id,
             session_id,
+            strength,
         } => {
             let opts = postkit::watermark::WatermarkOptions {
-                backend: postkit::watermark::WatermarkBackend::Internal,
                 operator_id,
                 session_id,
-                strength: 0.5,
+                strength,
                 input_dir: PathBuf::from(&input),
                 output_dir: PathBuf::from(&output),
-                license_file: PathBuf::new(),
             };
             let result = postkit::watermark::embed_watermark(&opts);
             if result.success {
@@ -2567,7 +2589,13 @@ fn run() {
 
         Commands::EdlImport { input, json } => {
             // Alias for conform
-            let timeline = postkit::conform::parse_timeline(std::path::Path::new(&input));
+            let timeline = match postkit::conform::parse_timeline(std::path::Path::new(&input)) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
             } else {
@@ -2618,9 +2646,37 @@ fn run() {
             }
         }
 
-        Commands::Kdm { .. } => {
-            eprintln!("KDM generation is currently unavailable in the bundled postkit version.");
-            std::process::exit(2);
+        Commands::Kdm {
+            cpl_id,
+            content_title,
+            cert,
+            signer_cert,
+            signer_key,
+            signer_chain,
+            output,
+            valid_from,
+            valid_to,
+            formulation,
+        } => {
+            let config = postkit::certificate::KdmConfig {
+                cpl_id,
+                content_title,
+                recipient_cert_file: cert,
+                signer_cert_file: signer_cert,
+                signer_key_file: signer_key,
+                signer_chain_files: signer_chain,
+                output_file: output.clone(),
+                valid_from,
+                valid_to,
+                formulation,
+            };
+            match postkit::certificate::generate_kdm(&config) {
+                Ok(()) => println!("KDM written to {}", output.display()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
 
         Commands::Restore {
