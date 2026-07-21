@@ -39,7 +39,7 @@ impl SubtitleFormat {
 pub fn convert_subtitles(
     input: &std::path::Path,
     output: &std::path::Path,
-    _target_format: SubtitleFormat,
+    target_format: SubtitleFormat,
 ) -> Result<(), String> {
     // Parse input
     let content =
@@ -48,6 +48,16 @@ pub fn convert_subtitles(
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
     let source_format = SubtitleFormat::from_extension(ext)
         .ok_or_else(|| format!("Unknown subtitle format: {ext}"))?;
+
+    if source_format == SubtitleFormat::Ttml
+        && matches!(
+            target_format,
+            SubtitleFormat::Ttml | SubtitleFormat::ImscTtml
+        )
+    {
+        std::fs::copy(input, output).map_err(|e| format!("Failed to copy TTML: {e}"))?;
+        return Ok(());
+    }
 
     let cues = match source_format {
         SubtitleFormat::Scc => crate::scc::parse_scc(&content)?,
@@ -139,5 +149,18 @@ mod tests {
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains("HELLO"), "ttml: {ttml}");
         assert!(ttml.contains(r#"begin="00:00:01.001""#), "ttml: {ttml}");
+    }
+
+    #[test]
+    fn preserves_authored_ttml() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.ttml");
+        let output = dir.path().join("out.ttml");
+        let authored = r#"<tt><head><styling><style xml:id="top"/></styling></head><body><div><p region="top">Hello</p></div></body></tt>"#;
+        std::fs::write(&input, authored).unwrap();
+
+        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+
+        assert_eq!(std::fs::read_to_string(output).unwrap(), authored);
     }
 }
