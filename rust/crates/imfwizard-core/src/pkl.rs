@@ -85,8 +85,14 @@ mod tests {
         std::fs::write(&b, "b").unwrap();
         let pkl_path = dir.path().join("PKL_pkl.xml");
         let cpls = [
-            CplEntry { uuid: "aaa".into(), path: a },
-            CplEntry { uuid: "bbb".into(), path: b },
+            CplEntry {
+                uuid: "aaa".into(),
+                path: a,
+            },
+            CplEntry {
+                uuid: "bbb".into(),
+                path: b,
+            },
         ];
 
         write_pkl(&pkl_path, "pkl", &cpls, &[]).unwrap();

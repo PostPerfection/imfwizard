@@ -24,9 +24,18 @@ mod tests {
 
     #[test]
     fn platform_from_name_maps_known_presets() {
-        assert!(matches!(platform_from_name("netflix"), Some(Platform::Netflix)));
-        assert!(matches!(platform_from_name("DCI-4K"), Some(Platform::TheatricalDci4k)));
-        assert!(matches!(platform_from_name("amazon_prime"), Some(Platform::AmazonPrime)));
+        assert!(matches!(
+            platform_from_name("netflix"),
+            Some(Platform::Netflix)
+        ));
+        assert!(matches!(
+            platform_from_name("DCI-4K"),
+            Some(Platform::TheatricalDci4k)
+        ));
+        assert!(matches!(
+            platform_from_name("amazon_prime"),
+            Some(Platform::AmazonPrime)
+        ));
         assert!(platform_from_name("nope").is_none());
     }
 }

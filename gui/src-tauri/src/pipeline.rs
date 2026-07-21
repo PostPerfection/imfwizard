@@ -312,7 +312,11 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let video_path = PathBuf::from(&ci.video_path);
         log_to(
             &log_file,
-            &format!("[ENCODE] composition {} of {n}: {}", idx + 1, video_path.display()),
+            &format!(
+                "[ENCODE] composition {} of {n}: {}",
+                idx + 1,
+                video_path.display()
+            ),
         );
 
         // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
@@ -380,7 +384,17 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     }
 
     // Package IMP
-    emit_progress(app, job.id, "package", "Creating IMP...", 0, 0, 0.0, 0.0, 99.0);
+    emit_progress(
+        app,
+        job.id,
+        "package",
+        "Creating IMP...",
+        0,
+        0,
+        0.0,
+        0.0,
+        99.0,
+    );
     log_to(&log_file, "[PACKAGE] Creating IMP...");
 
     let opts = imfwizard_core::imp::ImpOptions {

@@ -1047,7 +1047,11 @@ fn run() {
                         _ => 10.0,
                     };
                     if let Some(p) = &preset {
-                        tracing::info!("Preset {}: {} Mbps (ratio {compression_ratio:.1})", p.name, p.bitrate_mbps);
+                        tracing::info!(
+                            "Preset {}: {} Mbps (ratio {compression_ratio:.1})",
+                            p.name,
+                            p.bitrate_mbps
+                        );
                     }
                     // encode via the shared grok pipeline (grk_compress); no fallback
                     let encoded = postkit::pipeline::run_encode_with_ratio(
@@ -2389,10 +2393,14 @@ fn run() {
             let span = |stream: &str| -> Option<(f64, f64)> {
                 let out = std::process::Command::new("ffprobe")
                     .args([
-                        "-v", "quiet",
-                        "-select_streams", stream,
-                        "-show_entries", "stream=start_time,duration",
-                        "-of", "csv=p=0",
+                        "-v",
+                        "quiet",
+                        "-select_streams",
+                        stream,
+                        "-show_entries",
+                        "stream=start_time,duration",
+                        "-of",
+                        "csv=p=0",
                         &input,
                     ])
                     .output()
@@ -2405,8 +2413,11 @@ fn run() {
             };
 
             println!("A/V sync analysis: {input}");
-            let (Some((v_start, v_dur)), Some((a_start, a_dur))) = (span("v:0"), span("a:0")) else {
-                eprintln!("  Could not read stream start_time/duration (missing stream or ffprobe?)");
+            let (Some((v_start, v_dur)), Some((a_start, a_dur))) = (span("v:0"), span("a:0"))
+            else {
+                eprintln!(
+                    "  Could not read stream start_time/duration (missing stream or ffprobe?)"
+                );
                 std::process::exit(1);
             };
 
@@ -2427,7 +2438,9 @@ fn run() {
             if worst < 5.0 {
                 println!("  Result: PASS (offset < 5ms, frame-accurate)");
             } else if worst < 40.0 {
-                println!("  Result: WARNING (offset {worst:.1}ms, within EBU tolerance but audible)");
+                println!(
+                    "  Result: WARNING (offset {worst:.1}ms, within EBU tolerance but audible)"
+                );
             } else {
                 println!("  Result: FAIL (offset {worst:.1}ms, exceeds ±40ms tolerance)");
                 std::process::exit(1);

@@ -36,7 +36,10 @@ fn parse_timecode(tc: &str) -> Result<u64, String> {
     if parts.len() != 4 {
         return Err(format!("invalid SCC timecode: {tc}"));
     }
-    let p = |s: &str| s.parse::<u64>().map_err(|_| format!("invalid SCC timecode: {tc}"));
+    let p = |s: &str| {
+        s.parse::<u64>()
+            .map_err(|_| format!("invalid SCC timecode: {tc}"))
+    };
     let (hh, mm, ss, ff) = (p(parts[0])?, p(parts[1])?, p(parts[2])?, p(parts[3])?);
     let mut frames = (hh * 3600 + mm * 60 + ss) * 30 + ff;
     if drop_frame {
@@ -87,9 +90,9 @@ impl Decoder {
         // miscellaneous command set
         if b0 == 0x14 && (0x20..=0x2f).contains(&b1) {
             match b1 {
-                0x20 => self.popon = true,       // RCL, resume caption loading
-                0x2e => self.back.clear(),       // ENM, erase non-displayed memory
-                0x2f => self.end_of_caption(tc_ms), // EOC, flip buffers
+                0x20 => self.popon = true,           // RCL, resume caption loading
+                0x2e => self.back.clear(),           // ENM, erase non-displayed memory
+                0x2f => self.end_of_caption(tc_ms),  // EOC, flip buffers
                 0x2c => self.erase_displayed(tc_ms), // EDM, erase displayed memory
                 0x21 => {
                     if let Some(l) = self.back.last_mut() {

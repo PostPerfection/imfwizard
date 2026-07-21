@@ -86,7 +86,9 @@ pub fn validate_language(tag: &str) -> Result<(), String> {
     let bad = tag.is_empty()
         || tag.starts_with('-')
         || tag.ends_with('-')
-        || subtags.iter().any(|s| s.is_empty() || !s.chars().all(|c| c.is_ascii_alphanumeric()));
+        || subtags
+            .iter()
+            .any(|s| s.is_empty() || !s.chars().all(|c| c.is_ascii_alphanumeric()));
     let primary_ok = subtags
         .first()
         .map(|s| (2..=8).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphabetic()))
@@ -174,7 +176,13 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 
         // picture (required, validated above)
         let j2k_dir = comp.j2k_dir.as_ref().expect("checked above");
-        match wrap_one(opts, &opts.output_dir, "VIDEO", j2k_dir, crate::EssenceType::J2k) {
+        match wrap_one(
+            opts,
+            &opts.output_dir,
+            "VIDEO",
+            j2k_dir,
+            crate::EssenceType::J2k,
+        ) {
             Ok(tf) => comp_tracks.push(tf),
             Err(e) => {
                 return ImpResult {
@@ -188,7 +196,13 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             if !a.path.exists() {
                 continue;
             }
-            match wrap_one(opts, &opts.output_dir, "AUDIO", &a.path, crate::EssenceType::Wav) {
+            match wrap_one(
+                opts,
+                &opts.output_dir,
+                "AUDIO",
+                &a.path,
+                crate::EssenceType::Wav,
+            ) {
                 Ok(tf) => comp_tracks.push(tf),
                 Err(e) => {
                     return ImpResult {
@@ -203,7 +217,13 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             if !tt.exists() {
                 continue;
             }
-            match wrap_one(opts, &opts.output_dir, "SUBTITLE", tt, crate::EssenceType::TimedText) {
+            match wrap_one(
+                opts,
+                &opts.output_dir,
+                "SUBTITLE",
+                tt,
+                crate::EssenceType::TimedText,
+            ) {
                 Ok(tf) => comp_tracks.push(tf),
                 Err(e) => {
                     return ImpResult {

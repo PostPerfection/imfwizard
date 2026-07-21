@@ -206,7 +206,9 @@ fn build_dcp(
     let cpl_size = std::fs::metadata(&cpl_path).map(|m| m.len()).unwrap_or(0);
 
     let pkl_path = opts.output_dir.join(format!("PKL_{pkl_uuid}.xml"));
-    write_pkl(&pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &assets)?;
+    write_pkl(
+        &pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &assets,
+    )?;
 
     write_assetmap(
         &opts.output_dir.join("ASSETMAP.xml"),
@@ -613,7 +615,11 @@ mod tests {
             eprintln!("skipping: set POSTKIT_DCP_XSD_DIR to the SMPTE XSD directory");
             return;
         };
-        if std::process::Command::new("xmllint").arg("--version").output().is_err() {
+        if std::process::Command::new("xmllint")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("skipping: xmllint not installed");
             return;
         }
@@ -639,7 +645,10 @@ mod tests {
 
         let assets = [
             asset(
-                AssetKind::Picture { width: 2048, height: 858 },
+                AssetKind::Picture {
+                    width: 2048,
+                    height: 858,
+                },
                 "77777777-7777-8888-9999-aaaaaaaaaaaa",
                 "picture.mxf",
             ),
@@ -656,8 +665,15 @@ mod tests {
         let pkl_path = dir.path().join(format!("PKL_{pkl_uuid}.xml"));
         let am_path = dir.path().join("ASSETMAP.xml");
         write_cpl(&cpl_path, cpl_uuid, "Test", "feature", &assets).unwrap();
-        write_pkl(&pkl_path, pkl_uuid, cpl_uuid, "kO0m3F3qX3qg3n3qg3n3qg3n3q0=", 100, &assets)
-            .unwrap();
+        write_pkl(
+            &pkl_path,
+            pkl_uuid,
+            cpl_uuid,
+            "kO0m3F3qX3qg3n3qg3n3qg3n3q0=",
+            100,
+            &assets,
+        )
+        .unwrap();
         write_assetmap(
             &am_path,
             pkl_uuid,

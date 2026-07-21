@@ -187,7 +187,11 @@ mod tests {
     fn accessibility_role_emits_mca_descriptor() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("CPL_ad.xml");
-        let opts = ImpOptions { fps_num: 24, fps_den: 1, ..Default::default() };
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
         let comp = Composition {
             title: "AD".into(),
             audio_files: vec![AudioTrack {
@@ -213,7 +217,11 @@ mod tests {
     /// dir is set but the XSDs are missing (a misconfiguration).
     fn validate_st2067_3(cpl_xml: &str) -> Option<bool> {
         let xsd_dir = std::env::var("IMFWIZARD_IMF_XSD_DIR").ok()?;
-        if std::process::Command::new("xmllint").arg("--version").output().is_err() {
+        if std::process::Command::new("xmllint")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             return None;
         }
         fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
@@ -234,7 +242,9 @@ mod tests {
             walk(root, "imf-cpl-20160411.xsd"),
             walk(root, "xmldsig-core-schema.xsd"),
         ) else {
-            panic!("could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {xsd_dir}");
+            panic!(
+                "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {xsd_dir}"
+            );
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -274,7 +284,11 @@ mod tests {
     fn language_cpl_passes_st2067_3_xsd() {
         let dir = tempfile::tempdir().unwrap();
         let cpl_path = dir.path().join("CPL_lang.xml");
-        let opts = ImpOptions { fps_num: 24, fps_den: 1, ..Default::default() };
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
         let comp = Composition {
             title: "Lang Test".into(),
             content_kind: "feature".into(),
@@ -285,7 +299,14 @@ mod tests {
             }],
             ..Default::default()
         };
-        write_cpl(&cpl_path, "11111111-2222-3333-4444-555555555555", &opts, &comp, &[]).unwrap();
+        write_cpl(
+            &cpl_path,
+            "11111111-2222-3333-4444-555555555555",
+            &opts,
+            &comp,
+            &[],
+        )
+        .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
         match validate_st2067_3(&cpl_xml) {
             Some(ok) => assert!(ok, "language CPL must pass ST 2067-3 XSD"),
@@ -299,7 +320,11 @@ mod tests {
     fn accessibility_cpl_passes_st2067_3_xsd() {
         let dir = tempfile::tempdir().unwrap();
         let cpl_path = dir.path().join("CPL_ad.xml");
-        let opts = ImpOptions { fps_num: 24, fps_den: 1, ..Default::default() };
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
         let comp = Composition {
             title: "AD Test".into(),
             content_kind: "feature".into(),
@@ -311,7 +336,14 @@ mod tests {
             ..Default::default()
         };
         let tracks = [accessibility_track()];
-        write_cpl(&cpl_path, "22222222-3333-4444-5555-666666666666", &opts, &comp, &tracks).unwrap();
+        write_cpl(
+            &cpl_path,
+            "22222222-3333-4444-5555-666666666666",
+            &opts,
+            &comp,
+            &tracks,
+        )
+        .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
         match validate_st2067_3(&cpl_xml) {
             Some(ok) => assert!(ok, "accessibility CPL must pass ST 2067-3 XSD"),
