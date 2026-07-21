@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "shell:allow-open",
+    "opener:allow-reveal-item-in-dir",
     {
       "identifier": "shell:allow-execute",
       "allow": [

@@ -62,6 +62,35 @@ jobs:
           echo "OPENSSL_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $GITHUB_ENV
 
+      # build grok (jpeg 2000 codec) from source once per tag, cached.
+      # provides libgrokj2k on the pkg-config + loader paths and grk_compress on PATH.
+      # imfwizard does not link grok-ffi; it runs grk_compress at encode time.
+      - name: Cache grok
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/grok-install
+          key: grok-${{ runner.os }}-v20.3.6
+
+      - name: Setup grok
+        if: runner.os != 'Windows'
+        env:
+          GROK_TAG: v20.3.6
+        run: |
+          prefix="$GITHUB_WORKSPACE/grok-install"
+          if [ ! -x "$prefix/bin/grk_compress" ]; then
+            git clone --depth 1 --recurse-submodules --shallow-submodules --branch "$GROK_TAG" \
+              https://github.com/GrokImageCompression/grok.git "$RUNNER_TEMP/grok-src"
+            cmake -S "$RUNNER_TEMP/grok-src" -B "$RUNNER_TEMP/grok-build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix"
+            cmake --build "$RUNNER_TEMP/grok-build" --parallel
+            cmake --install "$RUNNER_TEMP/grok-build"
+          fi
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig:$prefix/lib64/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$prefix/lib:$prefix/lib64:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$prefix/lib:$prefix/lib64:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+
       - name: Build
         working-directory: rust
         run: cargo build --release

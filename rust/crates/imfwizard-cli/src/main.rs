@@ -36,6 +36,15 @@ enum Commands {
         #[arg(long)]
         audio: Option<String>,
 
+        /// RFC 5646 language tag for the audio track (e.g. de-DE)
+        #[arg(long = "audio-lang")]
+        audio_lang: Option<String>,
+
+        /// Accessibility role for the audio track: ad (audio description /
+        /// visually impaired) or hi (hearing impaired). Emits an MCA descriptor.
+        #[arg(long = "audio-role")]
+        audio_role: Option<String>,
+
         /// TTML/IMSC subtitle file to package (repeatable)
         #[arg(long = "subtitle")]
         subtitles: Vec<String>,
@@ -43,6 +52,11 @@ enum Commands {
         /// Content kind (feature, trailer, etc.)
         #[arg(short, long, default_value = "feature")]
         kind: String,
+
+        /// Delivery preset (netflix, disney, apple, hbo, amazon, dci-2k, dci-4k,
+        /// broadcast, archival); sets the J2K target bitrate. See `profiles`.
+        #[arg(long)]
+        profile: Option<String>,
 
         /// Frame rate numerator
         #[arg(long, default_value = "24")]
@@ -936,11 +950,36 @@ fn run() {
             title,
             video,
             audio,
+            audio_lang,
+            audio_role,
             subtitles,
             kind,
+            profile,
             fps_num,
             fps_den,
         } => {
+            // parse the accessibility role up front so a bad value fails fast
+            let audio_role = match audio_role.as_deref() {
+                Some(s) => match imfwizard_core::imp::AudioRole::from_flag(s) {
+                    Some(r) => Some(r),
+                    None => {
+                        eprintln!("Error: unknown audio role '{s}' (expected ad or hi)");
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
+            // resolve a delivery preset once; applied to the encode bitrate below
+            let preset = match profile.as_deref() {
+                Some(name) => match imfwizard_core::profiles::platform_from_name(name) {
+                    Some(p) => Some(imfwizard_core::profiles::profile_for(p)),
+                    None => {
+                        eprintln!("Error: unknown delivery preset '{name}' (see `profiles`)");
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
             let _ = std::fs::create_dir_all(&output);
 
             // If video is a file, run encode pipeline
@@ -959,14 +998,10 @@ fn run() {
                         .unwrap_or(false);
 
                 if is_video_file {
-                    use postkit::grok_encoder::{CompressParams, EncodeProgress};
                     use std::sync::Arc;
                     use std::sync::atomic::AtomicBool;
 
-                    let j2k_out = output.join("j2k");
-                    let _ = std::fs::create_dir_all(&j2k_out);
-
-                    tracing::info!("Detected video file — encoding to J2K");
+                    tracing::info!("Detected video file, encoding to J2K");
 
                     // Probe for actual frame rate
                     let probed = imfwizard_core::probe::probe_video(&video_path);
@@ -993,51 +1028,54 @@ fn run() {
                     }
 
                     let cancel = Arc::new(AtomicBool::new(false));
+                    let pause = Arc::new(AtomicBool::new(false));
                     let cancel_clone = cancel.clone();
                     let _ = ctrlc::set_handler(move || {
                         cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     });
 
-                    tracing::info!("Compressor: OpenJPEG");
-                    let params = CompressParams {
-                        compression_ratio: 10.0,
-                        frame_rate: actual_fps as u16,
-                        ..CompressParams::default()
+                    tracing::info!("Compressor: Grok");
+                    // A delivery preset sets the target bitrate; convert it to a J2K
+                    // compression ratio (raw = w*h*36 bits/frame), else default 10x.
+                    let compression_ratio = match (&preset, &probed) {
+                        (Some(p), Some(info)) => {
+                            let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
+                            let raw_bits = info.width as f64 * info.height as f64 * 36.0;
+                            let target_bits = (p.bitrate_mbps * 1_000_000.0) / fps;
+                            (raw_bits / target_bits).max(1.0)
+                        }
+                        _ => 10.0,
                     };
-                    let (width, height, total_frames) = probed
-                        .as_ref()
-                        .map(|info| (info.width, info.height, info.total_frames as u64))
-                        .unwrap_or((2048, 1080, 0));
-                    let result = postkit::openjpeg_encoder::encode_video_pipeline_opj(
+                    if let Some(p) = &preset {
+                        tracing::info!("Preset {}: {} Mbps (ratio {compression_ratio:.1})", p.name, p.bitrate_mbps);
+                    }
+                    // encode via the shared grok pipeline (grk_compress); no fallback
+                    let encoded = postkit::pipeline::run_encode_with_ratio(
                         &video_path,
-                        &j2k_out,
-                        &params,
-                        total_frames,
-                        width,
-                        height,
+                        &output,
+                        compression_ratio,
+                        actual_fps,
                         &cancel,
-                        |p: EncodeProgress| {
-                            let percent = if p.total_frames > 0 {
-                                (p.frames_encoded as f64 / p.total_frames as f64) * 100.0
-                            } else {
-                                0.0
-                            };
+                        &pause,
+                        |p: &postkit::pipeline::PipelineProgress| {
                             eprint!(
                                 "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
-                                p.frames_encoded, p.total_frames, percent, p.fps
+                                p.frame, p.total_frames, p.percent, p.fps
                             );
                         },
+                        |msg: &str| tracing::info!("{msg}"),
                     );
-                    let encode_success = result.success;
-                    let encode_error = result.error;
-                    let frames_encoded = result.frames_encoded;
                     eprintln!();
-
-                    if !encode_success {
-                        eprintln!("Error: Encode failed: {encode_error}");
-                        std::process::exit(1);
-                    }
-                    tracing::info!("Encoded {frames_encoded} frames");
+                    let j2k_out = match encoded {
+                        Ok(r) => {
+                            tracing::info!("Encoded {} frames", r.frames_encoded);
+                            r.j2k_dir
+                        }
+                        Err(e) => {
+                            eprintln!("Error: Encode failed: {e}");
+                            std::process::exit(1);
+                        }
+                    };
 
                     // Auto-demux audio
                     let audio_files = if let Some(a) = audio {
@@ -1079,21 +1117,33 @@ fn run() {
                 )
             };
 
+            let audio_tracks = audio_files
+                .into_iter()
+                .map(|path| imfwizard_core::imp::AudioTrack {
+                    path,
+                    language: audio_lang.clone(),
+                    role: audio_role,
+                })
+                .collect();
             let opts = imfwizard_core::imp::ImpOptions {
                 output_dir: output,
-                title,
-                content_kind: kind,
+                compositions: vec![imfwizard_core::imp::Composition {
+                    title,
+                    content_kind: kind,
+                    j2k_dir,
+                    audio_files: audio_tracks,
+                    timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
+                }],
                 fps_num,
                 fps_den,
-                j2k_dir,
-                audio_files,
-                timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
                 ..Default::default()
             };
             let result = imfwizard_core::imp::create_imp(&opts);
             if result.success {
                 println!("IMP created at {}", result.output_dir.display());
-                println!("  CPL: {}", result.cpl_path.display());
+                for cpl in &result.cpl_paths {
+                    println!("  CPL: {}", cpl.display());
+                }
                 println!("  PKL: {}", result.pkl_path.display());
                 println!("  ASSETMAP: {}", result.assetmap_path.display());
             } else {
@@ -2332,80 +2382,55 @@ fn run() {
         }
 
         Commands::AvSync { input } => {
-            // Measure A/V sync by comparing first audio PTS with first video PTS
-            let output = std::process::Command::new("ffprobe")
-                .args([
-                    "-v",
-                    "quiet",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "packet=pts_time",
-                    "-of",
-                    "csv=p=0",
-                    "-read_intervals",
-                    "%+#1",
-                    &input,
-                ])
-                .output();
-            let first_video_pts = match &output {
-                Ok(out) => String::from_utf8_lossy(&out.stdout)
-                    .trim()
-                    .parse::<f64>()
-                    .ok(),
-                Err(_) => None,
-            };
-
-            let output = std::process::Command::new("ffprobe")
-                .args([
-                    "-v",
-                    "quiet",
-                    "-select_streams",
-                    "a:0",
-                    "-show_entries",
-                    "packet=pts_time",
-                    "-of",
-                    "csv=p=0",
-                    "-read_intervals",
-                    "%+#1",
-                    &input,
-                ])
-                .output();
-            let first_audio_pts = match &output {
-                Ok(out) => String::from_utf8_lossy(&out.stdout)
-                    .trim()
-                    .parse::<f64>()
-                    .ok(),
-                Err(_) => None,
+            // Compare each stream's start and end on the container clock. The initial
+            // offset is the lip-sync delay; comparing the ends too catches drift that
+            // accumulates over the program (e.g. an audio rate mismatch), which a
+            // first-PTS-only check misses.
+            let span = |stream: &str| -> Option<(f64, f64)> {
+                let out = std::process::Command::new("ffprobe")
+                    .args([
+                        "-v", "quiet",
+                        "-select_streams", stream,
+                        "-show_entries", "stream=start_time,duration",
+                        "-of", "csv=p=0",
+                        &input,
+                    ])
+                    .output()
+                    .ok()?;
+                let text = String::from_utf8_lossy(&out.stdout);
+                let mut it = text.lines().next()?.split(',');
+                let start = it.next()?.trim().parse::<f64>().ok()?;
+                let dur = it.next()?.trim().parse::<f64>().ok()?;
+                Some((start, dur))
             };
 
             println!("A/V sync analysis: {input}");
-            match (first_video_pts, first_audio_pts) {
-                (Some(v), Some(a)) => {
-                    let drift_ms = (v - a) * 1000.0;
-                    println!("  First video PTS: {v:.6}s");
-                    println!("  First audio PTS: {a:.6}s");
-                    println!("  Drift: {drift_ms:.2}ms (video - audio)");
-                    // EBU R128 recommends < ±40ms for broadcast
-                    if drift_ms.abs() < 5.0 {
-                        println!("  Result: PASS (drift < 5ms, frame-accurate)");
-                    } else if drift_ms.abs() < 40.0 {
-                        println!(
-                            "  Result: WARNING (drift {drift_ms:.1}ms, within EBU tolerance but audible)"
-                        );
-                    } else {
-                        println!("  Result: FAIL (drift {drift_ms:.1}ms, exceeds ±40ms tolerance)");
-                        std::process::exit(1);
-                    }
-                }
-                (None, _) => {
-                    eprintln!("  Could not determine video start PTS (no video stream?)");
-                    std::process::exit(1);
-                }
-                (_, None) => {
-                    eprintln!("  Could not determine audio start PTS (no audio stream?)");
-                    std::process::exit(1);
-                }
+            let (Some((v_start, v_dur)), Some((a_start, a_dur))) = (span("v:0"), span("a:0")) else {
+                eprintln!("  Could not read stream start_time/duration (missing stream or ffprobe?)");
+                std::process::exit(1);
+            };
+
+            let initial_ms = (v_start - a_start) * 1000.0;
+            let end_ms = ((v_start + v_dur) - (a_start + a_dur)) * 1000.0;
+            let drift_ms = end_ms - initial_ms;
+            println!("  Video: start {v_start:.3}s  duration {v_dur:.3}s");
+            println!("  Audio: start {a_start:.3}s  duration {a_dur:.3}s");
+            println!("  Initial offset: {initial_ms:+.1}ms (video - audio)");
+            println!("  End offset:     {end_ms:+.1}ms");
+            println!("  Progressive drift over program: {drift_ms:+.1}ms");
+            if drift_ms.abs() > 20.0 {
+                println!("  Note: offset grows over time (likely an audio/video rate mismatch)");
+            }
+
+            let worst = initial_ms.abs().max(end_ms.abs());
+            // EBU R128 recommends < ±40ms for broadcast
+            if worst < 5.0 {
+                println!("  Result: PASS (offset < 5ms, frame-accurate)");
+            } else if worst < 40.0 {
+                println!("  Result: WARNING (offset {worst:.1}ms, within EBU tolerance but audible)");
+            } else {
+                println!("  Result: FAIL (offset {worst:.1}ms, exceeds ±40ms tolerance)");
+                std::process::exit(1);
             }
         }
 
@@ -2731,6 +2756,7 @@ fn run() {
                 valid_to,
                 formulation,
                 content_keys: Vec::new(),
+                format: postkit::certificate::KdmFormat::Smpte,
             };
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),

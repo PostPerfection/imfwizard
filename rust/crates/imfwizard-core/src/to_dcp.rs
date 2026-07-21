@@ -128,6 +128,7 @@ fn build_dcp(
         fps_den: pic.fps_den,
         partition_size: 0,
         encryption: None,
+        mca_config: None,
     });
     if !wrapped.success {
         return Err(format!(
@@ -161,6 +162,7 @@ fn build_dcp(
             fps_den: pic.fps_den,
             partition_size: 0,
             encryption: None,
+            mca_config: None,
         });
         if !wrapped.success {
             return Err(format!(
@@ -204,9 +206,7 @@ fn build_dcp(
     let cpl_size = std::fs::metadata(&cpl_path).map(|m| m.len()).unwrap_or(0);
 
     let pkl_path = opts.output_dir.join(format!("PKL_{pkl_uuid}.xml"));
-    write_pkl(
-        &pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &title, &assets,
-    )?;
+    write_pkl(&pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &assets)?;
 
     write_assetmap(
         &opts.output_dir.join("ASSETMAP.xml"),
@@ -459,8 +459,13 @@ fn write_wav(
     std::fs::write(path, w).map_err(|e| format!("writing WAV {}: {e}", path.display()))
 }
 
-use postkit::packaging::escape_xml as xml_escape;
+use postkit::packaging::{
+    AssetMap, AssetMapAsset, DcpCpl, DcpCplReel, PackingList, PklAsset, ns, volindex_xml,
+};
 
+/// Write the DCP CPL (ST 429-7 SMPTE) via postkit. Folds the picture and optional
+/// sound asset into a single reel; per-asset ScreenAspectRatio comes from the real
+/// picture container dims read off the MXF.
 fn write_cpl(
     path: &Path,
     cpl_uuid: &str,
@@ -468,118 +473,72 @@ fn write_cpl(
     content_kind: &str,
     assets: &[DcpAsset],
 ) -> Result<(), String> {
-    use std::fmt::Write;
-    let mut x = String::new();
-    let _ = writeln!(x, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
-    let _ = writeln!(
-        x,
-        r#"<CompositionPlaylist xmlns="http://www.smpte-ra.org/schemas/429-7/2006/CPL">"#
-    );
-    let _ = writeln!(x, "  <Id>urn:uuid:{cpl_uuid}</Id>");
-    let _ = writeln!(x, "  <IssueDate>{}</IssueDate>", crate::issue_date());
-    let _ = writeln!(x, "  <Issuer>IMF Wizard</Issuer>");
-    let _ = writeln!(x, "  <Creator>IMF Wizard</Creator>");
-    let _ = writeln!(
-        x,
-        "  <ContentTitleText>{}</ContentTitleText>",
-        xml_escape(title)
-    );
-    let _ = writeln!(
-        x,
-        "  <ContentKind>{}</ContentKind>",
-        xml_escape(content_kind)
-    );
-    let _ = writeln!(x, "  <ReelList>");
-    let _ = writeln!(x, "    <Reel>");
-    let _ = writeln!(x, "      <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4());
-    let _ = writeln!(x, "      <AssetList>");
+    let mut reel = DcpCplReel {
+        reel_id: uuid::Uuid::new_v4().to_string(),
+        ..Default::default()
+    };
     for a in assets {
-        let er = format!("{} {}", a.fps_num, a.fps_den);
         match a.kind {
             AssetKind::Picture { width, height } => {
-                let _ = writeln!(x, "        <MainPicture>");
-                let _ = writeln!(x, "          <Id>urn:uuid:{}</Id>", a.uuid);
-                let _ = writeln!(x, "          <EditRate>{er}</EditRate>");
-                let _ = writeln!(
-                    x,
-                    "          <IntrinsicDuration>{}</IntrinsicDuration>",
-                    a.duration
-                );
-                let _ = writeln!(x, "          <EntryPoint>0</EntryPoint>");
-                let _ = writeln!(x, "          <Duration>{}</Duration>", a.duration);
-                let _ = writeln!(x, "          <FrameRate>{er}</FrameRate>");
-                let _ = writeln!(
-                    x,
-                    "          <ScreenAspectRatio>{width} {height}</ScreenAspectRatio>"
-                );
-                let _ = writeln!(x, "        </MainPicture>");
+                reel.picture_id = a.uuid.clone();
+                reel.picture_edit_rate_num = a.fps_num;
+                reel.picture_edit_rate_den = a.fps_den;
+                reel.picture_duration = a.duration;
+                reel.picture_width = width;
+                reel.picture_height = height;
             }
             AssetKind::Sound => {
-                let _ = writeln!(x, "        <MainSound>");
-                let _ = writeln!(x, "          <Id>urn:uuid:{}</Id>", a.uuid);
-                let _ = writeln!(x, "          <EditRate>{er}</EditRate>");
-                let _ = writeln!(
-                    x,
-                    "          <IntrinsicDuration>{}</IntrinsicDuration>",
-                    a.duration
-                );
-                let _ = writeln!(x, "          <EntryPoint>0</EntryPoint>");
-                let _ = writeln!(x, "          <Duration>{}</Duration>", a.duration);
-                let _ = writeln!(x, "        </MainSound>");
+                reel.sound_id = Some(a.uuid.clone());
+                reel.sound_edit_rate_num = a.fps_num;
+                reel.sound_edit_rate_den = a.fps_den;
+                reel.sound_duration = a.duration;
             }
         }
     }
-    let _ = writeln!(x, "      </AssetList>");
-    let _ = writeln!(x, "    </Reel>");
-    let _ = writeln!(x, "  </ReelList>");
-    let _ = writeln!(x, "</CompositionPlaylist>");
-    std::fs::write(path, x).map_err(|e| format!("writing CPL {}: {e}", path.display()))
+    let cpl = DcpCpl {
+        uuid: cpl_uuid.to_string(),
+        namespace: ns::CPL_SMPTE.to_string(),
+        title: title.to_string(),
+        content_kind: content_kind.to_string(),
+        issuer: "IMF Wizard".to_string(),
+        creator: "IMF Wizard".to_string(),
+        issue_date: crate::issue_date(),
+        reels: vec![reel],
+    };
+    std::fs::write(path, cpl.to_xml()).map_err(|e| format!("writing CPL {}: {e}", path.display()))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_pkl(
     path: &Path,
     pkl_uuid: &str,
     cpl_uuid: &str,
     cpl_hash: &str,
     cpl_size: u64,
-    title: &str,
     assets: &[DcpAsset],
 ) -> Result<(), String> {
-    use std::fmt::Write;
-    let mut x = String::new();
-    let _ = writeln!(x, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
-    let _ = writeln!(
-        x,
-        r#"<PackingList xmlns="http://www.smpte-ra.org/schemas/429-8/2007/PKL">"#
-    );
-    let _ = writeln!(x, "  <Id>urn:uuid:{pkl_uuid}</Id>");
-    let _ = writeln!(
-        x,
-        "  <AnnotationText>{}</AnnotationText>",
-        xml_escape(title)
-    );
-    let _ = writeln!(x, "  <IssueDate>{}</IssueDate>", crate::issue_date());
-    let _ = writeln!(x, "  <Issuer>IMF Wizard</Issuer>");
-    let _ = writeln!(x, "  <Creator>IMF Wizard</Creator>");
-    let _ = writeln!(x, "  <AssetList>");
-    let _ = writeln!(x, "    <Asset>");
-    let _ = writeln!(x, "      <Id>urn:uuid:{cpl_uuid}</Id>");
-    let _ = writeln!(x, "      <Hash>{cpl_hash}</Hash>");
-    let _ = writeln!(x, "      <Size>{cpl_size}</Size>");
-    let _ = writeln!(x, "      <Type>text/xml</Type>");
-    let _ = writeln!(x, "    </Asset>");
+    let mut pkl_assets = vec![PklAsset {
+        id: cpl_uuid.to_string(),
+        hash: cpl_hash.to_string(),
+        size: cpl_size,
+        asset_type: "text/xml".to_string(),
+    }];
     for a in assets {
-        let _ = writeln!(x, "    <Asset>");
-        let _ = writeln!(x, "      <Id>urn:uuid:{}</Id>", a.uuid);
-        let _ = writeln!(x, "      <Hash>{}</Hash>", a.hash_b64);
-        let _ = writeln!(x, "      <Size>{}</Size>", a.size);
-        let _ = writeln!(x, "      <Type>application/mxf</Type>");
-        let _ = writeln!(x, "    </Asset>");
+        pkl_assets.push(PklAsset {
+            id: a.uuid.clone(),
+            hash: a.hash_b64.clone(),
+            size: a.size,
+            asset_type: "application/mxf".to_string(),
+        });
     }
-    let _ = writeln!(x, "  </AssetList>");
-    let _ = writeln!(x, "</PackingList>");
-    std::fs::write(path, x).map_err(|e| format!("writing PKL {}: {e}", path.display()))
+    let pkl = PackingList {
+        uuid: pkl_uuid.to_string(),
+        namespace: ns::PKL_SMPTE.to_string(),
+        issuer: "IMF Wizard".to_string(),
+        creator: "IMF Wizard".to_string(),
+        issue_date: crate::issue_date(),
+        assets: pkl_assets,
+    };
+    std::fs::write(path, pkl.to_xml()).map_err(|e| format!("writing PKL {}: {e}", path.display()))
 }
 
 fn write_assetmap(
@@ -590,55 +549,143 @@ fn write_assetmap(
     cpl_file: &str,
     assets: &[DcpAsset],
 ) -> Result<(), String> {
-    use std::fmt::Write;
-    let mut x = String::new();
-    let _ = writeln!(x, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
-    let _ = writeln!(
-        x,
-        r#"<AssetMap xmlns="http://www.smpte-ra.org/schemas/429-9/2007/AM">"#
-    );
-    let _ = writeln!(x, "  <Id>urn:uuid:{}</Id>", uuid::Uuid::new_v4());
-    let _ = writeln!(x, "  <Creator>IMF Wizard</Creator>");
-    let _ = writeln!(x, "  <VolumeCount>1</VolumeCount>");
-    let _ = writeln!(x, "  <IssueDate>{}</IssueDate>", crate::issue_date());
-    let _ = writeln!(x, "  <Issuer>IMF Wizard</Issuer>");
-    let _ = writeln!(x, "  <AssetList>");
-    let _ = writeln!(x, "    <Asset>");
-    let _ = writeln!(x, "      <Id>urn:uuid:{pkl_uuid}</Id>");
-    let _ = writeln!(x, "      <PackingList>true</PackingList>");
-    let _ = writeln!(
-        x,
-        "      <ChunkList><Chunk><Path>{pkl_file}</Path></Chunk></ChunkList>"
-    );
-    let _ = writeln!(x, "    </Asset>");
-    let _ = writeln!(x, "    <Asset>");
-    let _ = writeln!(x, "      <Id>urn:uuid:{cpl_uuid}</Id>");
-    let _ = writeln!(
-        x,
-        "      <ChunkList><Chunk><Path>{cpl_file}</Path></Chunk></ChunkList>"
-    );
-    let _ = writeln!(x, "    </Asset>");
+    let mut am_assets = vec![
+        AssetMapAsset {
+            id: pkl_uuid.to_string(),
+            path: pkl_file.to_string(),
+            packing_list: true,
+        },
+        AssetMapAsset {
+            id: cpl_uuid.to_string(),
+            path: cpl_file.to_string(),
+            packing_list: false,
+        },
+    ];
     for a in assets {
-        let _ = writeln!(x, "    <Asset>");
-        let _ = writeln!(x, "      <Id>urn:uuid:{}</Id>", a.uuid);
-        let _ = writeln!(
-            x,
-            "      <ChunkList><Chunk><Path>{}</Path></Chunk></ChunkList>",
-            a.filename
-        );
-        let _ = writeln!(x, "    </Asset>");
+        am_assets.push(AssetMapAsset {
+            id: a.uuid.clone(),
+            path: a.filename.clone(),
+            packing_list: false,
+        });
     }
-    let _ = writeln!(x, "  </AssetList>");
-    let _ = writeln!(x, "</AssetMap>");
-    std::fs::write(path, x).map_err(|e| format!("writing ASSETMAP {}: {e}", path.display()))
+    let am = AssetMap {
+        uuid: uuid::Uuid::new_v4().to_string(),
+        namespace: ns::AM_SMPTE.to_string(),
+        issuer: "IMF Wizard".to_string(),
+        creator: "IMF Wizard".to_string(),
+        issue_date: crate::issue_date(),
+        assets: am_assets,
+    };
+    std::fs::write(path, am.to_xml())
+        .map_err(|e| format!("writing ASSETMAP {}: {e}", path.display()))
 }
 
 fn write_volindex(path: &Path) -> Result<(), String> {
-    let x = concat!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
-        "<VolumeIndex xmlns=\"http://www.smpte-ra.org/schemas/429-9/2007/AM\">\n",
-        "  <Index>1</Index>\n",
-        "</VolumeIndex>\n"
-    );
-    std::fs::write(path, x).map_err(|e| format!("writing VOLINDEX {}: {e}", path.display()))
+    std::fs::write(path, volindex_xml(ns::AM_SMPTE))
+        .map_err(|e| format!("writing VOLINDEX {}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asset(kind: AssetKind, uuid: &str, filename: &str) -> DcpAsset {
+        DcpAsset {
+            uuid: uuid.to_string(),
+            filename: filename.to_string(),
+            hash_b64: "kO0m3F3qX3qg3n3qg3n3qg3n3q0=".to_string(),
+            size: 42,
+            duration: 240,
+            fps_num: 24,
+            fps_den: 1,
+            kind,
+        }
+    }
+
+    /// Validate the DCP docs this module writes against the official SMPTE
+    /// 429-7/8/9 XSDs. Gated on POSTKIT_DCP_XSD_DIR (a dir holding the SMPTE
+    /// schemas plus a local xmldsig-core-schema.xsd and xml.xsd) and xmllint;
+    /// skips when absent. Full essence-bearing DCP validation is done separately
+    /// with dcpdoctor once real MXF track files exist.
+    #[test]
+    fn generated_dcp_docs_pass_smpte_xsd() {
+        let Ok(xsd_dir) = std::env::var("POSTKIT_DCP_XSD_DIR") else {
+            eprintln!("skipping: set POSTKIT_DCP_XSD_DIR to the SMPTE XSD directory");
+            return;
+        };
+        if std::process::Command::new("xmllint").arg("--version").output().is_err() {
+            eprintln!("skipping: xmllint not installed");
+            return;
+        }
+        let xsd = std::path::Path::new(&xsd_dir);
+        let dir = tempfile::tempdir().unwrap();
+
+        // the 429-7 CPL imports xmldsig and xml.xsd by http URL; map them to the
+        // local copies so xmllint resolves them offline.
+        let catalog = dir.path().join("catalog.xml");
+        std::fs::write(
+            &catalog,
+            format!(
+                r#"<?xml version="1.0"?>
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+  <system systemId="http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd" uri="{dsig}"/>
+  <system systemId="http://www.w3.org/2001/03/xml.xsd" uri="{xml_xsd}"/>
+</catalog>"#,
+                dsig = xsd.join("xmldsig-core-schema.xsd").display(),
+                xml_xsd = xsd.join("xml.xsd").display(),
+            ),
+        )
+        .unwrap();
+
+        let assets = [
+            asset(
+                AssetKind::Picture { width: 2048, height: 858 },
+                "77777777-7777-8888-9999-aaaaaaaaaaaa",
+                "picture.mxf",
+            ),
+            asset(
+                AssetKind::Sound,
+                "88888888-7777-8888-9999-aaaaaaaaaaaa",
+                "sound.mxf",
+            ),
+        ];
+
+        let cpl_uuid = "11111111-2222-3333-4444-555555555555";
+        let pkl_uuid = "bbbbbbbb-7777-8888-9999-aaaaaaaaaaaa";
+        let cpl_path = dir.path().join(format!("CPL_{cpl_uuid}.xml"));
+        let pkl_path = dir.path().join(format!("PKL_{pkl_uuid}.xml"));
+        let am_path = dir.path().join("ASSETMAP.xml");
+        write_cpl(&cpl_path, cpl_uuid, "Test", "feature", &assets).unwrap();
+        write_pkl(&pkl_path, pkl_uuid, cpl_uuid, "kO0m3F3qX3qg3n3qg3n3qg3n3q0=", 100, &assets)
+            .unwrap();
+        write_assetmap(
+            &am_path,
+            pkl_uuid,
+            &format!("PKL_{pkl_uuid}.xml"),
+            cpl_uuid,
+            &format!("CPL_{cpl_uuid}.xml"),
+            &assets,
+        )
+        .unwrap();
+
+        for (doc, schema) in [
+            (&cpl_path, "SMPTE-429-7-2006-CPL.xsd"),
+            (&pkl_path, "SMPTE-429-8-2006-PKL.xsd"),
+            (&am_path, "SMPTE-429-9-2007-AM.xsd"),
+        ] {
+            let out = std::process::Command::new("xmllint")
+                .args(["--nonet", "--noout", "--schema"])
+                .arg(xsd.join(schema))
+                .arg(doc)
+                .env("XML_CATALOG_FILES", &catalog)
+                .output()
+                .expect("run xmllint");
+            assert!(
+                out.status.success(),
+                "{} must pass {schema}:\n{}",
+                doc.display(),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
 }

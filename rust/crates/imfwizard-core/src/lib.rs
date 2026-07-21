@@ -5,7 +5,6 @@ pub mod cpl_annotation;
 pub mod edl_import;
 pub mod imp;
 pub mod mxf_wrap;
-pub mod otioz_import;
 pub mod pkl;
 pub mod timeline;
 
@@ -28,19 +27,16 @@ pub mod mca;
 
 // Subtitles/Captions
 pub mod burnin;
-pub mod captions;
+pub mod scc;
 pub mod subtitle_convert;
-pub mod subtitle_retime;
 
 // Infrastructure
 pub mod executor;
 pub mod job_queue;
-pub mod plugin;
 pub mod preferences;
 pub mod rest_api;
 pub mod tools;
 pub mod watch;
-pub mod webhook;
 
 // Delivery
 pub mod delivery;
@@ -49,7 +45,6 @@ pub mod profiles;
 // Tools
 pub mod analytics;
 pub mod frame_compare;
-pub mod imp_diff;
 pub mod info;
 pub mod photon;
 pub mod prores;

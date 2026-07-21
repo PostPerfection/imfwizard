@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp } from "./preview.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
@@ -440,12 +441,23 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   const title = document.getElementById("prop-title")?.value?.trim();
   if (!title) { tauriMessage("Enter a content title in Properties"); return; }
 
-  const seg = project.segments[0];
-  if (!seg?.picture) { tauriMessage("Import a video asset first"); return; }
+  // one composition per CPL tab; each becomes a separate CPL in the IMP
+  const multi = project.compositions.length > 1;
+  const comps = project.compositions
+    .map((c) => {
+      const s = c.segments[0];
+      if (!s?.picture) return null;
+      return {
+        title: multi ? `${title} - ${c.name}` : title,
+        contentKind: c.contentKind || "feature",
+        videoPath: s.picture.path,
+        audioPath: s.sound?.path || null,
+        subtitles: s.subtitle?.path ? [s.subtitle.path] : [],
+      };
+    })
+    .filter(Boolean);
+  if (!comps.length) { tauriMessage("Import a video asset first"); return; }
 
-  const video = seg.picture.path;
-  const audio = seg.sound?.path || null;
-  const subtitles = seg.subtitle?.path ? [seg.subtitle.path] : [];
   let output = document.getElementById("prop-output")?.value;
   if (!output) {
     const docs = await documentDir();
@@ -490,9 +502,8 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
 
   try {
     currentJobId = await invoke("submit_job", {
-      videoPath: video, title, outputDir: output, audioPath: audio, subtitles,
+      title, outputDir: output, compositions: comps,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
-      contentKind: document.getElementById("prop-content-kind")?.value || "feature",
       bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     });
     setStatus("Building IMP...");
@@ -966,7 +977,8 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
     } else if (action === "remove") {
       removeAsset(ctxAssetId);
     } else if (action === "reveal") {
-      invoke("plugin:shell|open", { path: asset.path.replace(/[/\\][^/\\]*$/, '') });
+      // reveals the file in the OS file manager (shell open only accepts URLs)
+      revealItemInDir(asset.path);
     }
     ctxMenu.hidden = true;
   });

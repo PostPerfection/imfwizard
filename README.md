@@ -18,14 +18,14 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Packaging & Wrapping
 - **Original Version IMP creation** from J2K + WAV
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
-- **Subtitle conversion**, SRT → TTML
+- **Subtitle conversion**, SRT and SCC (CEA-608 pop-on captions) → IMSC/TTML
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
 - **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP
 
 ### Encoding & Transcoding
-- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via OpenJPEG
+- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok (`grk_compress`)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Subtitle burn-in**, render SRT/TTML into video frames via ffmpeg
@@ -52,7 +52,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
 - **Dolby Atmos ADM BWF import**, parse ADM metadata and wrap the PCM essence to MXF (not a Dolby IAB bitstream)
-- **A/V sync detection**, compare the first audio/video presentation timestamp for drift
+- **A/V sync detection**, compare per-stream start and end on the container clock for initial offset and drift over the program
 
 ### Versioning & Annotation
 - **Supplemental IMP** (`supplement`), package only the new/changed track files with a CPL that references the unchanged OV track files by UUID (ST 2067-2/-3 OV+supplemental)
@@ -70,14 +70,14 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
-- **Delivery presets**, listed profiles (Netflix, Amazon, Cinema 2K/4K, ...) for reference
+- **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`
 - **Watch folder**, print filesystem events for a directory
 - **EDL conform**, import CMX3600/FCP7 edit decisions to build a CPL timeline
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
 - **Partial restore**, extract tracks from existing IMPs back to raw files (asdcp-unwrap)
 
 ### Comparison & Analysis
-- **IMF package diff**, compare two IMPs and show track changes
+- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate) or pixel PSNR/SSIM/VMAF with `--pixel`/`--vmaf`
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
@@ -228,6 +228,35 @@ imfwizard create \
   --output /path/to/output/
 ```
 
+### Tag the audio language and apply a delivery preset
+
+```bash
+# --audio-lang writes an RFC 5646 LocaleList/Language in the CPL (ST 2067-3).
+# --profile maps a delivery preset's target bitrate to the J2K compression ratio.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --audio /path/to/de.wav --audio-lang de-DE \
+  --profile netflix \
+  --output /path/to/output/
+```
+
+### Package an accessibility audio track (AD/HI)
+
+```bash
+# --audio-role ad (audio description / visually impaired) or hi (hearing impaired)
+# emits an MCA EssenceDescriptor (SoundfieldGroup + chVIN/chHI + RFC 5646 language)
+# linked to the audio resource via SourceEncoding (ST 2067-2/-3, XSD-validated).
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --audio /path/to/ad.wav --audio-lang en-US --audio-role ad \
+  --output /path/to/output/
+```
+
+The CLI writes one CPL per `create`. The GUI packages multiple compositions
+(one CPL tab each) into a single IMP that shares one PKL and ASSETMAP.
+
 ### Create an IMP from non-J2K images (auto-encode)
 
 ```bash
@@ -308,7 +337,7 @@ imfwizard info /path/to/existing_imp/
 ### List delivery presets
 
 ```bash
-# Presets are reference profiles; they are listed, not auto-applied by `create`
+# Apply one to an encode with `create --profile <name>` (maps target bitrate).
 imfwizard profiles
 ```
 
@@ -443,7 +472,7 @@ imfwizard aces -i /log_frames/ -o /aces_frames/ --idt ARRI_LogC4 --odt P3D65_PQ_
 ### A/V sync check
 
 ```bash
-# Compare the first audio and video presentation timestamps for drift
+# Reports initial A/V offset plus drift accumulated across the program
 imfwizard av-sync -i /path/to/video.mxf
 ```
 

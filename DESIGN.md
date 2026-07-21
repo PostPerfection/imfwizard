@@ -13,8 +13,9 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 
 ## What is implemented and wired
 
-- IMP creation from J2K/video + WAV + TTML via CLI: real OpenJPEG encode, AS-02 wrapping, CPL/PKL/ASSETMAP with base64 SHA-1, App2E precheck. The CPL/PKL/ASSETMAP writers and SRT parsing come from `postkit::packaging` / `postkit::subtitle_retime` (shared with dcpwizard).
-- encode, transcode (basic), subtitle-convert SRT to TTML, hash, timecode.
+- IMP creation from J2K/video + WAV + TTML via CLI: real Grok (`grk_compress`) encode, AS-02 wrapping, CPL/PKL/ASSETMAP with base64 SHA-1, App2E precheck. The CPL/PKL/ASSETMAP writers and SRT parsing come from `postkit::packaging` / `postkit::subtitle_retime` (shared with dcpwizard). `--audio-lang` writes an RFC 5646 LocaleList/Language in the CPL (ST 2067-3, XSD-validated); `--audio-role ad|hi` adds an MCA accessibility EssenceDescriptor linked by SourceEncoding; `--profile <preset>` maps a delivery preset's bitrate to the J2K ratio.
+- Multi-CPL IMP: `create_imp` takes a list of compositions and writes one CPL each over a single shared PKL/ASSETMAP. The CLI writes one composition; the GUI packages every composition tab into one multi-CPL IMP.
+- encode, transcode (basic), subtitle-convert SRT and SCC (CEA-608 pop-on) to IMSC/TTML, hash, timecode.
 - Structural validate (dcpdoctor-core) plus XSD via xmllint; loudness measure; info; doctor. Optional `validate --photon` shells out to Netflix Photon (JRE + jar) and merges its findings.
 - kdm, dcdm, colour, lut, aces CTL pipeline, dv-extract/dv-inject/dv-convert, watermark, trailer, restore (asdcp-unwrap).
 - `supplement`: real ST 2067-2/-3 OV+supplemental IMP. Reads the OV CPL (edit rate, content kind, per-kind track-file UUIDs), wraps only the new/changed assets (`--replace`/`--add`, `<path>@<track>` selectors), and writes a CPL referencing the OV UUIDs for unchanged tracks plus the new UUIDs for changed ones. ASSETMAP/PKL cover only the physically-present assets (new CPL + new track files). Fails loud when nothing changes or a `--replace` target does not exist in the OV.
@@ -27,7 +28,9 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 ## Deliberately not implemented (fails loud, de-advertised)
 
 - `daemon` / `batch` CLI commands: removed. An in-memory cross-process queue with no IPC could never run or persist jobs; use `serve` (real worker) or the direct per-operation commands.
-- `webhook`, `plugin`, `otioz_import` modules are unused. Photon and VMAF are optional shell-out integrations (off by default, no build deps), not core features.
+- Photon and VMAF are optional shell-out integrations (off by default, no build deps), not core features.
+- Accessibility roles (AD/HI/SL) and HDR/WCG (ST 2067-21) essence metadata have no create-path option: both need per-track MCA labels / an EssenceDescriptorList that `postkit::packaging::ImfCpl` does not emit. Audio language is expressed at the composition level (LocaleList) instead.
+- SCC conversion handles pop-on captions only; roll-up, paint-on, and text-mode fail loud.
 
 ## Layout note
 

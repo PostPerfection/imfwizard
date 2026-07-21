@@ -55,9 +55,12 @@ pub fn execute_job(job: &Job) -> Result<(), String> {
         JobType::Create => {
             let opts = crate::imp::ImpOptions {
                 output_dir: job.output.clone(),
-                title: job.description.clone(),
-                content_kind: "feature".to_string(),
-                j2k_dir: Some(job.input.clone()),
+                compositions: vec![crate::imp::Composition {
+                    title: job.description.clone(),
+                    content_kind: "feature".to_string(),
+                    j2k_dir: Some(job.input.clone()),
+                    ..Default::default()
+                }],
                 fps_num: 24,
                 fps_den: 1,
                 ..Default::default()

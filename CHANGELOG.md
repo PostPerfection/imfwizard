@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **Accessibility audio (AD/HI)**: `create --audio-role ad|hi` emits an MCA `EssenceDescriptor` (SoundfieldGroup + `chVIN`/`chHI` channel label + RFC 5646 spoken language) linked to the audio resource via `SourceEncoding` (ST 2067-2/-3), carried verbatim by `postkit::packaging::ImfCpl`. XSD-validated against imf-cpl-20160411.xsd.
 - **KDM generation** — `kdm` command now generates signed SMPTE 430-1 KDMs via postkit (xmlsec1-verified). New `--signer-cert`/`--signer-key`/`--signer-chain` flags.
 - **Subtitle packaging** — `create --subtitle` wraps TTML/IMSC files as AS-02 timed-text MXF and adds a SubtitlesSequence to the CPL.
 - **GUI metadata save** — the Metadata panel Save button now calls `metadata-edit` instead of showing a placeholder.
@@ -15,6 +16,9 @@
 - **Supplemental IMP** — `supplement` builds a real ST 2067-2/-3 OV+supplemental package: `--replace`/`--add <path>@<track>` wraps only the new/changed track files, and the CPL references the OV's unchanged track files by UUID (ASSETMAP/PKL cover only present assets). Fails loud when nothing changes or a replace target is absent from the OV.
 
 ### Changed
+- **J2K encoding is Grok-only**: dropped the `openjpeg` postkit feature; the CLI `create` video path now encodes through the shared `postkit::pipeline` grok (`grk_compress`) pipeline, the same one the GUI uses. No OpenJPEG fallback; errors clearly if `grk_compress` is not found.
+- **CPL language via postkit**: the composition LocaleList now comes from `ImfCpl.languages` (postkit emits it) instead of imfwizard splicing the block into the generated XML. Output is byte-identical.
+- **IMF-to-DCP writers use postkit**: `to-dcp` now writes its DCP CPL/PKL/ASSETMAP/VOLINDEX through `postkit::packaging` (`DcpCpl` with per-reel picture dims for a real `ScreenAspectRatio`) instead of hand-rolled XML. Schema-valid (dcpdoctor schema-validate: passed).
 - **MXF wrapping** — imfwizard-core delegates J2K/TimedText/Atmos wrapping to postkit's AS-02 writers. PCM now parses the real WAV header (channels/bits/sample rate) instead of hardcoding 5.1/24-bit/48k.
 - **target-convert** — maps 2k/4k scope/flat/full to real resolutions and errors on unknown targets instead of always producing 1080p.
 - **metadata-edit** — the `--issuer` value is now written (was discarded).
@@ -23,8 +27,12 @@
 - **Timeline/ASSETMAP parsing** — replaced hand-rolled line scanners with quick-xml.
 - **Packaging XML** — CPL/PKL/ASSETMAP writers and the SRT parser now use the shared `postkit::packaging` / `postkit::subtitle_retime` writers instead of hand-rolled copies.
 
+### Fixed
+- **GUI "Show in Files"**: reveals the asset via `tauri-plugin-opener` `revealItemInDir` instead of `plugin:shell open` on a stripped parent path (shell open only accepts URLs). Mirrors the dcpwizard fix.
+
 ### Removed
 - **`daemon` and `batch` commands** — an in-memory, cross-process queue with no IPC could never run or persist jobs; removed in favour of the real `serve` worker.
+- **OpenJPEG**: no longer referenced anywhere in the repo; J2K encoding is Grok-only.
 
 ## [1.1.0] — 2026-05-28
 

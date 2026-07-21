@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::PathBuf;
@@ -30,18 +30,30 @@ pub struct JobInfo {
 
 // ─── Job types ─────────────────────────────────────────────────────────────
 
+/// One composition submitted by the GUI, packaged as its own CPL.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompositionInput {
+    pub title: String,
+    #[serde(default)]
+    pub content_kind: String,
+    pub video_path: String,
+    #[serde(default)]
+    pub audio_path: Option<String>,
+    #[serde(default)]
+    pub audio_lang: Option<String>,
+    #[serde(default)]
+    pub subtitles: Vec<String>,
+}
+
 #[derive(Clone)]
-#[allow(dead_code)]
 struct JobConfig {
     id: u64,
-    video_path: PathBuf,
     title: String,
     output_dir: PathBuf,
-    audio_path: Option<String>,
-    subtitles: Vec<String>,
+    compositions: Vec<CompositionInput>,
     fps_num: u32,
     fps_den: u32,
-    content_kind: String,
     bandwidth: u32,
 }
 
@@ -77,7 +89,7 @@ impl JobQueue {
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_job(
     app: AppHandle,
-    video_path: String,
+    video_path: Option<String>,
     title: String,
     output_dir: String,
     audio_path: Option<String>,
@@ -85,6 +97,7 @@ pub async fn submit_job(
     framerate: Option<String>,
     content_kind: Option<String>,
     bandwidth: Option<u32>,
+    compositions: Option<Vec<CompositionInput>>,
 ) -> Result<u64, String> {
     let queue = app.state::<JobQueue>();
     let id = queue.next_id.fetch_add(1, Ordering::Relaxed);
@@ -99,16 +112,32 @@ pub async fn submit_job(
         _ => (24, 1),
     };
 
+    // Build/Delivery may pass a compositions array; legacy single-video callers
+    // pass video_path and are treated as a one-composition job.
+    let compositions = match compositions {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            let Some(video_path) = video_path else {
+                return Err("no video or compositions provided".into());
+            };
+            vec![CompositionInput {
+                title: title.clone(),
+                content_kind: content_kind.unwrap_or_else(|| "feature".to_string()),
+                video_path,
+                audio_path,
+                audio_lang: None,
+                subtitles: subtitles.unwrap_or_default(),
+            }]
+        }
+    };
+
     let job = JobConfig {
         id,
-        video_path: PathBuf::from(&video_path),
         title: title.clone(),
         output_dir: PathBuf::from(&output_dir),
-        audio_path,
-        subtitles: subtitles.unwrap_or_default(),
+        compositions,
         fps_num,
         fps_den,
-        content_kind: content_kind.unwrap_or_else(|| "feature".to_string()),
         bandwidth: bandwidth.unwrap_or(250),
     };
 
@@ -260,8 +289,11 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     log_to(&log_file, "=== IMF Wizard Pipeline ===");
     log_to(&log_file, &format!("Job ID: {}", job.id));
     log_to(&log_file, &format!("Title: {}", job.title));
-    log_to(&log_file, &format!("Input: {}", job.video_path.display()));
     log_to(&log_file, &format!("Output: {}", output.display()));
+    log_to(
+        &log_file,
+        &format!("Compositions: {}", job.compositions.len()),
+    );
     log_to(
         &log_file,
         &format!(
@@ -270,68 +302,92 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         ),
     );
 
-    // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
-    // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
-    // input; image/J2K sequences fall back to the encoder default.
-    let compression_ratio = imfwizard_core::probe::probe_video(&job.video_path)
-        .map(|info| {
-            let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
-            let raw_bits = info.width as f64 * info.height as f64 * 36.0;
-            let target_bits = (job.bandwidth as f64 * 1_000_000.0) / fps;
-            (raw_bits / target_bits).max(1.0)
-        })
-        .unwrap_or(10.0);
-
-    // Encode using shared pipeline
     let job_id = job.id;
-    let app_ref = app.clone();
-    let log_ref = log_file.clone();
-    let encode_result = postkit::pipeline::run_encode_with_ratio(
-        &job.video_path,
-        output,
-        compression_ratio,
-        job.fps_num,
-        &cancel,
-        &pause,
-        |p| {
-            emit_progress(
-                &app_ref,
-                job_id,
-                &p.stage,
-                &p.message,
-                p.frame,
-                p.total_frames,
-                p.fps,
-                p.elapsed_secs,
-                p.percent,
-            );
-        },
-        |msg| log_to(&log_ref, msg),
-    )?;
+    let n = job.compositions.len();
+    let mut total_elapsed = 0.0;
+    let mut comps: Vec<imfwizard_core::imp::Composition> = Vec::new();
+
+    // Encode each composition's picture, then package all into one multi-CPL IMP.
+    for (idx, ci) in job.compositions.iter().enumerate() {
+        let video_path = PathBuf::from(&ci.video_path);
+        log_to(
+            &log_file,
+            &format!("[ENCODE] composition {} of {n}: {}", idx + 1, video_path.display()),
+        );
+
+        // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
+        // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
+        // input; image/J2K sequences fall back to the encoder default.
+        let compression_ratio = imfwizard_core::probe::probe_video(&video_path)
+            .map(|info| {
+                let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
+                let raw_bits = info.width as f64 * info.height as f64 * 36.0;
+                let target_bits = (job.bandwidth as f64 * 1_000_000.0) / fps;
+                (raw_bits / target_bits).max(1.0)
+            })
+            .unwrap_or(10.0);
+
+        // per-composition scratch dir so multiple encodes don't clobber each other
+        let enc_dir = output.join(format!("enc_{idx}"));
+        let app_ref = app.clone();
+        let log_ref = log_file.clone();
+        let encode_result = postkit::pipeline::run_encode_with_ratio(
+            &video_path,
+            &enc_dir,
+            compression_ratio,
+            job.fps_num,
+            &cancel,
+            &pause,
+            |p| {
+                // scale each composition's 0..100 into its slice of the whole job
+                let scaled = (idx as f64 + p.percent / 100.0) / n as f64 * 100.0;
+                emit_progress(
+                    &app_ref,
+                    job_id,
+                    &p.stage,
+                    &p.message,
+                    p.frame,
+                    p.total_frames,
+                    p.fps,
+                    p.elapsed_secs,
+                    scaled,
+                );
+            },
+            |msg| log_to(&log_ref, msg),
+        )?;
+        total_elapsed += encode_result.elapsed_secs;
+
+        let audio_files = ci
+            .audio_path
+            .iter()
+            .map(|p| imfwizard_core::imp::AudioTrack {
+                path: PathBuf::from(p),
+                language: ci.audio_lang.clone(),
+                role: None,
+            })
+            .collect();
+        comps.push(imfwizard_core::imp::Composition {
+            title: ci.title.clone(),
+            content_kind: if ci.content_kind.is_empty() {
+                "feature".to_string()
+            } else {
+                ci.content_kind.clone()
+            },
+            j2k_dir: Some(encode_result.j2k_dir.clone()),
+            audio_files,
+            timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
+        });
+    }
 
     // Package IMP
-    emit_progress(
-        app,
-        job.id,
-        "package",
-        "Creating IMP...",
-        0,
-        0,
-        0.0,
-        0.0,
-        99.0,
-    );
+    emit_progress(app, job.id, "package", "Creating IMP...", 0, 0, 0.0, 0.0, 99.0);
     log_to(&log_file, "[PACKAGE] Creating IMP...");
 
     let opts = imfwizard_core::imp::ImpOptions {
-        title: job.title.clone(),
         output_dir: job.output_dir.clone(),
+        compositions: comps,
         fps_num: job.fps_num,
         fps_den: job.fps_den,
-        content_kind: job.content_kind.clone(),
-        j2k_dir: Some(encode_result.j2k_dir.clone()),
-        audio_files: job.audio_path.iter().map(PathBuf::from).collect(),
-        timed_text_files: job.subtitles.iter().map(PathBuf::from).collect(),
         ..Default::default()
     };
 
@@ -340,16 +396,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         log_to(&log_file, &format!("[PACKAGE] FAILED: {}", result.error));
         return Err(format!("IMP packaging failed: {}", result.error));
     }
-    log_to(&log_file, "[PACKAGE] Done");
+    log_to(
+        &log_file,
+        &format!("[PACKAGE] Done, {} CPL(s)", result.cpl_paths.len()),
+    );
 
     log_to(
         &log_file,
-        &format!(
-            "=== Pipeline finished in {:.1}s ===",
-            encode_result.elapsed_secs
-        ),
+        &format!("=== Pipeline finished in {total_elapsed:.1}s ==="),
     );
-    Ok(format!("IMP created in {:.1}s", encode_result.elapsed_secs))
+    Ok(format!("IMP created in {total_elapsed:.1}s"))
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

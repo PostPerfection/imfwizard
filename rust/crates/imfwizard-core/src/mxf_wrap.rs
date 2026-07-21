@@ -101,6 +101,7 @@ fn delegate(
         fps_den: opts.edit_rate_den,
         partition_size: 0,
         encryption: None,
+        mca_config: None,
     });
 
     if !pk.success {

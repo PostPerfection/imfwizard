@@ -32,26 +32,67 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
   to_dcp.rs uses `postkit::packaging::escape_xml`. dcpdoctor-core bumped to ce050e5.
   imfwizard builds against the `extern/postkit` submodule; bump the pin when postkit changes.
 
-## Still overstated or unimplemented (implement or keep de-advertised)
+## Fixed 2026-07-21 (overstated/unimplemented items)
 
-- Multi-CPL IMP: create writes one CPL; GUI composition tabs are cosmetic and Build
-  submits only the active composition.
-- Accessibility tracks (AD/HI/SL), multi-language audio / RFC 5646, HDR/WCG ST 2067-21
-  metadata: no create-path options.
-- SCC (CEA-608) to TTML: subtitle-convert is SRT-only; captions.rs extract_captions unused.
-- Delivery presets: listed, never applied by create.
-- av-sync compares first PTS only (no --fix); slate is a black text slate only; preview
-  plays via mpv (no thumbnails); partial-version copies files by CPL uuid (no reel logic);
-  loudness measures only. Docs now describe these honestly.
-- Dead modules still present: webhook, plugin, otioz_import, imp_diff, subtitle_retime shim.
+- Dead modules deleted (zero callers): webhook, plugin, otioz_import, imp_diff,
+  subtitle_retime shim. captions.rs (unused extract_captions) deleted too.
+- Multi-CPL IMP: `create_imp` takes `Vec<Composition>`, writes one CPL each over a
+  single shared PKL/ASSETMAP (`imp.rs`/`cpl.rs`/`pkl.rs`/`assetmap.rs`). GUI Build
+  submits every composition tab (`pipeline.rs` + `main.js`, `submit_job` now takes a
+  `compositions` array). CLI still writes one composition.
+- RFC 5646 audio language: `create --audio-lang <tag>` writes a composition-level
+  LocaleList/Language in the CPL (ST 2067-3). Validated against imf-cpl-20160411.xsd
+  via xmllint (gated test `cpl::language_cpl_passes_st2067_3_xsd`).
+- SCC (CEA-608) pop-on to IMSC/TTML: new `scc.rs` parser wired into subtitle-convert;
+  roll-up/paint-on/text-mode fail loud.
+- Delivery presets applied: `create --profile <preset>` maps the preset bitrate to the
+  J2K compression ratio (`profiles::platform_from_name` + `profile_for`).
+- av-sync now compares per-stream start and end on the container clock (initial offset
+  plus drift over the program), not just the first PTS.
+
+## Fixed 2026-07-21 (postkit fd477a5 API adoption)
+
+- postkit pin bumped to fd477a5. `ImfResource` gained `source_encoding`, `ImfCpl`
+  gained `languages` + `essence_descriptors`; all call sites updated (cpl.rs,
+  supplement.rs). cpl.rs dropped its `inject_locale_list` string-splice and now
+  passes `ImfCpl.languages` (byte-identical LocaleList; existing tests unchanged).
+- Accessibility audio (AD/HI): `create --audio-role ad|hi` (imp.rs `AudioRole`)
+  emits an MCA `EssenceDescriptor` (WAVEPCMDescriptor + SoundfieldGroup + chVIN/chHI
+  AudioChannelLabel + RFC5646SpokenLanguage) linked to the audio resource via
+  SourceEncoding. Body matches the shape in postkit's own XSD-gated packaging test.
+  New gated test `cpl::accessibility_cpl_passes_st2067_3_xsd` passes xmllint against
+  imf-cpl-20160411.xsd. SL (sign language) is a video overlay, not an audio essence,
+  so it gets no MCA audio descriptor here.
+- to_dcp.rs: hand-rolled DCP CPL/PKL/ASSETMAP/VOLINDEX writers deleted; now uses
+  `postkit::packaging` (`DcpCpl` per-reel picture dims → real ScreenAspectRatio).
+  Gated test `to_dcp::generated_dcp_docs_pass_smpte_xsd` + `dcpdoctor schema-validate`
+  both pass on the output.
+- openjpeg removed: dropped the postkit `openjpeg` feature and the direct
+  `openjpeg_encoder` call; CLI `create` now encodes through `postkit::pipeline`
+  (grok / grk_compress), the same path the GUI uses. No fallback.
+- GUI "Show in Files" now uses tauri-plugin-opener `revealItemInDir` (mirrors dcpwizard).
+
+## Deliberately skipped
+
+- HDR/WCG ST 2067-21 essence metadata: the carrier now exists (`ImfCpl.essence_descriptors`),
+  but this pipeline does not write mastering-display / transfer / colour metadata into
+  the picture MXF header (asdcplib AS-02 descriptors here don't carry it, and it can't
+  be read back from a J2K codestream, see to_dcp.rs module docs). Emitting an
+  RGBADescriptor into the CPL from user-supplied flags alone would describe HDR the
+  actual essence doesn't structurally back, which Photon's CPL-vs-MXF conformance would
+  reject. So the "source honestly AND validate" bar isn't met; skipped until the MXF
+  wrapper writes the metadata it would claim.
+- SL (sign language) accessibility: a video-overlay track, not audio; no MCA audio
+  descriptor. Composition-level LocaleList still carries languages.
+- slate is a black text slate only; preview plays via mpv (no thumbnails);
+  partial-version copies files by CPL uuid (no reel logic); loudness measures only.
+  Docs describe these honestly.
 
 ## Dedup not done (needs postkit API work or later phase)
 
 - timecode.rs is a `Timecode` struct with methods; postkit::timecode is free functions.
   Not a drop-in; needs a postkit Timecode type first. Left as-is.
-- to_dcp.rs DCP CPL/PKL/ASSETMAP writers compute per-asset detail (real ScreenAspectRatio)
-  that postkit's DcpCpl hardcodes; only the escaper was switched.
-- frame_compare.rs and imp_diff.rs: no clean postkit home (later phase, do not touch).
+- frame_compare.rs: no clean postkit home (later phase, do not touch).
 
 ## Keep in sync with dcpwizard (deliberately duplicated, no clean shared home)
 
@@ -75,6 +116,12 @@ with no clean cross-repo home. Edit one side, mirror the other:
   dcpwizard, dcpdoctor differing by binary/artifact names + per-app build deps
   (this repo adds xerces-c/libxml2 + vcpkg steps). Separate repos, no shared
   reusable-workflow without a central repo. Keep aligned by hand.
+- Grok CI 2026-07-21: imfwizard does not link grok-ffi, it runs grk_compress at
+  encode time. ci.yml `rust` gained the shared cached "Setup grok" step (build
+  grok v20.3.6 from source, put grk_compress on PATH) on Linux + macOS so the
+  encode path is exercisable; windows is unchanged (no grk_compress, smoke skips
+  it). release.yml/gui-release.yml only compile the binary (no encode run), so
+  they were left unchanged.
 - tests/cli_flags_test.sh — NOT the same harness as dcpwizard's (this one parses
   main.js for sidecar calls; dcpwizard runs the binary and checks clap parse errors).
   Different CLIs, leave separate.

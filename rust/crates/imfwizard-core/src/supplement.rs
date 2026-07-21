@@ -325,6 +325,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             track_file_uuid: r.uuid.clone(),
             duration: r.duration,
             kind: r.kind,
+            source_encoding: None,
         })
         .collect();
 
@@ -352,6 +353,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             track_file_uuid: tf.uuid.clone(),
             duration: tf.duration,
             kind: s.kind,
+            source_encoding: None,
         });
         present.push(tf);
     }
@@ -372,6 +374,8 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         fps_num: ov.fps_num,
         fps_den: ov.fps_den,
         resources,
+        languages: Vec::new(),
+        essence_descriptors: Vec::new(),
     };
     let cpl_path = out.join(format!("CPL_{cpl_uuid}.xml"));
     if let Err(e) = std::fs::write(&cpl_path, cpl.to_xml()) {
@@ -381,11 +385,15 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
     // 6. PKL + ASSETMAP over only the present assets (new CPL + new track files)
     let pkl_uuid = uuid::Uuid::new_v4().to_string();
     let pkl_path = out.join(format!("PKL_{pkl_uuid}.xml"));
-    if let Err(e) = crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpl_uuid, &cpl_path, &present) {
+    let cpls = [crate::imp::CplEntry {
+        uuid: cpl_uuid.clone(),
+        path: cpl_path.clone(),
+    }];
+    if let Err(e) = crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpls, &present) {
         return SupplementResult::fail(out, format!("cannot write PKL: {e}"));
     }
     let am_path = out.join("ASSETMAP.xml");
-    if let Err(e) = crate::assetmap::write_assetmap(&am_path, &pkl_uuid, &cpl_uuid, &present) {
+    if let Err(e) = crate::assetmap::write_assetmap(&am_path, &pkl_uuid, &cpls, &present) {
         return SupplementResult::fail(out, format!("cannot write ASSETMAP: {e}"));
     }
 
