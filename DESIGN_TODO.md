@@ -45,6 +45,9 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
   via xmllint (gated test `cpl::language_cpl_passes_st2067_3_xsd`).
 - SCC (CEA-608) pop-on to IMSC/TTML: new `scc.rs` parser wired into subtitle-convert;
   roll-up/paint-on/text-mode fail loud.
+- Authored TTML/IMSC now passes through `subtitle-convert` unchanged when the target
+  is TTML, preserving regions, placement, and styling. Non-SCC text formats still
+  convert as plain timed text.
 - Delivery presets applied: `create --profile <preset>` maps the preset bitrate to the
   J2K compression ratio (`profiles::platform_from_name` + `profile_for`).
 - av-sync now compares per-stream start and end on the container clock (initial offset
