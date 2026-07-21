@@ -44,7 +44,6 @@ pub fn write_assetmap(
         issuer: "IMF Wizard".to_string(),
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
-        include_volume_count: false,
         assets,
     };
     std::fs::write(path, am.to_xml())
