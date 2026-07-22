@@ -529,7 +529,6 @@ imfwizard/
 ├── gui/                 # Tauri 2 desktop application
 │   ├── src/             # Frontend (Vite + vanilla JS)
 │   └── src-tauri/       # Rust backend (plugin shell)
-├── tests/               # Integration tests
 └── docs/                # GitHub Pages site
 ```
 
