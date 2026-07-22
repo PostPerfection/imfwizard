@@ -20,8 +20,10 @@ is mostly DCP-side; the items that map here:
   (reusing `timeline::list_cpls`/`get_timeline`), walks the composition timeline
   across segments, reads each picture track's AS-02 J2K MXF via asdcplib, and
   decodes every frame's codestream with grk_decompress to numbered files
-  (frame_000001.tif). No colour transform: output is the codestream's native
-  colour encoding and bit depth. Fails loud on encrypted essence (no KDM support).
+  (frame_000001.tif). No colour transform: output keeps the codestream's colour
+  encoding, so XYZ essence exports as raw code values (dark/green in an RGB
+  viewer, intended). TIFF preserves native 10/12-bit; PNG is 8/16-bit only, so
+  higher depths pad to 16-bit. Fails loud on encrypted essence (no KDM support).
   DPX is not offered: grk_decompress cannot emit it and an ffmpeg fallback would
   promote to 16-bit, breaking the native-bit-depth contract; `--format dpx` errors
   with that reason. Tested end to end (build IMP from synthetic frames, export,
