@@ -2,6 +2,17 @@
 
 Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/src/main.rs.
 
+## DoM tracker gaps (2026-07-22)
+
+The DCP-o-matic Mantis sweep (dom#N = https://dcpomatic.com/bugs/view.php?id=N)
+is mostly DCP-side; the items that map here:
+
+- Loudness adjustment to a target (dom#1382): loudness measures only. Gate on the
+  postkit gain API (postkit DESIGN_TODO, same date).
+- More subtitle input formats via postkit parsers: FCPXML (dom#2909), ASS with
+  styling (dom#1462), MKS (dom#3131).
+- Export a composition to an image file sequence (dom#3021).
+
 ## Fixed 2026-07-20 (silent data loss + doc lies)
 
 - GUI builds no longer drop audio/subtitles/bandwidth: `gui/src-tauri/src/pipeline.rs`
