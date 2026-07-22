@@ -87,6 +87,9 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
   wrapper writes the metadata it would claim.
 - SL (sign language) accessibility: a video-overlay track, not audio; no MCA audio
   descriptor. Composition-level LocaleList still carries languages.
+- Non-SCC subtitle conversion: authored TTML/IMSC passes through unchanged, but
+  other subtitle inputs become plain timed text and lose regions, placement,
+  and styling. Preserve those fields where the source format supplies them.
 - slate is a black text slate only; preview plays via mpv (no thumbnails);
   partial-version copies files by CPL uuid (no reel logic); loudness measures only.
   Docs describe these honestly.
