@@ -276,6 +276,34 @@ enum Commands {
         title: Option<String>,
     },
 
+    /// Export a composition's picture track to a numbered image sequence
+    #[command(name = "export-frames")]
+    ExportFrames {
+        /// Input IMP directory
+        #[arg(short, long)]
+        input: String,
+
+        /// Output directory for the image sequence
+        #[arg(short, long)]
+        output: String,
+
+        /// Output image format: tiff or png (native bit depth, no colour transform)
+        #[arg(short, long, default_value = "tiff")]
+        format: String,
+
+        /// CPL to export by UUID or 0-based index; defaults to the sole CPL
+        #[arg(long)]
+        cpl: Option<String>,
+
+        /// First composition frame to export (0-based)
+        #[arg(long, default_value = "0")]
+        start: u32,
+
+        /// Number of frames to export (defaults to all remaining)
+        #[arg(long)]
+        count: Option<u32>,
+    },
+
     /// Sign an IMF XML document (CPL/PKL/OPL) with an enveloped XML signature
     Sign {
         /// Input XML file
@@ -1516,6 +1544,44 @@ fn run() {
             } else {
                 eprintln!("Error: {}", result.error);
                 std::process::exit(1);
+            }
+        }
+
+        Commands::ExportFrames {
+            input,
+            output,
+            format,
+            cpl,
+            start,
+            count,
+        } => {
+            let format = match imfwizard_core::export_frames::ExportFormat::from_flag(&format) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let opts = imfwizard_core::export_frames::ExportFramesOptions {
+                imp_dir: PathBuf::from(input),
+                output_dir: PathBuf::from(output),
+                format,
+                cpl,
+                start,
+                count,
+            };
+            match imfwizard_core::export_frames::export_frames(&opts) {
+                Ok(r) => println!(
+                    "Exported {} frame(s) ({}x{}) to {}",
+                    r.frames_written,
+                    r.width,
+                    r.height,
+                    r.output_dir.display()
+                ),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
             }
         }
 

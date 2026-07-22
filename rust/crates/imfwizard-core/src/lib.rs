@@ -44,6 +44,7 @@ pub mod profiles;
 
 // Tools
 pub mod analytics;
+pub mod export_frames;
 pub mod frame_compare;
 pub mod info;
 pub mod photon;
