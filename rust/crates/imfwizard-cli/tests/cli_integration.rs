@@ -127,3 +127,78 @@ fn subtitle_convert_help() {
         .assert()
         .success();
 }
+
+// write a mono 16-bit 48k WAV of a 1 kHz sine at the given peak amplitude (0..1)
+fn write_sine_wav(path: &std::path::Path, amplitude: f64) {
+    let sample_rate = 48_000u32;
+    let samples: Vec<i16> = (0..sample_rate)
+        .map(|n| {
+            let t = n as f64 / sample_rate as f64;
+            let v = amplitude * (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+            (v * i16::MAX as f64).round() as i16
+        })
+        .collect();
+    let data_bytes = samples.len() * 2;
+    let mut buf = Vec::with_capacity(44 + data_bytes);
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&((36 + data_bytes) as u32).to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    buf.extend_from_slice(&1u16.to_le_bytes()); // mono
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+    buf.extend_from_slice(&2u16.to_le_bytes()); // block align
+    buf.extend_from_slice(&16u16.to_le_bytes()); // bits
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&(data_bytes as u32).to_le_bytes());
+    for s in samples {
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    std::fs::write(path, buf).unwrap();
+}
+
+#[test]
+fn loudness_adjust_to_target_writes_output() {
+    let dir = TempDir::new().unwrap();
+    let input = dir.path().join("in.wav");
+    let output = dir.path().join("out.wav");
+    write_sine_wav(&input, 0.25);
+    cmd()
+        .args([
+            "loudness",
+            input.to_str().unwrap(),
+            "--adjust-to",
+            "-24",
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Gain applied"))
+        .stdout(predicate::str::contains("Adjusted audio written"));
+    assert!(output.exists(), "adjusted wav should exist");
+}
+
+#[test]
+fn loudness_adjust_refuses_when_true_peak_would_clip() {
+    let dir = TempDir::new().unwrap();
+    let input = dir.path().join("quiet.wav");
+    let output = dir.path().join("loud.wav");
+    // quiet source + loud target forces a large positive gain that breaches the ceiling
+    write_sine_wav(&input, 0.05);
+    cmd()
+        .args([
+            "loudness",
+            input.to_str().unwrap(),
+            "--adjust-to",
+            "-3",
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("true-peak ceiling exceeded"));
+    assert!(!output.exists(), "clip-safe: nothing written on breach");
+}

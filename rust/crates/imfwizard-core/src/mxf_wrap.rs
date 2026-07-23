@@ -102,6 +102,7 @@ fn delegate(
         partition_size: 0,
         encryption: None,
         mca_config: None,
+        resource_ids: vec![],
     });
 
     if !pk.success {

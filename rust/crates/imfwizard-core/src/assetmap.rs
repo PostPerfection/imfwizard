@@ -52,6 +52,7 @@ pub fn write_assetmap(
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
         assets,
+        annotation: None,
     };
     std::fs::write(path, am.to_xml())
 }

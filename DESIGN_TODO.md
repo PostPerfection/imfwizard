@@ -7,10 +7,37 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
 The DCP-o-matic Mantis sweep (dom#N = https://dcpomatic.com/bugs/view.php?id=N)
 is mostly DCP-side; the items that map here:
 
-- Loudness adjustment to a target (dom#1382): loudness measures only. Gate on the
-  postkit gain API (postkit DESIGN_TODO, same date).
+- Loudness adjustment to a target (dom#1382): DONE 2026-07-23 (pin bump pending).
+  `loudness --adjust-to <lufs> -o <out.wav>` wires postkit `adjust_loudness`;
+  clip-safe true-peak guard via `--true-peak` (default -1 dBTP), refuses and
+  writes nothing on a ceiling breach, reports headroom. `#[command(allow_negative_numbers)]`
+  so `-24` parses. CLI integration tests with a synthetic 1 kHz WAV cover the
+  adjust and clip-refuse paths.
 - More subtitle input formats via postkit parsers: FCPXML (dom#2909), ASS with
-  styling (dom#1462), MKS (dom#3131).
+  styling (dom#1462), MKS (dom#3131). DONE 2026-07-23 (pin bump pending).
+  `subtitle_convert.rs` reads ass/ssa/fcpxml/mks via
+  `postkit::subtitle_formats::{ass,fcpxml,mks}`. TTML/IMSC target emits IMSC
+  regions (per distinct alignment/position) + inline `tts:` styling from
+  `StyledCue`; plain targets flatten via `to_srt_cues`. SCC/authored-TTML paths
+  unchanged. Per-format tests with small fixtures (MKS skips without ffmpeg).
+
+## Fixed 2026-07-23 (extern/postkit sync, pin bump pending)
+
+Synced `extern/postkit` to the canonical tree (loudness gain API, subtitle_formats,
+timecode superset, frame_compare, packaging annotation fields). Call sites updated
+for the aa9f01b -> current API changes:
+
+- `mxf_wrap::MxfWrapOptions` gained `resource_ids: Vec<[u8;16]>` (caller-supplied
+  timed-text ancillary ids): added `resource_ids: vec![]` in mxf_wrap.rs (1) and
+  to_dcp.rs (2).
+- `packaging::{AssetMap, PackingList}` gained `annotation: Option<String>`: added
+  `annotation: None` in assetmap.rs, pkl.rs, and to_dcp.rs (2).
+- `certificate::KdmConfig` gained `annotation: Option<String>`: added
+  `annotation: None` at the CLI kdm call site.
+
+mid-side wav decode and resumable encode pipeline changes needed no call-site edits
+(imfwizard re-exports `encode::{...}` unchanged and does not touch mid-side/stream).
+The submodule is intentionally dirty; the pin bump happens at commit time.
 
 ## Fixed 2026-07-22 (image-sequence export)
 
@@ -104,28 +131,43 @@ is mostly DCP-side; the items that map here:
 
 ## Deliberately skipped
 
-- HDR/WCG ST 2067-21 essence metadata: the carrier now exists (`ImfCpl.essence_descriptors`),
-  but this pipeline does not write mastering-display / transfer / colour metadata into
-  the picture MXF header (asdcplib AS-02 descriptors here don't carry it, and it can't
-  be read back from a J2K codestream, see to_dcp.rs module docs). Emitting an
-  RGBADescriptor into the CPL from user-supplied flags alone would describe HDR the
-  actual essence doesn't structurally back, which Photon's CPL-vs-MXF conformance would
-  reject. So the "source honestly AND validate" bar isn't met; skipped until the MXF
-  wrapper writes the metadata it would claim.
+- HDR/WCG ST 2067-21 essence metadata: STILL SKIPPED (verified 2026-07-23 against
+  asdcplib-rs HEAD e56e3fe). IMF uses the AS-02 picture writer
+  (`asdcplib::as02::jp2k::MxfWriter`), which has only a plain `open_write` (sys
+  `asdcp_as02_jp2k_writer_open_write`); no transfer/colour/mastering setter, and
+  `jp2k::PictureDescriptor` carries no such fields (edit_rate, sample_rate,
+  stored_width/height, aspect_ratio, container_duration, component_count only).
+  The AS-DCP path did gain `jp2k::MxfWriter::open_write_transfer` (sys
+  `asdcp_jp2k_writer_open_write_transfer`) but it only sets TransferCharacteristic,
+  not colour primaries or mastering display, and it postdates the pinned rev
+  66de9d0 (absent there). So writing an RGBADescriptor into the CPL would still be
+  an unbacked claim Photon's CPL-vs-MXF check rejects. To lift this, asdcplib-rs
+  needs, on the AS-02 jp2k writer: (1) an `open_write_transfer` analogue
+  (`asdcp_as02_jp2k_writer_open_write_transfer`) for TransferCharacteristic; (2) a
+  ColorPrimaries UL setter (missing on both AS-02 and AS-DCP paths, only transfer
+  exists); (3) mastering-display / ST 2086 fields on the RGBA descriptor
+  (MasteringDisplayPrimaries, WhitePointChromaticity, Max/MinLuminance) plus
+  MaxCLL/MaxFALL. Until then, do not add `--hdr` flags.
 - SL (sign language) accessibility: a video-overlay track, not audio; no MCA audio
   descriptor. Composition-level LocaleList still carries languages.
-- Non-SCC subtitle conversion: authored TTML/IMSC passes through unchanged, but
-  other subtitle inputs become plain timed text and lose regions, placement,
-  and styling. Preserve those fields where the source format supplies them.
+- Non-SCC subtitle conversion: RESOLVED 2026-07-23. Authored TTML/IMSC still
+  passes through unchanged; ASS/FCPXML/MKS now preserve styling and placement
+  (IMSC regions + inline `tts:` styling) when the target is TTML/IMSC, and
+  flatten to text for plain targets. SRT/SCC remain plain (no styling in the
+  source). See "Fixed" note above.
 - slate is a black text slate only; preview plays via mpv (no thumbnails);
   partial-version copies files by CPL uuid (no reel logic); loudness measures only.
   Docs describe these honestly.
 
 ## Dedup not done (needs postkit API work or later phase)
 
-- timecode.rs is a `Timecode` struct with methods; postkit::timecode is free functions.
-  Not a drop-in; needs a postkit Timecode type first. Left as-is.
-- frame_compare.rs: no clean postkit home (later phase, do not touch).
+- timecode.rs: DONE 2026-07-23 (pin bump pending). Local copy deleted; lib.rs now
+  `pub use postkit::timecode`, so `imfwizard_core::timecode::Timecode` resolves to
+  postkit's superset type. Callers (CLI) unchanged.
+- frame_compare.rs: DONE 2026-07-23 (pin bump pending). Local copy deleted; lib.rs
+  now `pub use postkit::frame_compare`. postkit's module was byte-identical
+  (same FrameMetric/CompareResult, compare_frames/compute_vmaf/ffmpeg_has_libvmaf).
+  Callers (lib.rs, CLI) unchanged.
 
 ## Keep in sync with dcpwizard (deliberately duplicated, no clean shared home)
 

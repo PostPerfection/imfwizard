@@ -205,10 +205,20 @@ enum Commands {
         photon_jar: Option<String>,
     },
 
-    /// Measure audio loudness (EBU R128)
+    /// Measure audio loudness (EBU R128), or adjust to a target with --adjust-to
+    #[command(allow_negative_numbers = true)]
     Loudness {
-        /// Audio file to measure
+        /// Audio file to measure (WAV required for --adjust-to)
         audio_file: String,
+        /// Adjust integrated loudness to this target in LUFS, writing --output
+        #[arg(long)]
+        adjust_to: Option<f64>,
+        /// Output WAV for the adjusted audio (required with --adjust-to)
+        #[arg(short, long)]
+        output: Option<String>,
+        /// True-peak ceiling in dBTP for the clip-safe check
+        #[arg(long, default_value_t = postkit::loudness::DEFAULT_TRUE_PEAK_CEILING_DBTP)]
+        true_peak: f64,
     },
 
     /// Burn subtitles into video
@@ -1446,15 +1456,53 @@ fn run() {
             }
         }
 
-        Commands::Loudness { audio_file } => {
-            let result = postkit::loudness::measure_loudness(std::path::Path::new(&audio_file));
-            if result.success {
-                println!("Integrated: {:.1} LUFS", result.integrated_lufs);
-                println!("True Peak: {:.1} dBTP", result.true_peak_dbtp);
-                println!("Range: {:.1} LU", result.range_lu);
-            } else {
-                eprintln!("Error: {}", result.error);
-                std::process::exit(1);
+        Commands::Loudness {
+            audio_file,
+            adjust_to,
+            output,
+            true_peak,
+        } => {
+            let input = std::path::Path::new(&audio_file);
+            match adjust_to {
+                Some(target_lufs) => {
+                    let Some(output) = output else {
+                        eprintln!("Error: --adjust-to requires --output");
+                        std::process::exit(1);
+                    };
+                    let out = std::path::Path::new(&output);
+                    let target = postkit::loudness::LoudnessTarget::IntegratedLufs(target_lufs);
+                    match postkit::loudness::adjust_loudness(input, out, target, true_peak) {
+                        Ok(plan) => {
+                            println!("Measured: {:.1} LUFS", plan.measured_db);
+                            println!("Target: {:.1} LUFS", plan.target_db);
+                            println!("Gain applied: {:+.2} dB", plan.gain_db);
+                            println!(
+                                "True peak: {:.2} -> {:.2} dBTP (ceiling {:.2}, headroom {:.2})",
+                                plan.input_true_peak_dbtp,
+                                plan.resulting_true_peak_dbtp,
+                                plan.true_peak_ceiling_dbtp,
+                                plan.true_peak_ceiling_dbtp - plan.resulting_true_peak_dbtp
+                            );
+                            println!("Adjusted audio written to {}", out.display());
+                        }
+                        Err(e) => {
+                            // clip-safe: on a ceiling breach nothing is written
+                            eprintln!("Error: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => {
+                    let result = postkit::loudness::measure_loudness(input);
+                    if result.success {
+                        println!("Integrated: {:.1} LUFS", result.integrated_lufs);
+                        println!("True Peak: {:.1} dBTP", result.true_peak_dbtp);
+                        println!("Range: {:.1} LU", result.range_lu);
+                    } else {
+                        eprintln!("Error: {}", result.error);
+                        std::process::exit(1);
+                    }
+                }
             }
         }
 
@@ -2836,6 +2884,7 @@ fn run() {
                 formulation,
                 content_keys: Vec::new(),
                 format: postkit::certificate::KdmFormat::Smpte,
+                annotation: None,
             };
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),

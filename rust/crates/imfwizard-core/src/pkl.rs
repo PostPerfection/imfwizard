@@ -41,6 +41,7 @@ pub fn write_pkl(
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
         assets,
+        annotation: None,
     };
     std::fs::write(path, pkl.to_xml())
 }

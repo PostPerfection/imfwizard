@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- **Loudness adjustment** — `loudness --adjust-to <lufs> -o <out.wav>` applies a pure sample-domain gain to hit a target integrated loudness (EBU R128), clip-safe: it refuses and writes nothing if the gain would raise true peak above the ceiling (`--true-peak`, default -1 dBTP), reporting the headroom (dom#1382, via postkit `adjust_loudness`).
+- **More subtitle input formats** — `subtitle-convert` now reads ASS/SSA (dom#1462), FCPXML (dom#2909), and MKS/Matroska (dom#3131) in addition to SRT and SCC. ASS/FCPXML/MKS keep styling and placement (italic/bold/underline/colour, alignment, vertical position) as IMSC regions and inline `tts:` styling in the TTML output; SRT/SCC and plain targets stay text-only.
 - **Accessibility audio (AD/HI)**: `create --audio-role ad|hi` emits an MCA `EssenceDescriptor` (SoundfieldGroup + `chVIN`/`chHI` channel label + RFC 5646 spoken language) linked to the audio resource via `SourceEncoding` (ST 2067-2/-3), carried verbatim by `postkit::packaging::ImfCpl`. XSD-validated against imf-cpl-20160411.xsd.
 - **KDM generation** — `kdm` command now generates signed SMPTE 430-1 KDMs via postkit (xmlsec1-verified). New `--signer-cert`/`--signer-key`/`--signer-chain` flags.
 - **Subtitle packaging** — `create --subtitle` wraps TTML/IMSC files as AS-02 timed-text MXF and adds a SubtitlesSequence to the CPL.

@@ -45,13 +45,13 @@ pub mod profiles;
 // Tools
 pub mod analytics;
 pub mod export_frames;
-pub mod frame_compare;
+pub use postkit::frame_compare;
 pub mod info;
 pub mod photon;
 pub mod prores;
 pub mod report;
 pub mod supplement;
-pub mod timecode;
+pub use postkit::timecode;
 pub mod to_dcp;
 pub mod validate;
 pub mod xsd_validate;

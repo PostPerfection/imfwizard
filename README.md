@@ -18,7 +18,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Packaging & Wrapping
 - **Original Version IMP creation** from J2K + WAV
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
-- **Subtitle conversion**, SRT and SCC (CEA-608 pop-on captions) → IMSC/TTML
+- **Subtitle conversion** to IMSC/TTML from SRT, SCC (CEA-608 pop-on captions), ASS/SSA, FCPXML, and MKS (Matroska); ASS/FCPXML/MKS keep styling and placement (italic/bold/underline/colour, alignment, position) in the TTML output
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
@@ -290,6 +290,22 @@ imfwizard encode \
 
 ```bash
 imfwizard loudness /path/to/audio.wav
+```
+
+Adjust a WAV to a target integrated loudness (clip-safe: refuses and writes
+nothing if the gain would push true peak above the ceiling, default -1 dBTP):
+
+```bash
+imfwizard loudness in.wav --adjust-to -24 -o out.wav
+# raise the ceiling if you accept the reported headroom
+imfwizard loudness in.wav --adjust-to -24 --true-peak -0.5 -o out.wav
+```
+
+### Convert subtitles to IMSC/TTML
+
+```bash
+# SRT/SCC flatten to text; ASS/SSA, FCPXML, and MKS keep styling and placement
+imfwizard subtitle-convert -i subs.ass -o subs.ttml
 ```
 
 ### Supplemental IMP (OV + supplemental)

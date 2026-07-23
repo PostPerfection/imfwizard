@@ -129,6 +129,7 @@ fn build_dcp(
         partition_size: 0,
         encryption: None,
         mca_config: None,
+        resource_ids: vec![],
     });
     if !wrapped.success {
         return Err(format!(
@@ -163,6 +164,7 @@ fn build_dcp(
             partition_size: 0,
             encryption: None,
             mca_config: None,
+            resource_ids: vec![],
         });
         if !wrapped.success {
             return Err(format!(
@@ -539,6 +541,7 @@ fn write_pkl(
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
         assets: pkl_assets,
+        annotation: None,
     };
     std::fs::write(path, pkl.to_xml()).map_err(|e| format!("writing PKL {}: {e}", path.display()))
 }
@@ -577,6 +580,7 @@ fn write_assetmap(
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
         assets: am_assets,
+        annotation: None,
     };
     std::fs::write(path, am.to_xml())
         .map_err(|e| format!("writing ASSETMAP {}: {e}", path.display()))
