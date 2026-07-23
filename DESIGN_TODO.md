@@ -56,10 +56,9 @@ without `--hdr`.
 - Tests: round-trips the picture MXF via `hdr_metadata()` (ULs + mastering asserted) and
   xmllint-gates the HDR CPL against imf-cpl-20160411.xsd. A `PHOTON_JAR`-gated test runs
   Photon over the HDR IMP when a jar is present.
-- asdcplib pin bumped to 6d7b8ca (the HDR commit). dcpdoctor still pins the pre-HDR rev
-  66de9d0 and cargo forbids patching a git source with itself, so the workspace `[patch]`
-  points asdcplib/asdcplib-sys at `extern/asdcplib` (checkout at 6d7b8ca). Drop the patch
-  once dcpdoctor bumps its own asdcplib pin.
+- asdcplib pin bumped to 6d7b8ca (the HDR commit). dcpdoctor bumped its own pin to
+  6d7b8ca too (dcpdoctor 171136e), so the temporary workspace `[patch]` workaround
+  was dropped; dcpdoctor-core is consumed at rev 171136e.
 
 ## Fixed 2026-07-22 (image-sequence export)
 
