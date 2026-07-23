@@ -2,30 +2,52 @@
 
 Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/src/main.rs.
 
+Genuinely open items are standing limitations and deliberate scope decisions;
+everything advertised is wired (done notes below).
+
+## Deliberately skipped / standing limitations
+
+- HDR/WCG MaxCLL/MaxFALL: the transfer/colour/mastering-display metadata is written
+  (see the HDR/WCG done note), but MaxCLL (MaximumContentLightLevel) and MaxFALL
+  (MaximumFrameAverageLightLevel) stay unsupported: the vendored asdcplib has no
+  property for them on GenericPictureEssenceDescriptor and no MDD UL, so they can't
+  be written without patching the C++. We do not fake them.
+- SL (sign language) accessibility: a video-overlay track, not audio, so it gets no
+  MCA audio descriptor. Composition-level LocaleList still carries languages.
+- Photon not exercisable locally: `validate --photon` shells out to Netflix Photon
+  and needs a JRE + Photon jar. The Photon tests (and the HDR IMP round-trip) are
+  gated on `PHOTON_JAR` and skip when no jar is present, so the Photon path isn't
+  covered in a bare local/CI run.
+- Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
+  thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
+  measures and adjusts to a target (no other processing). Docs describe these as-is.
+
+# Done
+
 ## DoM tracker gaps (2026-07-22)
 
 The DCP-o-matic Mantis sweep (dom#N = https://dcpomatic.com/bugs/view.php?id=N)
 is mostly DCP-side; the items that map here:
 
-- Loudness adjustment to a target (dom#1382): DONE 2026-07-23 (pin bump pending).
+- Loudness adjustment to a target (dom#1382): DONE 2026-07-23.
   `loudness --adjust-to <lufs> -o <out.wav>` wires postkit `adjust_loudness`;
   clip-safe true-peak guard via `--true-peak` (default -1 dBTP), refuses and
   writes nothing on a ceiling breach, reports headroom. `#[command(allow_negative_numbers)]`
   so `-24` parses. CLI integration tests with a synthetic 1 kHz WAV cover the
   adjust and clip-refuse paths.
 - More subtitle input formats via postkit parsers: FCPXML (dom#2909), ASS with
-  styling (dom#1462), MKS (dom#3131). DONE 2026-07-23 (pin bump pending).
+  styling (dom#1462), MKS (dom#3131). DONE 2026-07-23.
   `subtitle_convert.rs` reads ass/ssa/fcpxml/mks via
   `postkit::subtitle_formats::{ass,fcpxml,mks}`. TTML/IMSC target emits IMSC
   regions (per distinct alignment/position) + inline `tts:` styling from
   `StyledCue`; plain targets flatten via `to_srt_cues`. SCC/authored-TTML paths
   unchanged. Per-format tests with small fixtures (MKS skips without ffmpeg).
 
-## Fixed 2026-07-23 (extern/postkit sync, pin bump pending)
+## Fixed 2026-07-23 (extern/postkit sync)
 
-Synced `extern/postkit` to the canonical tree (loudness gain API, subtitle_formats,
-timecode superset, frame_compare, packaging annotation fields). Call sites updated
-for the aa9f01b -> current API changes:
+Synced `extern/postkit` to the canonical tree (be89fe0: loudness gain API,
+subtitle_formats, timecode superset, frame_compare, packaging annotation fields).
+Call sites updated for the aa9f01b -> be89fe0 API changes:
 
 - `mxf_wrap::MxfWrapOptions` gained `resource_ids: Vec<[u8;16]>` (caller-supplied
   timed-text ancillary ids): added `resource_ids: vec![]` in mxf_wrap.rs (1) and
@@ -37,7 +59,7 @@ for the aa9f01b -> current API changes:
 
 mid-side wav decode and resumable encode pipeline changes needed no call-site edits
 (imfwizard re-exports `encode::{...}` unchanged and does not touch mid-side/stream).
-The submodule is intentionally dirty; the pin bump happens at commit time.
+The postkit submodule is pinned at be89fe0.
 
 ## Fixed 2026-07-23 (HDR/WCG ST 2067-21 essence metadata)
 
@@ -56,9 +78,10 @@ without `--hdr`.
 - Tests: round-trips the picture MXF via `hdr_metadata()` (ULs + mastering asserted) and
   xmllint-gates the HDR CPL against imf-cpl-20160411.xsd. A `PHOTON_JAR`-gated test runs
   Photon over the HDR IMP when a jar is present.
-- asdcplib pin bumped to 6d7b8ca (the HDR commit). dcpdoctor bumped its own pin to
-  6d7b8ca too (dcpdoctor 171136e), so the temporary workspace `[patch]` workaround
-  was dropped; dcpdoctor-core is consumed at rev 171136e.
+- asdcplib pin bumped to 6d7b8ca (the HDR commit). dcpdoctor bumped its own asdcplib
+  pin to 6d7b8ca too (at dcpdoctor 171136e), so the temporary workspace `[patch]`
+  workaround was dropped; dcpdoctor-core is consumed at rev 6037768 (which includes
+  that bump).
 
 ## Fixed 2026-07-22 (image-sequence export)
 
@@ -150,30 +173,12 @@ without `--hdr`.
   (grok / grk_compress), the same path the GUI uses. No fallback.
 - GUI "Show in Files" now uses tauri-plugin-opener `revealItemInDir` (mirrors dcpwizard).
 
-## Deliberately skipped
+## Dedup onto postkit (done 2026-07-23)
 
-- HDR/WCG MaxCLL/MaxFALL: the transfer/colour/mastering-display metadata is now
-  written (see "Fixed" above), but MaxCLL (MaximumContentLightLevel) and MaxFALL
-  (MaximumFrameAverageLightLevel) stay unsupported: the vendored asdcplib has no
-  property for them on GenericPictureEssenceDescriptor and no MDD UL, so they can't
-  be written without patching the C++. We do not fake them.
-- SL (sign language) accessibility: a video-overlay track, not audio; no MCA audio
-  descriptor. Composition-level LocaleList still carries languages.
-- Non-SCC subtitle conversion: RESOLVED 2026-07-23. Authored TTML/IMSC still
-  passes through unchanged; ASS/FCPXML/MKS now preserve styling and placement
-  (IMSC regions + inline `tts:` styling) when the target is TTML/IMSC, and
-  flatten to text for plain targets. SRT/SCC remain plain (no styling in the
-  source). See "Fixed" note above.
-- slate is a black text slate only; preview plays via mpv (no thumbnails);
-  partial-version copies files by CPL uuid (no reel logic); loudness measures only.
-  Docs describe these honestly.
-
-## Dedup not done (needs postkit API work or later phase)
-
-- timecode.rs: DONE 2026-07-23 (pin bump pending). Local copy deleted; lib.rs now
+- timecode.rs: DONE. Local copy deleted; lib.rs now
   `pub use postkit::timecode`, so `imfwizard_core::timecode::Timecode` resolves to
   postkit's superset type. Callers (CLI) unchanged.
-- frame_compare.rs: DONE 2026-07-23 (pin bump pending). Local copy deleted; lib.rs
+- frame_compare.rs: DONE. Local copy deleted; lib.rs
   now `pub use postkit::frame_compare`. postkit's module was byte-identical
   (same FrameMetric/CompareResult, compare_frames/compute_vmaf/ffmpeg_has_libvmaf).
   Callers (lib.rs, CLI) unchanged.
