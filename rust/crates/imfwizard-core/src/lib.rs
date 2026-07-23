@@ -17,6 +17,7 @@ pub mod transcode;
 pub mod aces;
 pub mod dolby_vision;
 pub mod hdr;
+pub mod hdr_wcg;
 
 // Audio
 pub mod atmos;

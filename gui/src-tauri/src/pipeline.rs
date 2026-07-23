@@ -380,6 +380,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             j2k_dir: Some(encode_result.j2k_dir.clone()),
             audio_files,
             timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
+            hdr: None,
         });
     }
 

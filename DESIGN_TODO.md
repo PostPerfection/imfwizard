@@ -39,6 +39,28 @@ mid-side wav decode and resumable encode pipeline changes needed no call-site ed
 (imfwizard re-exports `encode::{...}` unchanged and does not touch mid-side/stream).
 The submodule is intentionally dirty; the pin bump happens at commit time.
 
+## Fixed 2026-07-23 (HDR/WCG ST 2067-21 essence metadata)
+
+`create --hdr <preset>` now writes HDR/WCG picture metadata, lifting the long-standing
+skip. Presets: `pq-bt2020`, `pq-p3d65` (ST 2084 transfer + BT.2020 / P3-D65 primaries).
+Optional `--mastering-display <x265 string>` adds the ST 2086 block; it is refused
+without `--hdr`.
+
+- `hdr_wcg.rs`: `HdrWcg` parses the preset + x265 master-display string, converts to
+  `asdcplib::jp2k::HdrMetadata`, and emits the CPL RGBADescriptor body (transfer/colour
+  ULs as `urn:smpte:ul:`, ST 2086 mastering display).
+- MXF write: threaded through `mxf_wrap`/`imp` into postkit's `wrap_j2k`, which calls
+  `as02::jp2k::MxfWriter::open_write_hdr` (postkit `MxfWrapOptions` gained an `hdr` field).
+- CPL: `cpl.rs` emits the image EssenceDescriptor + SourceEncoding only when `--hdr` is
+  set, so the CPL claims only what the MXF carries.
+- Tests: round-trips the picture MXF via `hdr_metadata()` (ULs + mastering asserted) and
+  xmllint-gates the HDR CPL against imf-cpl-20160411.xsd. A `PHOTON_JAR`-gated test runs
+  Photon over the HDR IMP when a jar is present.
+- asdcplib pin bumped to 6d7b8ca (the HDR commit). dcpdoctor still pins the pre-HDR rev
+  66de9d0 and cargo forbids patching a git source with itself, so the workspace `[patch]`
+  points asdcplib/asdcplib-sys at `extern/asdcplib` (checkout at 6d7b8ca). Drop the patch
+  once dcpdoctor bumps its own asdcplib pin.
+
 ## Fixed 2026-07-22 (image-sequence export)
 
 - Export a composition to an image file sequence (dom#3021): new `export-frames`
@@ -131,23 +153,11 @@ The submodule is intentionally dirty; the pin bump happens at commit time.
 
 ## Deliberately skipped
 
-- HDR/WCG ST 2067-21 essence metadata: STILL SKIPPED (verified 2026-07-23 against
-  asdcplib-rs HEAD e56e3fe). IMF uses the AS-02 picture writer
-  (`asdcplib::as02::jp2k::MxfWriter`), which has only a plain `open_write` (sys
-  `asdcp_as02_jp2k_writer_open_write`); no transfer/colour/mastering setter, and
-  `jp2k::PictureDescriptor` carries no such fields (edit_rate, sample_rate,
-  stored_width/height, aspect_ratio, container_duration, component_count only).
-  The AS-DCP path did gain `jp2k::MxfWriter::open_write_transfer` (sys
-  `asdcp_jp2k_writer_open_write_transfer`) but it only sets TransferCharacteristic,
-  not colour primaries or mastering display, and it postdates the pinned rev
-  66de9d0 (absent there). So writing an RGBADescriptor into the CPL would still be
-  an unbacked claim Photon's CPL-vs-MXF check rejects. To lift this, asdcplib-rs
-  needs, on the AS-02 jp2k writer: (1) an `open_write_transfer` analogue
-  (`asdcp_as02_jp2k_writer_open_write_transfer`) for TransferCharacteristic; (2) a
-  ColorPrimaries UL setter (missing on both AS-02 and AS-DCP paths, only transfer
-  exists); (3) mastering-display / ST 2086 fields on the RGBA descriptor
-  (MasteringDisplayPrimaries, WhitePointChromaticity, Max/MinLuminance) plus
-  MaxCLL/MaxFALL. Until then, do not add `--hdr` flags.
+- HDR/WCG MaxCLL/MaxFALL: the transfer/colour/mastering-display metadata is now
+  written (see "Fixed" above), but MaxCLL (MaximumContentLightLevel) and MaxFALL
+  (MaximumFrameAverageLightLevel) stay unsupported: the vendored asdcplib has no
+  property for them on GenericPictureEssenceDescriptor and no MDD UL, so they can't
+  be written without patching the C++. We do not fake them.
 - SL (sign language) accessibility: a video-overlay track, not audio; no MCA audio
   descriptor. Composition-level LocaleList still carries languages.
 - Non-SCC subtitle conversion: RESOLVED 2026-07-23. Authored TTML/IMSC still

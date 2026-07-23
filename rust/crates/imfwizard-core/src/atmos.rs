@@ -326,6 +326,7 @@ pub fn import_atmos(input: &Path, output_dir: &Path) -> AtmosImportResult {
         edit_rate_num: 24,
         edit_rate_den: 1,
         duration: 0,
+        hdr: None,
     });
     let _ = std::fs::remove_file(&combined);
 

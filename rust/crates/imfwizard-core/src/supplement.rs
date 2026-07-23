@@ -234,6 +234,7 @@ fn wrap_asset(
         edit_rate_num: fps_num,
         edit_rate_den: fps_den,
         duration: 0,
+        hdr: None,
     });
     if !wrap.success {
         return Err(format!(

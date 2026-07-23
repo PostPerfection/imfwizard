@@ -32,3 +32,4 @@ libc = "0.2"
 # Optimize postkit in debug builds (color math is too slow unoptimized)
 [profile.dev.package.postkit]
 opt-level = 2
+

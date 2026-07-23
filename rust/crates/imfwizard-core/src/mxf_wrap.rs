@@ -9,6 +9,9 @@ pub struct MxfWrapOptions {
     pub edit_rate_num: u32,
     pub edit_rate_den: u32,
     pub duration: u64,
+    /// HDR/WCG picture metadata for a J2K wrap (ST 2067-21); None is SDR.
+    #[serde(skip)]
+    pub hdr: Option<asdcplib::jp2k::HdrMetadata>,
 }
 
 /// MXF wrapping result.
@@ -103,6 +106,7 @@ fn delegate(
         encryption: None,
         mca_config: None,
         resource_ids: vec![],
+        hdr: opts.hdr.clone(),
     });
 
     if !pk.success {
@@ -180,6 +184,7 @@ mod tests {
             edit_rate_num: 24,
             edit_rate_den: 1,
             duration: 0,
+            hdr: None,
         };
         let result = wrap_mxf(&opts);
         assert!(result.success, "wrap failed: {}", result.error);

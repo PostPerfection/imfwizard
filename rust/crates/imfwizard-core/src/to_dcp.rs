@@ -130,6 +130,7 @@ fn build_dcp(
         encryption: None,
         mca_config: None,
         resource_ids: vec![],
+        hdr: None,
     });
     if !wrapped.success {
         return Err(format!(
@@ -165,6 +166,7 @@ fn build_dcp(
             encryption: None,
             mca_config: None,
             resource_ids: vec![],
+            hdr: None,
         });
         if !wrapped.success {
             return Err(format!(

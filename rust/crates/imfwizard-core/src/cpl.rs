@@ -36,6 +36,18 @@ pub fn write_cpl(
             continue;
         };
         let mut source_encoding = None;
+        // image gets an RGBA EssenceDescriptor only when HDR/WCG is set; the
+        // descriptor mirrors what the picture MXF actually carries.
+        if kind == ImfTrackKind::Image
+            && let Some(hdr) = &comp.hdr
+        {
+            let se = uuid::Uuid::new_v4().to_string();
+            descriptors.push(ImfEssenceDescriptor {
+                id: se.clone(),
+                body: hdr.cpl_descriptor_body(),
+            });
+            source_encoding = Some(se);
+        }
         if kind == ImfTrackKind::Audio {
             if let Some(track) = comp.audio_files.get(audio_idx)
                 && let Some(role) = track.role
@@ -275,6 +287,52 @@ mod tests {
             eprintln!("xmllint failed: {}", String::from_utf8_lossy(&out.stderr));
         }
         Some(out.status.success())
+    }
+
+    /// An HDR/WCG CPL (image RGBADescriptor with transfer/colour ULs + ST 2086
+    /// mastering display) must pass the ST 2067-3:2016 XSD. Same gating as the
+    /// language test.
+    #[test]
+    fn hdr_cpl_passes_st2067_3_xsd() {
+        let dir = tempfile::tempdir().unwrap();
+        let cpl_path = dir.path().join("CPL_hdr.xml");
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        let hdr = crate::hdr_wcg::HdrWcg::from_flags(
+            "pq-bt2020",
+            Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
+        )
+        .unwrap();
+        let comp = Composition {
+            title: "HDR Test".into(),
+            content_kind: "feature".into(),
+            hdr: Some(hdr),
+            ..Default::default()
+        };
+        let video = MxfTrackFile {
+            path: "VIDEO_hdr.mxf".into(),
+            uuid: "bbbbbbbb-1111-2222-3333-444444444444".into(),
+            duration: 240,
+            ..Default::default()
+        };
+        write_cpl(
+            &cpl_path,
+            "33333333-4444-5555-6666-777777777777",
+            &opts,
+            &comp,
+            &[video],
+        )
+        .unwrap();
+        let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
+        assert!(cpl_xml.contains("<r0:RGBADescriptor"));
+        assert!(cpl_xml.contains("<r1:TransferCharacteristic>"));
+        match validate_st2067_3(&cpl_xml) {
+            Some(ok) => assert!(ok, "HDR CPL must pass ST 2067-3 XSD"),
+            None => eprintln!("skipping: set IMFWIZARD_IMF_XSD_DIR and install xmllint"),
+        }
     }
 
     /// Validate a language CPL against the official ST 2067-3:2016 XSD. Gated on

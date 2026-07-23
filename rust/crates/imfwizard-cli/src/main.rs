@@ -65,6 +65,17 @@ enum Commands {
         /// Frame rate denominator
         #[arg(long, default_value = "1")]
         fps_den: u32,
+
+        /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020 or
+        /// pq-p3d65. Writes the transfer/colour ULs into the MXF and CPL.
+        #[arg(long)]
+        hdr: Option<String>,
+
+        /// ST 2086 mastering display, x265 master-display string, e.g.
+        /// "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)".
+        /// Requires --hdr.
+        #[arg(long = "mastering-display")]
+        mastering_display: Option<String>,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -995,7 +1006,28 @@ fn run() {
             profile,
             fps_num,
             fps_den,
+            hdr,
+            mastering_display,
         } => {
+            // --mastering-display only makes sense with an HDR preset
+            if mastering_display.is_some() && hdr.is_none() {
+                eprintln!("Error: --mastering-display requires --hdr");
+                std::process::exit(1);
+            }
+            // build the HDR/WCG metadata up front so a bad preset/string fails fast
+            let hdr = match hdr.as_deref() {
+                Some(preset) => match imfwizard_core::hdr_wcg::HdrWcg::from_flags(
+                    preset,
+                    mastering_display.as_deref(),
+                ) {
+                    Ok(h) => Some(h),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
             // parse the accessibility role up front so a bad value fails fast
             let audio_role = match audio_role.as_deref() {
                 Some(s) => match imfwizard_core::imp::AudioRole::from_flag(s) {
@@ -1175,6 +1207,7 @@ fn run() {
                     j2k_dir,
                     audio_files: audio_tracks,
                     timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
+                    hdr,
                 }],
                 fps_num,
                 fps_den,
