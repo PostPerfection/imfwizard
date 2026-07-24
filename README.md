@@ -573,4 +573,4 @@ job queue, preferences, REST API, watch folders, and more).
 
 ## License
 
-GPL-3.0, see [LICENSE](LICENSE)
+AGPL-3.0-or-later. Copyright (C) 2026 Grok Image Compression Inc. See [LICENSE](LICENSE).

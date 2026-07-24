@@ -8,8 +8,8 @@ yanked = "deny"
 
 [licenses]
 allow = [
-    # imfwizard, postkit and dcpdoctor are all GPL-3.0-or-later themselves
-    "GPL-3.0-or-later",
+    # imfwizard, postkit and dcpdoctor are all AGPL-3.0-or-later themselves
+    "AGPL-3.0-or-later",
     "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
