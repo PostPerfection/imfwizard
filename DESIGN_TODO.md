@@ -7,6 +7,17 @@ everything advertised is wired (done notes below).
 
 ## Deliberately skipped / standing limitations
 
+- postkit compiles twice. `postkit` is a path dep on `extern/postkit`, and
+  `dcpdoctor-core` comes from git carrying its own path dep on the postkit inside
+  that checkout, so cargo resolves two copies. Legal, because only `asdcplib-sys`
+  declares a `links` key, and asdcplib itself resolves once. The cost is build
+  time plus a latent hazard: `dcpdoctor_core::loudness` re-exports postkit types,
+  so the day anything here uses that re-export alongside `postkit::loudness` the
+  two will not unify and the error will be confusing. Nothing does today. Fixing
+  it means pinning postkit by git rev in dcpdoctor and here and in the Tauri
+  workspace, which costs the edit-the-submodule-and-rebuild loop. Left as is on
+  purpose 2026-08-12. dcpwizard has the same shape.
+
 - HDR/WCG MaxCLL/MaxFALL: the transfer/colour/mastering-display metadata is written
   (see the HDR/WCG done note), but MaxCLL (MaximumContentLightLevel) and MaxFALL
   (MaximumFrameAverageLightLevel) stay unsupported: the vendored asdcplib has no
