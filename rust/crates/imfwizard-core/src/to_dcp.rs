@@ -131,6 +131,7 @@ fn build_dcp(
         mca_config: None,
         resource_ids: vec![],
         hdr: None,
+        asset_uuid: None,
     });
     if !wrapped.success {
         return Err(format!(
@@ -167,6 +168,7 @@ fn build_dcp(
             mca_config: None,
             resource_ids: vec![],
             hdr: None,
+            asset_uuid: None,
         });
         if !wrapped.success {
             return Err(format!(

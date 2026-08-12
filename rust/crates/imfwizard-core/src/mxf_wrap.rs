@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 /// MXF wrapping options.
@@ -12,6 +13,11 @@ pub struct MxfWrapOptions {
     /// HDR/WCG picture metadata for a J2K wrap (ST 2067-21); None is SDR.
     #[serde(skip)]
     pub hdr: Option<asdcplib::jp2k::HdrMetadata>,
+    /// The id written into the MXF as its AssetUUID and returned as the track
+    /// file uuid. A caller that names the output file after an id must pass that
+    /// id here, or the MXF carries one the package never mentions. None mints one.
+    #[serde(default)]
+    pub asset_uuid: Option<[u8; 16]>,
 }
 
 /// MXF wrapping result.
@@ -107,6 +113,7 @@ fn delegate(
         mca_config: None,
         resource_ids: vec![],
         hdr: opts.hdr.clone(),
+        asset_uuid: opts.asset_uuid,
     });
 
     if !pk.success {
@@ -116,16 +123,60 @@ fn delegate(
         };
     }
 
+    let hash = match base64_digest_from_hex(&pk.hash) {
+        Ok(h) => h,
+        Err(e) => {
+            return MxfWrapResult {
+                error: format!("unusable MXF hash from postkit: {e}"),
+                ..Default::default()
+            };
+        }
+    };
+
     MxfWrapResult {
         success: true,
         error: String::new(),
         track_file: crate::MxfTrackFile {
             path: pk.path,
             uuid: pk.uuid,
-            hash: pk.hash,
+            hash,
             size: pk.size,
             duration: pk.duration,
         },
+    }
+}
+
+/// SHA-1 digest length. ST 2067-2 fixes the PKL Hash field to a SHA-1 digest.
+const SHA1_DIGEST_BYTES: usize = 20;
+
+/// postkit returns a hex SHA-1, but the PKL Hash field is xs:base64Binary.
+/// This decodes the hex to the raw digest and re-encodes, so a postkit that
+/// starts returning base64 fails here instead of double-encoding into a string
+/// that still looks like a plausible hash.
+fn base64_digest_from_hex(hex: &str) -> Result<String, String> {
+    if hex.len() != SHA1_DIGEST_BYTES * 2 {
+        return Err(format!(
+            "expected {} hex characters, got {}: {hex}",
+            SHA1_DIGEST_BYTES * 2,
+            hex.len()
+        ));
+    }
+    let mut digest = [0u8; SHA1_DIGEST_BYTES];
+    for (byte, pair) in digest.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+        let (Some(high), Some(low)) = (hex_nibble(pair[0]), hex_nibble(pair[1])) else {
+            return Err(format!("not hexadecimal: {hex}"));
+        };
+        *byte = (high << 4) | low;
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(digest))
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -168,6 +219,24 @@ mod tests {
         assert!(validate_app2e_picture(2048, 1080, 16).is_err());
     }
 
+    #[test]
+    fn hex_digest_becomes_base64() {
+        assert_eq!(
+            base64_digest_from_hex("37a15bc80b0243dde57f7469865579a5700c472c").unwrap(),
+            "N6FbyAsCQ93lf3RphlV5pXAMRyw="
+        );
+    }
+
+    #[test]
+    fn already_base64_is_rejected_not_re_encoded() {
+        assert!(base64_digest_from_hex("N6FbyAsCQ93lf3RphlV5pXAMRyw=").is_err());
+    }
+
+    #[test]
+    fn non_hex_of_the_right_length_is_rejected() {
+        assert!(base64_digest_from_hex(&"z".repeat(40)).is_err());
+    }
+
     /// A non-default (2ch/16-bit) WAV wraps into an AS-02 PCM MXF via postkit,
     /// and the wrapped descriptor reflects the real header, not a 5.1 default.
     #[test]
@@ -185,6 +254,7 @@ mod tests {
             edit_rate_den: 1,
             duration: 0,
             hdr: None,
+            asset_uuid: None,
         };
         let result = wrap_mxf(&opts);
         assert!(result.success, "wrap failed: {}", result.error);

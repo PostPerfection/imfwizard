@@ -110,8 +110,8 @@ fn wrap_one(
     essence: crate::EssenceType,
     hdr: Option<asdcplib::jp2k::HdrMetadata>,
 ) -> Result<crate::MxfTrackFile, String> {
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let mxf_path = output_dir.join(format!("{prefix}_{uuid}.mxf"));
+    let asset_uuid = uuid::Uuid::new_v4();
+    let mxf_path = output_dir.join(format!("{prefix}_{asset_uuid}.mxf"));
     let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
         input_dir: input.to_path_buf(),
         output_file: mxf_path,
@@ -120,6 +120,7 @@ fn wrap_one(
         edit_rate_den: opts.fps_den,
         duration: opts.duration,
         hdr,
+        asset_uuid: Some(*asset_uuid.as_bytes()),
     };
     let r = crate::mxf_wrap::wrap_mxf(&wrap_opts);
     if !r.success {
@@ -432,11 +433,136 @@ mod tests {
         (create_imp(&opts), out)
     }
 
-    /// Netflix Photon must analyse the HDR IMP without a launch failure. Gated on
-    /// PHOTON_JAR (+ java); skips when absent. Synthetic essence is not fully
-    /// conformant, so this checks the package parses, not that it is error-free.
+    /// Every `<Hash>` in the PKL, paired with the asset's `<Type>`.
+    fn pkl_hashes_by_type(pkl: &str) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for asset in pkl.split("<Asset>").skip(1) {
+            let hash = between(asset, "<Hash>", "</Hash>");
+            let asset_type = between(asset, "<Type>", "</Type>");
+            pairs.push((asset_type, hash));
+        }
+        pairs
+    }
+
+    fn between(text: &str, open: &str, close: &str) -> String {
+        let start = text.find(open).expect("open tag") + open.len();
+        let rest = &text[start..];
+        rest[..rest.find(close).expect("close tag")].to_string()
+    }
+
+    /// Base64 SHA-1 of a file, computed here rather than taken from the packaging
+    /// code, so the test fails if that code changes encoding.
+    fn expected_hash(path: &std::path::Path) -> String {
+        use base64::Engine;
+        use sha1::Digest;
+        let digest = sha1::Sha1::digest(std::fs::read(path).expect("read asset"));
+        assert_eq!(digest.len(), 20);
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    }
+
+    /// The PKL Hash field is xs:base64Binary, so both the CPL and the MXF entry
+    /// must carry a base64 SHA-1 of the file on disk. These two came from
+    /// different code paths and silently disagreed: the MXF one was hex.
     #[test]
-    fn hdr_imp_analyzes_under_photon() {
+    fn pkl_hashes_are_base64_sha1_of_the_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (result, out) = build_hdr_imp(dir.path());
+        assert!(result.success, "create failed: {}", result.error);
+
+        let pkl = std::fs::read_to_string(&result.pkl_path).unwrap();
+        let pairs = pkl_hashes_by_type(&pkl);
+        assert_eq!(
+            pairs.len(),
+            2,
+            "expected one CPL and one MXF asset: {pairs:?}"
+        );
+
+        let mxf = &result.track_files[0].path;
+        assert!(mxf.starts_with(&out));
+        let expected: std::collections::HashMap<&str, String> = [
+            ("text/xml", expected_hash(&result.cpl_paths[0])),
+            ("application/mxf", expected_hash(mxf)),
+        ]
+        .into_iter()
+        .collect();
+
+        for (asset_type, hash) in &pairs {
+            use base64::Engine;
+            let want = expected
+                .get(asset_type.as_str())
+                .unwrap_or_else(|| panic!("unexpected asset type {asset_type}"));
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(hash)
+                .unwrap_or_else(|e| panic!("{asset_type} hash is not base64: {hash} ({e})"));
+            assert_eq!(decoded.len(), 20, "{asset_type} hash is not a SHA-1 digest");
+            assert_eq!(hash, want, "{asset_type} hash does not match the file");
+        }
+    }
+
+    /// Read the asset id back out of the MXF. asdcp-info refuses AS-02, and every
+    /// IMF track file is AS-02, so this looks for the raw 16 bytes the way postkit
+    /// checks the same thing.
+    fn mxf_carries_asset_uuid(path: &std::path::Path, id: &str) -> bool {
+        let bytes = uuid::Uuid::parse_str(id)
+            .expect("parse asset id")
+            .into_bytes();
+        let data = std::fs::read(path).expect("read mxf");
+        data.windows(bytes.len()).any(|w| w == bytes.as_slice())
+    }
+
+    /// One asset, one id: the uuid in the file name, the CPL TrackFileId, the PKL
+    /// asset Id, the ASSETMAP asset Id and the AssetUUID in the MXF must all be the
+    /// same value. The file name used to carry a uuid minted only for the name,
+    /// which then appeared nowhere else in the package.
+    #[test]
+    fn track_file_id_is_the_same_everywhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let (result, _out) = build_hdr_imp(dir.path());
+        assert!(result.success, "create failed: {}", result.error);
+
+        let cpl = std::fs::read_to_string(&result.cpl_paths[0]).unwrap();
+        let pkl = std::fs::read_to_string(&result.pkl_path).unwrap();
+        let assetmap = std::fs::read_to_string(&result.assetmap_path).unwrap();
+
+        assert!(!result.track_files.is_empty(), "no track files to check");
+        for track in &result.track_files {
+            let name = track
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let from_name = name
+                .trim_end_matches(".mxf")
+                .rsplit('_')
+                .next()
+                .expect("uuid in file name");
+
+            assert_eq!(from_name, track.uuid, "{name}: file name vs reported id");
+            assert!(
+                cpl.contains(&format!("<TrackFileId>urn:uuid:{from_name}<")),
+                "{name}: no CPL TrackFileId for {from_name}"
+            );
+            assert!(
+                pkl.contains(&format!("<Id>urn:uuid:{from_name}<")),
+                "{name}: no PKL asset for {from_name}"
+            );
+            assert!(
+                assetmap.contains(&format!("<Id>urn:uuid:{from_name}<")),
+                "{name}: no ASSETMAP asset for {from_name}"
+            );
+            assert!(
+                mxf_carries_asset_uuid(&track.path, from_name),
+                "{name}: MXF does not carry AssetUUID {from_name}"
+            );
+        }
+    }
+
+    /// Netflix Photon must analyse the HDR IMP and find nothing wrong with the
+    /// ASSETMAP, PKL, CPL or picture MXF. Gated on PHOTON_JAR (+ java); skips when
+    /// absent.
+    #[test]
+    fn hdr_imp_is_clean_under_photon() {
         if std::env::var("PHOTON_JAR").is_err() {
             eprintln!("skipping: set PHOTON_JAR to run the Photon check");
             return;
@@ -445,7 +571,12 @@ mod tests {
         let (result, out) = build_hdr_imp(dir.path());
         assert!(result.success, "create failed: {}", result.error);
         match crate::photon::run_photon(&out, None) {
-            Ok(_) => {}
+            Ok(photon) => assert!(
+                photon.errors.is_empty() && photon.warnings.is_empty(),
+                "Photon errors {:?}, warnings {:?}",
+                photon.errors,
+                photon.warnings
+            ),
             Err(e) => panic!("Photon failed to analyse the HDR IMP: {e}"),
         }
     }

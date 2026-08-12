@@ -14,15 +14,86 @@ everything advertised is wired (done notes below).
   be written without patching the C++. We do not fake them.
 - SL (sign language) accessibility: a video-overlay track, not audio, so it gets no
   MCA audio descriptor. Composition-level LocaleList still carries languages.
-- Photon not exercisable locally: `validate --photon` shells out to Netflix Photon
-  and needs a JRE + Photon jar. The Photon tests (and the HDR IMP round-trip) are
-  gated on `PHOTON_JAR` and skip when no jar is present, so the Photon path isn't
-  covered in a bare local/CI run.
+- Photon runs and the generated IMP is clean under it, but only on Linux CI:
+  `scripts/fetch_photon.sh` pulls Photon and its dependencies from Maven Central
+  (checksums pinned) and CI sets `PHOTON_JAR` there, so `hdr_imp_is_clean_under_photon`
+  executes rather than skipping. Still gated: a bare run without the script skips
+  it, and macOS/Windows CI never runs it.
 - Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
   thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
   measures and adjusts to a target (no other processing). Docs describe these as-is.
 
 # Done
+
+## Fixed 2026-08-12 (postkit c6406d1: one asset id, and a clean Photon run)
+
+- postkit submodule bumped 05516cd -> c6406d1. `MxfWrapOptions` and
+  `StereoscopicWrapOptions` gained `asset_uuid`, breaking every struct literal.
+  imfwizard constructs no `StereoscopicWrapOptions`, so the breaks were five
+  `MxfWrapOptions` sites: mxf_wrap.rs (the delegate and its test), to_dcp.rs x2,
+  atmos.rs.
+- The MXF carried an id the package never mentioned. `imp.rs` and `supplement.rs`
+  minted a uuid for the output filename, then wrote postkit's separately minted id
+  into the CPL, PKL and ASSETMAP, so `VIDEO_<a>.mxf` held AssetUUID `<b>` and `<a>`
+  appeared nowhere else. Both now pass the minted id down as `asset_uuid`.
+  to_dcp.rs and atmos.rs pass None on purpose: they use fixed output names
+  (picture.mxf, sound.mxf, atmos.mxf) and either use postkit's returned id or
+  discard the track file, so there is no second id to reconcile.
+- `track_file_id_is_the_same_everywhere` checks the file name, CPL TrackFileId, PKL
+  asset Id, ASSETMAP asset Id and the AssetUUID in the MXF are one value. The MXF
+  side is read back from the file bytes: asdcp-info refuses AS-02 ("Inspection in
+  not supported by this command") and every IMF track file is AS-02, so it looks
+  for the raw 16 bytes the way postkit's own tests do.
+- postkit now emits `HashAlgorithm` for the IMF PKL namespace, so Photon gets past
+  the PKL for the first time and reports no errors or warnings on any of the four
+  files, CPL and picture MXF included. `hdr_imp_is_clean_under_photon` (renamed from
+  `hdr_imp_analyzes_under_photon`) now asserts that instead of only asserting Photon
+  ran. asdcplib stays at 6d7b8ca, which is what postkit c6406d1 pins.
+
+## Fixed 2026-08-12 (PKL Hash encoding)
+
+- PKL `Hash` for MXF assets was hex where the field is `xs:base64Binary`. postkit's
+  `mxf_wrap` returns a hex SHA-1 and `pkl.rs` passed it straight through, while the
+  CPL hash on the same path was base64. Photon never caught it: 40 hex characters
+  are valid base64, they just decode to 30 meaningless bytes.
+- `mxf_wrap.rs` now decodes the hex to the raw digest and base64s that at the postkit
+  boundary, so `MxfTrackFile.hash` is base64 for every caller (imp and supplement both
+  wrap through it). Decoding rather than sniffing means a postkit that switches to
+  base64 fails the wrap loudly instead of double-encoding into a plausible-looking
+  wrong value.
+- `pkl_hashes_are_base64_sha1_of_the_files` asserts both the CPL and MXF entries
+  decode to 20 bytes and equal a SHA-1 computed in the test, so the two paths cannot
+  drift apart again.
+- Audited every other place imfwizard puts a hash in XML: `to_dcp.rs` uses
+  `dcpdoctor_core::hash::sha1_base64` for the DCP PKL CPL and asset hashes (correct),
+  ASSETMAP and the IMF CPL carry no hash element, and `signature.rs` delegates digests
+  to postkit's xmldsig. Nothing else needed changing.
+
+## Fixed 2026-08-12 (Photon actually runs)
+
+- `photon.rs` invoked `java -cp <single jar>`, which cannot work: Photon ships no
+  fat jar and needs slf4j, regxmllib and jaxb-runtime alongside it, so every run
+  died with `NoClassDefFoundError: org/slf4j/LoggerFactory`. The launch-failure
+  guard caught it, meaning `--photon` had never once produced a verdict. `--photon-jar`
+  and `PHOTON_JAR` now also accept a directory, passed to java as `dir/*`, which is
+  the layout Netflix documents.
+- `scripts/fetch_photon.sh` fetches Photon 5.0.1 and 12 runtime jars from Maven
+  Central into a cache directory, sha256 pinned, then smoke-tests that IMPAnalyzer
+  starts. Checksums are pinned in the script because Photon 5.0.1's own published
+  .sha1/.sha256/.md5 on Maven Central do not match the artifact Central serves;
+  every other pin was cross-checked against its publisher sidecar. aws-java-nio-spi-for-s3
+  is left out: it is only reached for s3:// inputs and drags in the whole AWS SDK.
+- ci.yml `rust` gained cached "Setup Photon" + Temurin 21 on Linux, so
+  `hdr_imp_analyzes_under_photon` runs there instead of skipping. No credentials
+  needed. Not wired on macOS/Windows.
+- README pointed at `photon-all.jar` from Netflix's GitHub releases. That file does
+  not exist and those releases carry no binaries at all.
+- Found while testing: plain `validate` (no `--photon`) runs a second Photon pass
+  inside dcpdoctor-core, which clones Netflix/photon and gradle-builds it unless
+  `PHOTON_DIR` points at a jar directory. On a JDK newer than 21 that build fails
+  and a whole gradle stack trace lands inside one `warning:` line. Setting
+  `PHOTON_DIR` avoids it, which CI and the README now do. The truncation and the
+  JDK ceiling are dcpdoctor's to fix.
 
 ## DoM tracker gaps (2026-07-22)
 
@@ -59,7 +130,7 @@ Call sites updated for the aa9f01b -> be89fe0 API changes:
 
 mid-side wav decode and resumable encode pipeline changes needed no call-site edits
 (imfwizard re-exports `encode::{...}` unchanged and does not touch mid-side/stream).
-The postkit submodule is pinned at 05516cd.
+The postkit submodule is pinned at c6406d1.
 
 ## Fixed 2026-07-23 (HDR/WCG ST 2067-21 essence metadata)
 

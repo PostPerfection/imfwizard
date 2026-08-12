@@ -178,7 +178,7 @@ cargo build --release
 | `ctlrender` | ACES CTL transforms (IDT/RRT/ODT) | [GitHub](https://github.com/ampas/CTL) |
 | `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
 | ffmpeg with `libvmaf` | VMAF in `compare --vmaf` | ffmpeg built `--enable-libvmaf` (check `ffmpeg -filters \| grep libvmaf`) |
-| JRE + Photon jar | `validate --photon` (Netflix Photon) | `apt install default-jre`; jar from [Netflix/photon releases](https://github.com/Netflix/photon/releases) |
+| JRE + Photon jars | `validate --photon` (Netflix Photon) | `apt install default-jre`; then `scripts/fetch_photon.sh` |
 | `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
 | AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 
@@ -358,9 +358,13 @@ imfwizard validate /path/to/imp/
 # Also validate XML against the SMPTE ST 2067 schemas
 imfwizard validate /path/to/imp/ --xsd
 
-# Also run Netflix Photon (needs a JRE + Photon jar)
-imfwizard validate /path/to/imp/ --photon --photon-jar /opt/photon/photon-all.jar
-# or set PHOTON_JAR=/opt/photon/photon-all.jar
+# Also run Netflix Photon (needs a JRE plus Photon and its dependencies).
+# Netflix ships no fat jar, so fetch the jars into one directory and point at it:
+scripts/fetch_photon.sh ~/.cache/imfwizard/photon
+imfwizard validate /path/to/imp/ --photon --photon-jar ~/.cache/imfwizard/photon
+# or set PHOTON_JAR=~/.cache/imfwizard/photon
+# Set PHOTON_DIR to the same directory as well: plain `validate` runs a second
+# Photon pass via dcpdoctor, which otherwise clones and gradle-builds Photon.
 ```
 
 ### Display IMP info

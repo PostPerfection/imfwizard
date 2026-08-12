@@ -225,8 +225,8 @@ fn wrap_asset(
     if !spec.path.exists() {
         return Err(format!("input not found: {}", spec.path.display()));
     }
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let mxf_path = output_dir.join(format!("{}_{uuid}.mxf", prefix_for(spec.kind)));
+    let asset_uuid = uuid::Uuid::new_v4();
+    let mxf_path = output_dir.join(format!("{}_{asset_uuid}.mxf", prefix_for(spec.kind)));
     let wrap = crate::mxf_wrap::wrap_mxf(&crate::mxf_wrap::MxfWrapOptions {
         input_dir: spec.path.clone(),
         output_file: mxf_path,
@@ -235,6 +235,7 @@ fn wrap_asset(
         edit_rate_den: fps_den,
         duration: 0,
         hdr: None,
+        asset_uuid: Some(*asset_uuid.as_bytes()),
     });
     if !wrap.success {
         return Err(format!(

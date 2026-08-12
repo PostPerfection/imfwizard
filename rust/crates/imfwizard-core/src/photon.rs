@@ -1,9 +1,13 @@
 //! Optional Netflix Photon IMF validation, gated behind `validate --photon`.
 //!
-//! Shell-out only (no build dep): runs `java -cp <jar>
+//! Shell-out only (no build dep): runs `java -cp <classpath>
 //! com.netflix.imflibrary.app.IMPAnalyzer <imp>` and maps its per-file summary
 //! lines ("<file> has N errors and M warnings") into findings. Photon logs via
 //! slf4j, so counts are read from the message text regardless of log backend.
+//!
+//! Photon ships no fat jar, so its own jar cannot run alone: slf4j, regxmllib
+//! and jaxb-runtime must be on the classpath too. The configured path may
+//! therefore be a directory of jars, which becomes a `dir/*` classpath entry.
 
 use std::path::{Path, PathBuf};
 
@@ -17,18 +21,19 @@ pub struct PhotonResult {
 const MAIN_CLASS: &str = "com.netflix.imflibrary.app.IMPAnalyzer";
 
 /// Run Photon over an IMP directory. `explicit_jar` is `--photon-jar`; otherwise
-/// the `PHOTON_JAR` env var is used. Errors with a one-line hint when java or the
-/// jar is missing.
+/// the `PHOTON_JAR` env var is used. Either may name the Photon jar itself or a
+/// directory holding it alongside its dependencies. Errors with a one-line hint
+/// when java or the jar is missing.
 pub fn run_photon(imp_dir: &Path, explicit_jar: Option<&Path>) -> Result<PhotonResult, String> {
     let java = find_java()
         .ok_or("java not found; install a JRE (e.g. apt install default-jre) to use --photon")?;
-    let jar = find_jar(explicit_jar).ok_or(
-        "Photon jar not found; pass --photon-jar <path> or set PHOTON_JAR (download photon-all.jar from github.com/Netflix/photon/releases)",
+    let classpath = find_classpath(explicit_jar).ok_or(
+        "Photon jar not found; pass --photon-jar <path> or set PHOTON_JAR to Photon's jar or to a directory holding it with its dependencies (see scripts/fetch_photon.sh)",
     )?;
 
     let out = std::process::Command::new(&java)
         .arg("-cp")
-        .arg(&jar)
+        .arg(&classpath)
         .arg(MAIN_CLASS)
         .arg(imp_dir)
         .output()
@@ -110,11 +115,19 @@ fn find_java() -> Option<PathBuf> {
     ok.then(|| PathBuf::from("java"))
 }
 
-fn find_jar(explicit: Option<&Path>) -> Option<PathBuf> {
+/// Java expands a trailing `*` classpath entry to every jar in that directory.
+const CLASSPATH_WILDCARD: &str = "*";
+
+fn find_classpath(explicit: Option<&Path>) -> Option<String> {
     let candidate = explicit
         .map(|p| p.to_path_buf())
         .or_else(|| std::env::var("PHOTON_JAR").ok().map(PathBuf::from))?;
-    candidate.is_file().then_some(candidate)
+    if candidate.is_dir() {
+        return Some(candidate.join(CLASSPATH_WILDCARD).to_string_lossy().into());
+    }
+    candidate
+        .is_file()
+        .then(|| candidate.to_string_lossy().into())
 }
 
 #[cfg(test)]

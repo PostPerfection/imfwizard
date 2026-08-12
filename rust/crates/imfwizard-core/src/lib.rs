@@ -116,6 +116,7 @@ pub enum TransferFunction {
 pub struct MxfTrackFile {
     pub path: PathBuf,
     pub uuid: String,
+    /// Base64 SHA-1 digest, the encoding the PKL Hash field takes.
     pub hash: String,
     pub size: u64,
     pub duration: u64,

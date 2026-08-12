@@ -91,6 +91,32 @@ jobs:
           echo "DYLD_LIBRARY_PATH=$prefix/lib:$prefix/lib64:$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
           echo "$prefix/bin" >> "$GITHUB_PATH"
 
+      # netflix publishes no photon fat jar and attaches no binaries to its
+      # releases, so the jars come from maven central. linux only: one platform
+      # is enough for an external cross-check.
+      - name: Install JDK (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Photon
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/photon-jars
+          key: photon-${{ runner.os }}-${{ hashFiles('scripts/fetch_photon.sh') }}
+
+      - name: Setup Photon
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/fetch_photon.sh "$GITHUB_WORKSPACE/photon-jars"
+          echo "PHOTON_JAR=$GITHUB_WORKSPACE/photon-jars" >> "$GITHUB_ENV"
+          # dcpdoctor-core reads PHOTON_DIR for its own Photon pass during
+          # `validate`. Without it, it clones and gradle-builds Photon itself.
+          echo "PHOTON_DIR=$GITHUB_WORKSPACE/photon-jars" >> "$GITHUB_ENV"
+
       - name: Build
         working-directory: rust
         run: cargo build --release
