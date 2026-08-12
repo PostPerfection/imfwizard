@@ -59,7 +59,7 @@ Call sites updated for the aa9f01b -> be89fe0 API changes:
 
 mid-side wav decode and resumable encode pipeline changes needed no call-site edits
 (imfwizard re-exports `encode::{...}` unchanged and does not touch mid-side/stream).
-The postkit submodule is pinned at be89fe0.
+The postkit submodule is pinned at 05516cd.
 
 ## Fixed 2026-07-23 (HDR/WCG ST 2067-21 essence metadata)
 
