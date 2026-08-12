@@ -342,7 +342,7 @@ fn extract_j2k_frames(mxf: &Path, pic: &PictureInfo, dir: &Path) -> Result<Vec<P
         .open_read(&mxf.to_string_lossy())
         .map_err(|e| format!("opening picture {}: {e}", mxf.display()))?;
 
-    let dci_max = postkit::j2k::dci_max_bitrate_mbps(pic.width);
+    let dci_max = postkit::j2k::DCI_MAX_BITRATE_MBPS;
     let fps = pic.fps_num as f64 / pic.fps_den.max(1) as f64;
     let mut buf = vec![0u8; 16 * 1024 * 1024];
     let mut paths = Vec::with_capacity(pic.frame_count as usize);

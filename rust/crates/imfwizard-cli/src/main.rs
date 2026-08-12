@@ -2918,6 +2918,9 @@ fn run() {
                 content_keys: Vec::new(),
                 format: postkit::certificate::KdmFormat::Smpte,
                 annotation: None,
+                // empty is the assume-trust thumbprint. a formulation naming
+                // specific devices would need certificates this cli cannot take yet
+                device_cert_files: Vec::new(),
             };
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),
