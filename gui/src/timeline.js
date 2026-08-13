@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { showEmbeddedPanel } from "./preview.js";
+import { showEmbeddedPanel } from "../../extern/guikit/src/preview.js";
 
 // Timeline state
 let timelineData = null; // { segments: [], totalFrames, editRate }
