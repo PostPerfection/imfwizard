@@ -5,3 +5,6 @@
 [submodule "extern/dcpdoctor"]
 	path = extern/dcpdoctor
 	url = https://github.com/PostPerfection/dcpdoctor.git
+[submodule "extern/guikit"]
+	path = extern/guikit
+	url = https://github.com/PostPerfection/guikit.git
