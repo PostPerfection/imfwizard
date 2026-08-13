@@ -20,6 +20,7 @@
 - **Supplemental IMP** — `supplement` builds a real ST 2067-2/-3 OV+supplemental package: `--replace`/`--add <path>@<track>` wraps only the new/changed track files, and the CPL references the OV's unchanged track files by UUID (ASSETMAP/PKL cover only present assets). Fails loud when nothing changes or a replace target is absent from the OV.
 
 ### Changed
+- **Shared GUI frontend via guikit**: the preview and keyboard-shortcut modules and the base stylesheet now come from the `extern/guikit` submodule instead of local copies; `gui/src/style.css` keeps only the imfwizard-specific rules. No behaviour change.
 - **J2K encoding is Grok-only**: dropped the `openjpeg` postkit feature; the CLI `create` video path now encodes through the shared `postkit::pipeline` grok (`grk_compress`) pipeline, the same one the GUI uses. No OpenJPEG fallback; errors clearly if `grk_compress` is not found.
 - **CPL language via postkit**: the composition LocaleList now comes from `ImfCpl.languages` (postkit emits it) instead of imfwizard splicing the block into the generated XML. Output is byte-identical.
 - **IMF-to-DCP writers use postkit**: `to-dcp` now writes its DCP CPL/PKL/ASSETMAP/VOLINDEX through `postkit::packaging` (`DcpCpl` with per-reel picture dims for a real `ScreenAspectRatio`) instead of hand-rolled XML. Schema-valid (dcpdoctor schema-validate: passed).

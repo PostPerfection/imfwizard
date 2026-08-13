@@ -5,23 +5,15 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
 Genuinely open items are standing limitations and deliberate scope decisions;
 everything advertised is wired (done notes below).
 
-## Guikit extraction (confirmed 2026-08-13, not started)
+## Guikit extraction phase 2 (confirmed 2026-08-13, not started)
 
-New PostPerfection/guikit repo consumed as an extern/guikit submodule by
-imfwizard and dcpwizard only, dcpdoctor stays out and keeps its vendored
-shortcuts.js copy. Phase 1 moves gui/src/preview.js, gui/src/shortcuts.js and a
-base stylesheet (thin per-app override files hold the deltas), and aligns
-gui/package.json and gui/vite.config.js without moving them. timeline.js is
-decided by classifying its diff during extraction: unify into guikit if the
-divergence is drift, keep both copies if it is domain difference (225 of 330
-lines shared today). main.js, index.html and pipeline.rs stay per-app
-permanently. Pin discipline mirrors postkit: every guikit change is immediately
-followed by a pin bump commit in both wizards, plain commit pins, no tags.
-Phase 2, only after phase 1 survives one real change cycle: preview_server.rs
-and preview_surface.rs into a small crate in guikit consumed as a path dep
-through the submodule (not postkit, which must stay free of a tauri dep).
-Subsumes the preview.js and vite.config.js entries in "Keep in sync with
-dcpwizard" below.
+Phase 1 is done: extern/guikit carries preview.js, shortcuts.js and base.css,
+gui/src/style.css is the thin override. Phase 2 moves preview_server.rs and
+preview_surface.rs into a small crate in guikit consumed as a path dep through
+the submodule (not postkit, which must stay free of a tauri dep). Gated on
+phase 1 surviving one real change cycle: a guikit edit landing in both wizards
+under the pin-bump discipline (every guikit change immediately followed by a
+pin bump commit in both, plain commit pins, no tags).
 
 ## Deliberately skipped / standing limitations
 
@@ -292,15 +284,20 @@ with no clean cross-repo home. Edit one side, mirror the other:
   has no tauri dep (used by CLI + wasm too), so hosting there would force tauri onto
   the core lib. The reusable part is already in postkit::mpv. Note dcpwizard also
   keeps a windows preview_server_stub this repo doesn't.
-- gui/src/preview.js, gui/vite.config.js — frontend (differ only by var order / dev
-  port); GUIs don't consume JS from the postkit crate, no home.
-  Planned home: guikit (see above).
-- gui/src/shortcuts.js — byte-identical across imfwizard, dcpwizard and dcpdoctor
-  (2026-08-13). App-agnostic by design: all app specifics enter through
-  initShortcuts, so sync is a plain cp, never a per-repo edit. If an integration
-  seems to need an engine change, change the engine in one repo and cp to the
-  others. Planned home for the wizard copies: guikit (see above); dcpdoctor keeps
-  a vendored copy.
+- preview.js — no longer duplicated, both wizards import extern/guikit/src/preview.js
+  (2026-08-13). Edit it in guikit and bump the pin in both.
+- gui/vite.config.js — still per-app (dev port differs) but now partially aligned:
+  the `server.fs.allow` and `resolve.dedupe` blocks are what make the out-of-root
+  guikit sources resolve, and both wizards need them identical.
+- shortcuts.js — deleted from both wizards, they import
+  extern/guikit/src/shortcuts.js (2026-08-13). dcpdoctor stays out of guikit and
+  keeps its vendored copy, synced by cp. App-agnostic by design: all app specifics
+  enter through initShortcuts, so an integration never needs an engine change; if
+  one seems to, change the engine in guikit and cp to dcpdoctor.
+- gui/src/timeline.js — classified 2026-08-13 as genuine domain difference, not
+  drift, so it stays per-app deliberately. It is a thin renderer over disjoint
+  backend structs (SegmentEntry segments here, TimelineEntry reels in dcpwizard),
+  and the zoom control and IMP argument builder are imfwizard-only.
 - gui/src-tauri/src/lib.rs, gui/src-tauri/src/pipeline.rs — app-specific tauri setup
   and build orchestration; encode already delegates to postkit::pipeline. Diverged
   enough (lib.rs module names + terminal guard, pipeline.rs 382 vs 467 lines) that

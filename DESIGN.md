@@ -36,3 +36,5 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 ## Layout note
 
 imfwizard builds against the `extern/postkit` submodule (pinned to the postkit commit with the `postkit::packaging` dedup work); bump the pin when postkit changes. dcpdoctor-core is pinned at rev ce050e5.
+
+The GUI frontend takes its preview module, keyboard shortcut engine and base stylesheet from the `extern/guikit` submodule, shared with dcpwizard; `gui/src/style.css` holds only the imfwizard deltas. Bump the pin when guikit changes.
