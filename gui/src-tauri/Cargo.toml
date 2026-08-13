@@ -1,6 +1,6 @@
 [package]
 name = "imfwizard-gui"
-version = "1.1.0"
+version = "1.2.0"
 description = "IMF Wizard Desktop GUI"
 authors = ["IMF Wizard"]
 edition = "2021"

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.0] - 2026-08-13
 
 ### Added
 - **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer characteristic + colour primaries ULs onto the picture MXF RGBA essence descriptor (asdcplib `open_write_hdr`) and emits a matching CPL `EssenceDescriptor` linked via `SourceEncoding`. Optional `--mastering-display` (x265 master-display string, requires `--hdr`) adds the ST 2086 block (display primaries, white point, max/min luminance). The CPL claims only what the MXF carries; round-tripped via `hdr_metadata()` and XSD-validated against imf-cpl-20160411.xsd. `--max-cll`/`--max-fall` (nits, also requiring `--hdr`) write the content light levels as ST 2067-21 CPL `ExtensionProperties`, where that standard puts them rather than in the MXF descriptor.

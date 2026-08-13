@@ -26,9 +26,10 @@ everything advertised is wired (done notes below).
 - Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
   thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
   measures and adjusts to a target (no other processing). Docs describe these as-is.
-- Preview is a separate mpv window: Wayland has no foreign-window embedding, so it
-  cannot sit inside the tauri window. Embedded playback via the libmpv render API
-  is planned in postkit's DESIGN_TODO, shared with dcpwizard.
+- Preview embeds in the app window on linux builds with the embedded-preview
+  feature (libmpv render API, state in postkit's DESIGN_TODO, shared with
+  dcpwizard); other platforms and builds without the feature spawn a separate
+  mpv window.
 
 # Done
 
