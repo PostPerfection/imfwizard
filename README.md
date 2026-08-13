@@ -91,7 +91,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dark theme** by default with optional light mode toggle
 - **File import** (video, WAV, TTML/subtitle) via file picker; builds package the selected picture, audio, and subtitle
 - **Timeline editor**, visual segment arrangement
-- **Keyboard shortcuts**, preview controls and Ctrl+1..7 tab navigation
+- **Keyboard shortcuts**, Ctrl+N/O/B/P/I, Ctrl+Shift+S, Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
 - **Preview player**, mpv-based playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)

@@ -4,8 +4,9 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp } from "./preview.js";
+import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, isPreviewVisible } from "./preview.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
+import { initShortcuts, getBinding } from "./shortcuts.js";
 
 // === Browse wrapper ===
 let lastBrowseDir = null;
@@ -49,29 +50,61 @@ function switchView(viewName) {
   if (viewName === "jobs") { refreshJobs(); startJobsPolling(); } else { stopJobsPolling(); }
 }
 
-document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+const SHORTCUTS_KEY = "imfwizard-shortcuts";
+const PREVIEW_SEEK_SECONDS = 5;
 
-  const ctrl = e.ctrlKey || e.metaKey;
-  const shift = e.shiftKey;
+const PROJECT_BUTTON_SHORTCUTS = [
+  { id: "new-project", label: "New IMP", binding: "Ctrl+N", buttonId: "btn-new-project" },
+  { id: "open-project", label: "Open IMP", binding: "Ctrl+O", buttonId: "btn-open-project" },
+  { id: "supplement", label: "Create supplement", binding: "Ctrl+Shift+S", buttonId: "btn-supplement" },
+  { id: "build", label: "Create IMP", binding: "Ctrl+B", buttonId: "btn-build" },
+  { id: "preview", label: "Preview", binding: "Ctrl+P", buttonId: "btn-preview" },
+  { id: "import-video", label: "Import video", binding: "Ctrl+I", buttonId: "import-video" },
+];
+const THEME_BUTTON_SHORTCUT = { id: "toggle-theme", label: "Toggle light / dark theme", binding: "Ctrl+Shift+T", buttonId: "theme-toggle" };
+const BUTTON_SHORTCUTS = [...PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT];
 
-  if (ctrl && e.key === "n") { e.preventDefault(); document.getElementById("btn-new-project")?.click(); }
-  else if (ctrl && e.key === "o") { e.preventDefault(); document.getElementById("btn-open-project")?.click(); }
-  else if (ctrl && e.key === "b") { e.preventDefault(); document.getElementById("btn-build")?.click(); }
-  else if (ctrl && e.key === "p") { e.preventDefault(); document.getElementById("btn-preview")?.click(); }
-  else if (ctrl && e.key === "i") { e.preventDefault(); document.getElementById("import-video")?.click(); }
-  else if (ctrl && shift && e.key === "S") { e.preventDefault(); document.getElementById("btn-supplement")?.click(); }
-  // View switching: Ctrl+1-7
-  else if (ctrl && e.key === "1") { e.preventDefault(); switchView("project"); }
-  else if (ctrl && e.key === "2") { e.preventDefault(); switchView("timeline"); }
-  else if (ctrl && e.key === "3") { e.preventDefault(); switchView("validate"); }
-  else if (ctrl && e.key === "4") { e.preventDefault(); switchView("tools"); }
-  else if (ctrl && e.key === "5") { e.preventDefault(); switchView("deliver"); }
-  else if (ctrl && e.key === "6") { e.preventDefault(); switchView("jobs"); }
-  else if (ctrl && e.key === "7") { e.preventDefault(); switchView("settings"); }
-  // Theme toggle
-  else if (ctrl && shift && e.key === "T") { e.preventDefault(); document.getElementById("theme-toggle")?.click(); }
+function clickAction({ id, label, binding, buttonId }, category) {
+  return { id, label, category, binding, handler: () => document.getElementById(buttonId)?.click() };
+}
+
+function viewAction(view, label, binding) {
+  return { id: `view-${view}`, label, category: "Views", binding, handler: () => switchView(view) };
+}
+
+function previewAction(id, label, binding, handler) {
+  return { id, label, category: "Preview", binding, when: isPreviewVisible, handler };
+}
+
+function refreshButtonTooltips() {
+  for (const { id, label, buttonId } of BUTTON_SHORTCUTS) {
+    const button = document.getElementById(buttonId);
+    if (!button) continue;
+    const binding = getBinding(id);
+    button.title = binding ? `${label} (${binding})` : label;
+  }
+}
+
+initShortcuts({
+  storageKey: SHORTCUTS_KEY,
+  onChange: refreshButtonTooltips,
+  actions: [
+    ...PROJECT_BUTTON_SHORTCUTS.map((shortcut) => clickAction(shortcut, "Project")),
+    viewAction("project", "Project", "Ctrl+1"),
+    viewAction("timeline", "Timeline", "Ctrl+2"),
+    viewAction("validate", "Validate", "Ctrl+3"),
+    viewAction("tools", "Tools", "Ctrl+4"),
+    viewAction("deliver", "Deliver", "Ctrl+5"),
+    viewAction("jobs", "Jobs", "Ctrl+6"),
+    viewAction("settings", "Settings", "Ctrl+7"),
+    previewAction("preview-play-pause", "Play / pause", "Space", previewPlayPause),
+    previewAction("preview-back", `Back ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowLeft", () => previewSeek(-PREVIEW_SEEK_SECONDS)),
+    previewAction("preview-forward", `Forward ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowRight", () => previewSeek(PREVIEW_SEEK_SECONDS)),
+    previewAction("preview-start", "Go to start", "Home", () => previewSeekAbsolute(0)),
+    clickAction(THEME_BUTTON_SHORTCUT, "Appearance"),
+  ],
 });
+refreshButtonTooltips();
 
 // === Preferences ===
 const PREFS_KEY = "imfwizard-preferences";
