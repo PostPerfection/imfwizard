@@ -1515,6 +1515,7 @@ dependencies = [
  "hex",
  "hound",
  "notify",
+ "pkg-config",
  "quick-xml 0.37.5",
  "rcgen",
  "regex",
