@@ -67,6 +67,8 @@ pub struct JobQueue {
     current_id: AtomicU64,
     current_title: Mutex<String>,
     current_status: Mutex<String>,
+    /// Output folder of the running job, so a second build cannot write into it
+    current_output: Mutex<Option<PathBuf>>,
 }
 
 impl JobQueue {
@@ -79,7 +81,20 @@ impl JobQueue {
             current_id: AtomicU64::new(0),
             current_title: Mutex::new(String::new()),
             current_status: Mutex::new(String::new()),
+            current_output: Mutex::new(None),
         }
+    }
+
+    /// Is a job already running or queued that writes into `output`?
+    fn is_building_into(&self, output: &std::path::Path) -> bool {
+        if self.current_output.lock().unwrap().as_deref() == Some(output) {
+            return true;
+        }
+        self.queue
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|job| job.output_dir == output)
     }
 }
 
@@ -131,10 +146,24 @@ pub async fn submit_job(
         }
     };
 
+    // packages are folders named by title, so a reused title lands in the old
+    // package. refuse now, not after the encode.
+    let output_path = PathBuf::from(&output_dir);
+    if output_path.join("ASSETMAP.xml").exists() || output_path.join("VOLINDEX.xml").exists() {
+        return Err(format!(
+            "Output folder already holds an IMP: {output_dir}. Use a new title or output folder, or delete the old package first."
+        ));
+    }
+    if queue.is_building_into(&output_path) {
+        return Err(format!(
+            "A build is already running into {output_dir}. Wait for it to finish or cancel it."
+        ));
+    }
+
     let job = JobConfig {
         id,
         title: title.clone(),
-        output_dir: PathBuf::from(&output_dir),
+        output_dir: output_path,
         compositions,
         fps_num,
         fps_den,
@@ -224,6 +253,7 @@ async fn run_queue_worker(app: AppHandle) {
         let Some(job) = job else {
             let queue = app.state::<JobQueue>();
             queue.current_id.store(0, Ordering::Relaxed);
+            *queue.current_output.lock().unwrap() = None;
             break;
         };
 
@@ -231,6 +261,7 @@ async fn run_queue_worker(app: AppHandle) {
             let queue = app.state::<JobQueue>();
             queue.current_id.store(job.id, Ordering::Relaxed);
             *queue.current_title.lock().unwrap() = job.title.clone();
+            *queue.current_output.lock().unwrap() = Some(job.output_dir.clone());
             *queue.current_status.lock().unwrap() = "running".to_string();
             queue.cancel.store(false, Ordering::Relaxed);
             queue.pause.store(false, Ordering::Relaxed);
@@ -250,16 +281,29 @@ async fn run_queue_worker(app: AppHandle) {
                 emit_progress(&app, job.id, "done", "Complete", 0, 0, 0.0, 0.0, 100.0);
             }
             Ok(Err(e)) => {
-                let status = if queue.cancel.load(Ordering::Relaxed) {
+                let cancelled = queue.cancel.load(Ordering::Relaxed);
+                *queue.current_status.lock().unwrap() = if cancelled {
                     "cancelled".to_string()
                 } else {
                     format!("failed: {e}")
                 };
-                *queue.current_status.lock().unwrap() = status;
-                emit_progress(&app, job.id, "error", &e, 0, 0, 0.0, 0.0, 0.0);
+                let stage = if cancelled { "cancelled" } else { "error" };
+                emit_progress(&app, job.id, stage, &e, 0, 0, 0.0, 0.0, 0.0);
             }
+            // a panic leaves no error event, so the panel would wait forever
             Err(e) => {
                 *queue.current_status.lock().unwrap() = format!("panic: {e}");
+                emit_progress(
+                    &app,
+                    job.id,
+                    "error",
+                    &format!("Build panicked: {e}"),
+                    0,
+                    0,
+                    0.0,
+                    0.0,
+                    0.0,
+                );
             }
         }
 

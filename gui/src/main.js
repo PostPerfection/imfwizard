@@ -423,7 +423,15 @@ renderCplTabs();
 // === Output directory ===
 document.getElementById("browse-output")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
-  if (dir) document.getElementById("prop-output").value = dir;
+  if (dir) {
+    const outputEl = document.getElementById("prop-output");
+    outputEl.value = dir;
+    delete outputEl.dataset.autoFilled;
+  }
+});
+
+document.getElementById("prop-output")?.addEventListener("input", (event) => {
+  delete event.target.dataset.autoFilled;
 });
 
 // === Open existing IMP ===
@@ -471,6 +479,9 @@ document.getElementById("btn-supplement")?.addEventListener("click", () => {
 let currentJobId = null;
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {
+  // a second build would queue behind the first and encode all over again
+  if (buildInFlight) return;
+
   const title = document.getElementById("prop-title")?.value?.trim();
   if (!title) { tauriMessage("Enter a content title in Properties"); return; }
 
@@ -491,11 +502,16 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     .filter(Boolean);
   if (!comps.length) { tauriMessage("Import a video asset first"); return; }
 
-  let output = document.getElementById("prop-output")?.value;
-  if (!output) {
+  // re-derive an auto-filled output folder so it follows the current title
+  const outputEl = document.getElementById("prop-output");
+  let output = outputEl?.value;
+  if (!output || outputEl?.dataset.autoFilled) {
     const docs = await documentDir();
     output = await join(docs, title);
-    document.getElementById("prop-output").value = output;
+    if (outputEl) {
+      outputEl.value = output;
+      outputEl.dataset.autoFilled = "1";
+    }
   }
 
   const progressSection = document.getElementById("progress-section");
@@ -506,6 +522,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   progressBar.value = 0;
   stageEl.textContent = "Queued...";
   statsEl.textContent = "";
+  setStatus("");
 
   const unlisten = await listen("pipeline-progress", (event) => {
     const p = event.payload;
@@ -524,16 +541,26 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       setTitleProgress(-1);
       notifyBuildComplete(true, title);
       addRecentProject(output, title);
+      endBuild();
+      unlisten();
+    } else if (p.stage === "cancelled") {
+      setStatus("Cancelled");
+      stageEl.textContent = "Cancelled";
+      setTitleProgress(-1);
+      endBuild();
       unlisten();
     } else if (p.stage === "error") {
-      setStatus("Build failed");
+      setStatus("Build failed: " + p.message);
       setTitleProgress(-1);
       notifyBuildComplete(false, title);
+      tauriMessage(p.message, { title: "Build failed", kind: "error" });
+      endBuild();
       unlisten();
     }
   });
 
   try {
+    beginBuild();
     currentJobId = await invoke("submit_job", {
       title, outputDir: output, compositions: comps,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
@@ -543,6 +570,8 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   } catch (e) {
     stageEl.textContent = "Failed";
     setStatus("Error: " + e);
+    tauriMessage(String(e), { title: "Build failed", kind: "error" });
+    endBuild();
     unlisten();
   }
 });
@@ -845,7 +874,13 @@ function stopJobsPolling() { if (jobsPollInterval) { clearInterval(jobsPollInter
 document.getElementById("jobs-refresh")?.addEventListener("click", refreshJobs);
 
 // === Utilities ===
-function setStatus(text) { const el = document.getElementById("status-text"); if (el) el.textContent = text; }
+function setStatus(text) {
+  const el = document.getElementById("status-text");
+  if (el) {
+    el.textContent = text;
+    el.title = text;
+  }
+}
 function formatTime(secs) { const m = Math.floor(secs / 60); const s = Math.floor(secs % 60); return m > 0 ? `${m}m${s}s` : `${s}s`; }
 
 // === Title sync ===
@@ -957,13 +992,25 @@ function updateStatusStats() {
 }
 
 // === Toolbar Button State ===
+let buildInFlight = false;
+
+function beginBuild() {
+  buildInFlight = true;
+  updateToolbarState();
+}
+
+function endBuild() {
+  buildInFlight = false;
+  updateToolbarState();
+}
+
 function updateToolbarState() {
   const hasVideo = project.segments.some(s => s.picture);
   const hasTitle = !!(document.getElementById("prop-title")?.value?.trim());
   const buildBtn = document.getElementById("btn-build");
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
-  if (buildBtn) buildBtn.disabled = !(hasVideo && hasTitle);
+  if (buildBtn) buildBtn.disabled = buildInFlight || !(hasVideo && hasTitle);
   if (previewBtn) previewBtn.disabled = !hasVideo;
   if (supBtn) supBtn.disabled = !hasTitle;
 }
