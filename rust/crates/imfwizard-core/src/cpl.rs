@@ -11,7 +11,8 @@ use crate::imp::{AudioRole, Composition, ImpOptions};
 /// the same convention the MXF wrapper writes. Audio languages from `comp` are
 /// written into a composition-level LocaleList (ST 2067-3 Locale/LanguageList).
 /// Audio tracks with an accessibility role (AD/HI) get an MCA EssenceDescriptor
-/// linked to the resource via SourceEncoding (ST 2067-2/-3).
+/// linked to the resource via SourceEncoding (ST 2067-2/-3). HDR content light
+/// levels become ST 2067-21 ExtensionProperties.
 pub fn write_cpl(
     path: &Path,
     cpl_uuid: &str,
@@ -91,6 +92,8 @@ pub fn write_cpl(
         resources,
         languages: langs,
         essence_descriptors: descriptors,
+        max_cll: comp.hdr.as_ref().and_then(|h| h.max_cll),
+        max_fall: comp.hdr.as_ref().and_then(|h| h.max_fall),
     };
 
     std::fs::write(path, cpl.to_xml())
@@ -151,6 +154,49 @@ mod tests {
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<IssueDate>"));
         assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/schemas/2067-21/2016</cc:ApplicationIdentification>"));
+    }
+
+    /// ST 2067-21 carries MaxCLL/MaxFALL in the CPL ExtensionProperties, not on the
+    /// essence descriptor. Photon only schema-validates them, it never compares them
+    /// against the picture essence.
+    #[test]
+    fn write_cpl_writes_content_light_levels_from_hdr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CPL_test.xml");
+        let hdr = crate::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None)
+            .unwrap()
+            .with_content_light_levels(Some(993), Some(362));
+        let comp = Composition {
+            title: "Test".into(),
+            hdr: Some(hdr),
+            ..Default::default()
+        };
+
+        write_cpl(&path, "cpl", &ImpOptions::default(), &comp, &[]).unwrap();
+        let xml = std::fs::read_to_string(&path).unwrap();
+        let app2e = "http://www.smpte-ra.org/schemas/2067-21/2016";
+        assert!(xml.contains(&format!(
+            "<app2e:MaxCLL xmlns:app2e=\"{app2e}\">993</app2e:MaxCLL>"
+        )));
+        assert!(xml.contains(&format!(
+            "<app2e:MaxFALL xmlns:app2e=\"{app2e}\">362</app2e:MaxFALL>"
+        )));
+        // they follow ApplicationIdentification inside ExtensionProperties
+        assert!(
+            xml.find("<cc:ApplicationIdentification>").unwrap()
+                < xml.find("<app2e:MaxCLL").unwrap()
+        );
+        assert!(xml.find("<app2e:MaxFALL").unwrap() < xml.find("</ExtensionProperties>").unwrap());
+        // HDR without light levels leaves the CPL free of them
+        let plain = Composition {
+            title: "Test".into(),
+            hdr: Some(crate::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None).unwrap()),
+            ..Default::default()
+        };
+        write_cpl(&path, "cpl", &ImpOptions::default(), &plain, &[]).unwrap();
+        let xml = std::fs::read_to_string(&path).unwrap();
+        assert!(!xml.contains("MaxCLL"));
+        assert!(!xml.contains("MaxFALL"));
     }
 
     #[test]
@@ -262,6 +308,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cpl_path = dir.path().join("CPL.xml");
         std::fs::write(&cpl_path, cpl_xml).unwrap();
+        // ExtensionProperties is xs:any processContents="lax", so MaxCLL/MaxFALL are
+        // only really checked when the app2e schema is among the imports.
+        let app2e_import = match walk(root, "app2e-2016.xsd") {
+            Some(p) => format!(
+                r#"
+  <xs:import namespace="http://www.smpte-ra.org/schemas/2067-21/2016" schemaLocation="{}"/>"#,
+                p.display()
+            ),
+            None => String::new(),
+        };
         let driver = dir.path().join("driver.xsd");
         std::fs::write(
             &driver,
@@ -269,7 +325,7 @@ mod tests {
                 r#"<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
-  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>
+  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>{app2e_import}
 </xs:schema>"#,
                 cpl = cpl_xsd.display(),
                 dsig = dsig_xsd.display(),
@@ -305,7 +361,8 @@ mod tests {
             "pq-bt2020",
             Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
         )
-        .unwrap();
+        .unwrap()
+        .with_content_light_levels(Some(993), Some(362));
         let comp = Composition {
             title: "HDR Test".into(),
             content_kind: "feature".into(),
@@ -329,6 +386,7 @@ mod tests {
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
         assert!(cpl_xml.contains("<r0:RGBADescriptor"));
         assert!(cpl_xml.contains("<r1:TransferCharacteristic>"));
+        assert!(cpl_xml.contains(">993</app2e:MaxCLL>"));
         match validate_st2067_3(&cpl_xml) {
             Some(ok) => assert!(ok, "HDR CPL must pass ST 2067-3 XSD"),
             None => eprintln!("skipping: set IMFWIZARD_IMF_XSD_DIR and install xmllint"),

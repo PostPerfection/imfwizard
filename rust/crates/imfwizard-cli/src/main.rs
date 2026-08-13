@@ -76,6 +76,16 @@ enum Commands {
         /// Requires --hdr.
         #[arg(long = "mastering-display")]
         mastering_display: Option<String>,
+
+        /// Maximum content light level in nits, written as a ST 2067-21 CPL
+        /// ExtensionProperty. Requires --hdr.
+        #[arg(long = "max-cll")]
+        max_cll: Option<u16>,
+
+        /// Maximum frame-average light level in nits, same placement as
+        /// --max-cll. Requires --hdr.
+        #[arg(long = "max-fall")]
+        max_fall: Option<u16>,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1008,11 +1018,19 @@ fn run() {
             fps_den,
             hdr,
             mastering_display,
+            max_cll,
+            max_fall,
         } => {
-            // --mastering-display only makes sense with an HDR preset
-            if mastering_display.is_some() && hdr.is_none() {
-                eprintln!("Error: --mastering-display requires --hdr");
-                std::process::exit(1);
+            // the HDR detail flags only make sense with an HDR preset
+            for (name, given) in [
+                ("--mastering-display", mastering_display.is_some()),
+                ("--max-cll", max_cll.is_some()),
+                ("--max-fall", max_fall.is_some()),
+            ] {
+                if given && hdr.is_none() {
+                    eprintln!("Error: {name} requires --hdr");
+                    std::process::exit(1);
+                }
             }
             // build the HDR/WCG metadata up front so a bad preset/string fails fast
             let hdr = match hdr.as_deref() {
@@ -1020,7 +1038,7 @@ fn run() {
                     preset,
                     mastering_display.as_deref(),
                 ) {
-                    Ok(h) => Some(h),
+                    Ok(h) => Some(h.with_content_light_levels(max_cll, max_fall)),
                     Err(e) => {
                         eprintln!("Error: {e}");
                         std::process::exit(1);

@@ -404,6 +404,9 @@ mod tests {
         assert!(cpl.contains("<r0:RGBADescriptor"));
         assert!(cpl.contains("<SourceEncoding>"));
         assert!(cpl.contains("<r1:MasteringDisplayMaximumLuminance>40000000<"));
+        // content light levels are ExtensionProperties, not descriptor metadata
+        assert!(cpl.contains(">993</app2e:MaxCLL>"));
+        assert!(cpl.contains(">362</app2e:MaxFALL>"));
     }
 
     /// Build a one-frame HDR IMP into `out` and return the result.
@@ -416,7 +419,8 @@ mod tests {
             "pq-bt2020",
             Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
         )
-        .unwrap();
+        .unwrap()
+        .with_content_light_levels(Some(993), Some(362));
         let opts = ImpOptions {
             output_dir: out.clone(),
             compositions: vec![Composition {

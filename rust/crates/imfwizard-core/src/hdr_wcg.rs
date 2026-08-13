@@ -6,8 +6,8 @@
 //! (via asdcplib `open_write_hdr`) and the CPL EssenceDescriptor, so the CPL only
 //! claims what the essence carries.
 //!
-//! MaxCLL/MaxFALL are not written: the vendored asdcplib has no descriptor
-//! property for them.
+//! MaxCLL/MaxFALL are not essence-descriptor metadata: ST 2067-21 defines them as
+//! CPL ExtensionProperties, so they ride on `HdrWcg` but only reach the CPL.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,13 +22,18 @@ pub struct MasteringDisplay {
     pub min_luminance: u32,
 }
 
-/// HDR/WCG metadata for one picture: transfer + colour primaries ULs plus an
-/// optional mastering display.
+/// HDR/WCG metadata for one picture: transfer + colour primaries ULs, an optional
+/// mastering display, and the optional content light levels.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HdrWcg {
     pub transfer: [u8; 16],
     pub color_primaries: [u8; 16],
     pub mastering: Option<MasteringDisplay>,
+    /// Maximum content light level, cd/m^2. Goes to the CPL ExtensionProperties,
+    /// never to the essence descriptor.
+    pub max_cll: Option<u16>,
+    /// Maximum frame-average light level, cd/m^2. Same placement as `max_cll`.
+    pub max_fall: Option<u16>,
 }
 
 impl HdrWcg {
@@ -52,7 +57,20 @@ impl HdrWcg {
             transfer,
             color_primaries,
             mastering,
+            ..Default::default()
         })
+    }
+
+    /// Attach the `--max-cll` / `--max-fall` content light levels. Separate from
+    /// `from_flags` because they need no parsing and never touch the essence.
+    pub fn with_content_light_levels(
+        mut self,
+        max_cll: Option<u16>,
+        max_fall: Option<u16>,
+    ) -> Self {
+        self.max_cll = max_cll;
+        self.max_fall = max_fall;
+        self
     }
 
     /// The asdcplib descriptor written into the picture MXF.
@@ -275,6 +293,24 @@ mod tests {
         assert_eq!(a.transfer_characteristic.unwrap(), h.transfer);
         assert_eq!(a.mastering_display_primaries.unwrap()[0], [34000, 16000]);
         assert_eq!(a.mastering_display_max_luminance, Some(40000000));
+    }
+
+    /// Content light levels are ST 2067-21 CPL ExtensionProperties, so they must not
+    /// leak into the MXF descriptor or the CPL EssenceDescriptor body.
+    #[test]
+    fn content_light_levels_stay_out_of_the_essence_descriptor() {
+        let h = HdrWcg::from_flags("pq-bt2020", None)
+            .unwrap()
+            .with_content_light_levels(Some(993), Some(362));
+        assert_eq!(h.max_cll, Some(993));
+        assert_eq!(h.max_fall, Some(362));
+        let body = h.cpl_descriptor_body();
+        assert!(!body.contains("993"));
+        assert!(!body.contains("362"));
+        assert_eq!(
+            h.to_asdcp(),
+            HdrWcg::from_flags("pq-bt2020", None).unwrap().to_asdcp()
+        );
     }
 
     #[test]

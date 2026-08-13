@@ -378,6 +378,8 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         resources,
         languages: Vec::new(),
         essence_descriptors: Vec::new(),
+        max_cll: None,
+        max_fall: None,
     };
     let cpl_path = out.join(format!("CPL_{cpl_uuid}.xml"));
     if let Err(e) = std::fs::write(&cpl_path, cpl.to_xml()) {

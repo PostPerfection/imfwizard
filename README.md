@@ -31,7 +31,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Subtitle burn-in**, render SRT/TTML into video frames via ffmpeg
 
 ### HDR & Advanced
-- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. Optional `--mastering-display` adds the ST 2086 block. MaxCLL/MaxFALL are not written (unsupported by the MXF library)
+- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
 - **Dolby Vision** RPU metadata injection (via dovi_tool)
 - **HDR10+ dynamic metadata** injection, re-encodes with libx265 to write SEI (via hdr10plus_tool)
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
@@ -267,11 +267,14 @@ imfwizard create \
   --video /path/to/j2k_dir \
   --hdr pq-bt2020 \
   --mastering-display "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)" \
+  --max-cll 993 \
+  --max-fall 362 \
   --output /path/to/output/
 ```
 
-MaxCLL/MaxFALL are not written: the MXF library has no descriptor property for them, so
-claiming them in the CPL would be unbacked.
+`--max-cll` and `--max-fall` take nits (0-65535) and require `--hdr`. ST 2067-21 carries
+them as CPL ExtensionProperties, not as MXF descriptor metadata, so they go in the CPL
+next to ApplicationIdentification and nowhere else.
 
 The CLI writes one CPL per `create`. The GUI packages multiple compositions
 (one CPL tab each) into a single IMP that shares one PKL and ASSETMAP.
