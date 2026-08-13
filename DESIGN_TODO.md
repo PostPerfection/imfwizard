@@ -29,26 +29,6 @@ everything advertised is wired (done notes below).
 
 # Done
 
-## Done 2026-08-12 (MaxCLL/MaxFALL)
-
-- `create --max-cll <nits> --max-fall <nits>` (u16, both refused without `--hdr`, the
-  same gate `--mastering-display` uses). ST 2067-21 carries MaxCLL
-  (MaximumContentLightLevel) and MaxFALL (MaximumFrameAverageLightLevel) in the CPL
-  ExtensionProperties as `xs:unsignedShort` per app2e-2016.xsd, not in the MXF header
-  metadata, so they go next to ApplicationIdentification and never touch the essence
-  descriptor. The earlier note here called them unwritable because asdcplib has no
-  descriptor property for them; asdcplib is right to have none, SMPTE defined no
-  descriptor membership (the registered ULs belong to an ST 2108-2 serial-interface
-  pack).
-- `HdrWcg` gained `max_cll`/`max_fall` set by `with_content_light_levels`, cpl.rs
-  copies them into postkit's `ImfCpl`, and postkit's IMF CPL writer emits them.
-  Absent values leave the ExtensionProperties block byte-identical.
-- Tested in postkit (exact block text with and without the pair) and in imfwizard
-  (write_cpl output, the HDR MXF roundtrip CPL, and the ST 2067-3 XSD run, which now
-  also imports app2e-2016.xsd because ExtensionProperties is `xs:any` lax and would
-  otherwise skip them). `hdr_imp_is_clean_under_photon` stays clean with both values
-  present. Photon only schema-validates them, it never compares them to the essence.
-
 ## Fixed 2026-08-12 (postkit c6406d1: one asset id, and a clean Photon run)
 
 - postkit submodule bumped 05516cd -> c6406d1. `MxfWrapOptions` and
