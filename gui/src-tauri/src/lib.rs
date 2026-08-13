@@ -134,6 +134,8 @@ pub fn run() {
             pipeline::pause_job,
             pipeline::resume_job,
             pipeline::list_jobs,
+            pipeline::delete_imp,
+            pipeline::disk_space,
             timeline_cmd::list_cpls,
             timeline_cmd::get_timeline,
         ])

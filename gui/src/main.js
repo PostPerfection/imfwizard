@@ -427,6 +427,7 @@ document.getElementById("browse-output")?.addEventListener("click", async () => 
     const outputEl = document.getElementById("prop-output");
     outputEl.value = dir;
     delete outputEl.dataset.autoFilled;
+    refreshDiskSpace();
   }
 });
 
@@ -883,6 +884,39 @@ function setStatus(text) {
 }
 function formatTime(secs) { const m = Math.floor(secs / 60); const s = Math.floor(secs % 60); return m > 0 ? `${m}m${s}s` : `${s}s`; }
 
+// === Free disk ===
+const DISK_REFRESH_MS = 30000;
+const DISK_LOW_PERCENT = 10;
+
+function formatBytes(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+async function refreshDiskSpace() {
+  const el = document.getElementById("status-disk");
+  if (!el) return;
+  const path = document.getElementById("prop-output")?.value || await documentDir();
+  let space;
+  try {
+    space = await invoke("disk_space", { path });
+  } catch {
+    el.textContent = "";
+    el.title = "";
+    return;
+  }
+  const percent = Math.round(space.percent_free);
+  el.textContent = `💾 ${percent}%`;
+  el.title = `${formatBytes(space.free_bytes)} free of ${formatBytes(space.total_bytes)} on ${path}`;
+  el.style.color = percent <= DISK_LOW_PERCENT ? "#ff6b6b" : "";
+}
+
+refreshDiskSpace();
+setInterval(refreshDiskSpace, DISK_REFRESH_MS);
+
 // === Title sync ===
 document.getElementById("prop-title")?.addEventListener("input", (e) => {
   const title = e.target.value.trim();
@@ -892,7 +926,7 @@ document.getElementById("prop-title")?.addEventListener("input", (e) => {
 
 // === Recent Projects ===
 const RECENT_KEY = "imfwizard-recent-projects";
-const MAX_RECENT = 8;
+const MAX_RECENT = 20;
 
 function getRecentProjects() {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
@@ -907,6 +941,12 @@ function addRecentProject(path, title) {
   renderRecentProjects();
 }
 
+function removeRecentProject(path) {
+  const recent = getRecentProjects().filter(r => r.path !== path);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  renderRecentProjects();
+}
+
 function renderRecentProjects() {
   const section = document.getElementById("recent-projects");
   const list = document.getElementById("recent-list");
@@ -916,10 +956,33 @@ function renderRecentProjects() {
   section.hidden = false;
   list.innerHTML = recent.map(r => `
     <div class="recent-item" data-path="${r.path}" title="${r.path}">
-      <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
-      <span class="recent-path">${r.path}</span>
+      <div class="recent-item-text">
+        <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
+        <span class="recent-path">${r.path}</span>
+      </div>
+      <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
     </div>
   `).join('');
+  list.querySelectorAll('.recent-delete').forEach(el => {
+    el.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const dir = el.dataset.path;
+      const ok = await tauriConfirm(`Delete ${dir} and everything in it?`, {
+        title: "Delete IMP",
+        kind: "warning",
+      });
+      if (!ok) return;
+      try {
+        await invoke("delete_imp", { path: dir });
+      } catch (e) {
+        tauriMessage(String(e), { title: "Delete failed", kind: "error" });
+        return;
+      }
+      removeRecentProject(dir);
+      setStatus(`Deleted ${dir}`);
+      refreshDiskSpace();
+    });
+  });
   list.querySelectorAll('.recent-item').forEach(el => {
     el.addEventListener('click', () => {
       const dir = el.dataset.path;
@@ -1002,6 +1065,7 @@ function beginBuild() {
 function endBuild() {
   buildInFlight = false;
   updateToolbarState();
+  refreshDiskSpace();
 }
 
 function updateToolbarState() {

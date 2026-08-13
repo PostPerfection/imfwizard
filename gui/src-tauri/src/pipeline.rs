@@ -86,7 +86,7 @@ impl JobQueue {
     }
 
     /// Is a job already running or queued that writes into `output`?
-    fn is_building_into(&self, output: &std::path::Path) -> bool {
+    pub fn is_building_into(&self, output: &std::path::Path) -> bool {
         if self.current_output.lock().unwrap().as_deref() == Some(output) {
             return true;
         }
@@ -96,6 +96,13 @@ impl JobQueue {
             .iter()
             .any(|job| job.output_dir == output)
     }
+}
+
+/// Files a finished IMP always has at its root.
+const IMP_ROOT_FILES: [&str; 2] = ["ASSETMAP.xml", "VOLINDEX.xml"];
+
+fn holds_imp(dir: &std::path::Path) -> bool {
+    IMP_ROOT_FILES.iter().any(|name| dir.join(name).exists())
 }
 
 // ─── Tauri commands ────────────────────────────────────────────────────────
@@ -149,7 +156,7 @@ pub async fn submit_job(
     // packages are folders named by title, so a reused title lands in the old
     // package. refuse now, not after the encode.
     let output_path = PathBuf::from(&output_dir);
-    if output_path.join("ASSETMAP.xml").exists() || output_path.join("VOLINDEX.xml").exists() {
+    if holds_imp(&output_path) {
         return Err(format!(
             "Output folder already holds an IMP: {output_dir}. Use a new title or output folder, or delete the old package first."
         ));
@@ -195,6 +202,60 @@ pub async fn cancel_job(app: AppHandle, job_id: u64) -> Result<(), String> {
     let mut q = queue.queue.lock().unwrap();
     q.retain(|j| j.id != job_id);
     Ok(())
+}
+
+#[derive(Serialize)]
+pub struct DiskSpace {
+    pub free_bytes: u64,
+    pub total_bytes: u64,
+    pub percent_free: f64,
+}
+
+/// Free space on the volume holding `path`.
+#[tauri::command]
+pub async fn disk_space(path: String) -> Result<DiskSpace, String> {
+    // the output folder is only created once the build starts, so report the
+    // volume of the nearest folder that does exist
+    let mut dir = PathBuf::from(&path);
+    while !dir.exists() {
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return Err(format!("no existing folder above {path}")),
+        }
+    }
+    let stats = fs4::statvfs(&dir).map_err(|e| format!("Could not read free space: {e}"))?;
+    let (free, total) = (stats.available_space(), stats.total_space());
+    Ok(DiskSpace {
+        free_bytes: free,
+        total_bytes: total,
+        percent_free: if total == 0 {
+            0.0
+        } else {
+            free as f64 * 100.0 / total as f64
+        },
+    })
+}
+
+/// Delete a built IMP folder and everything in it. Refuses any folder that is
+/// not an IMP, so a stale recent entry cannot take out a folder of source media.
+#[tauri::command]
+pub async fn delete_imp(app: AppHandle, path: String) -> Result<(), String> {
+    let dir = PathBuf::from(&path);
+    if !dir.exists() {
+        return Err(format!("{path} no longer exists"));
+    }
+    if !holds_imp(&dir) {
+        return Err(format!(
+            "{path} does not hold an IMP, refusing to delete it"
+        ));
+    }
+    let queue = app.state::<JobQueue>();
+    if queue.is_building_into(&dir) {
+        return Err(format!(
+            "A build is writing into {path}. Cancel it before deleting."
+        ));
+    }
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("Could not delete {path}: {e}"))
 }
 
 #[tauri::command]
