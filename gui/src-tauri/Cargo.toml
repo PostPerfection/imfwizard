@@ -26,8 +26,17 @@ tokio = { version = "1", features = ["time", "rt"] }
 postkit = { path = "../../extern/postkit" }
 imfwizard-core = { path = "../../rust/crates/imfwizard-core" }
 
+[features]
+# Draws the preview inside the app window through libmpv's render API. Off by
+# default because it needs libmpv development files at build time.
+embedded-preview = ["dep:async-channel", "postkit/libmpv"]
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+async-channel = { version = "2", optional = true }
 
 # imfwizard-core pulls dcpdoctor-core, which depends on postkit by git. pointing
 # that at the submodule this build already compiles keeps postkit to one compile.

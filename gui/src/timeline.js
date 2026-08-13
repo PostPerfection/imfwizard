@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { showEmbeddedPanel } from "./preview.js";
 
 // Timeline state
 let timelineData = null; // { segments: [], totalFrames, editRate }
@@ -249,6 +250,7 @@ async function seekToPercent(pct) {
   if (segIdx !== currentSegmentIdx && targetSeg.video_file) {
     currentSegmentIdx = segIdx;
     try {
+      showEmbeddedPanel();
       await invoke('preview_load', { filePath: targetSeg.video_file });
     } catch (e) {
       console.error('[timeline] Failed to load segment:', e);
