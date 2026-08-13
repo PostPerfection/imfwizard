@@ -66,7 +66,7 @@ impl EmbeddedPreview {
 
 /// Put a GL area over the window's webview and hand back the player driving it.
 /// Everything here touches GTK, so it must run on the main thread.
-pub fn attach(window: &tauri::WebviewWindow) -> Result<EmbeddedPreview, String> {
+pub fn attach(window: &tauri::Window) -> Result<EmbeddedPreview, String> {
     let gtk_window = window.gtk_window().map_err(|e| e.to_string())?;
     let webview_box = window.default_vbox().map_err(|e| e.to_string())?;
 
