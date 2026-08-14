@@ -5,19 +5,17 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
 Genuinely open items are standing limitations and deliberate scope decisions;
 everything advertised is wired (done notes below).
 
-## Cross-platform embedded preview (phase 2 landed 2026-08-13)
+## Cross-platform embedded preview (hosts landed 2026-08-13, hardware pass open)
 
-Phase 2 is done: the preview host is a crate in guikit at extern/guikit/rust,
-both wizards take it as a path dep, and the spawned floating mpv player and the
-embedded-preview feature are gone, so embedded is the only path. Linux works.
-macos and windows are stubs whose `attach` returns Err, so those builds run with
-the preview panel hidden.
-
-The full plan for the two remaining hosts, the verified handles and crate
-versions, and the windows libmpv build requirement live in dcpwizard's
-DESIGN_TODO under "Cross-platform embedded preview". Both wizards consume the
-same guikit crate, so implementing a host there fixes both at once and there is
-nothing imf-specific to do beyond bumping the pin.
+The preview host is a crate in guikit at extern/guikit/rust, both wizards take
+it as a path dep, and embedded is the only path. All three hosts are
+implemented: linux (GtkGLArea, verified live), macos (NSOpenGLView layered over
+the WKWebView) and windows (WS_CHILD window over the WebView2 child, wgl). The
+pin here carries them and CI compiles all three platforms green. Neither the
+macos nor the windows host has run on real hardware yet, so a hand pass there
+is the last step before trusting the preview panel on those builds. Details
+live in dcpwizard's DESIGN_TODO under "Cross-platform embedded preview". There
+is nothing imf-specific beyond bumping the pin.
 
 ## Deliberately skipped / standing limitations
 
