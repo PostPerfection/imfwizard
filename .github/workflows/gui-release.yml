@@ -124,4 +124,3 @@ jobs:
           releaseBody: "See the release notes for details."
           releaseDraft: false
           prerelease: false
-          args: ${{ runner.os == 'Linux' && '--features embedded-preview' || '' }}

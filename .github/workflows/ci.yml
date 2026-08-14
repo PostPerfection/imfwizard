@@ -191,11 +191,11 @@ jobs:
 
       - name: Test Tauri backend
         working-directory: gui/src-tauri
-        run: cargo test --features embedded-preview
+        run: cargo test
 
       - name: Clippy Tauri backend
         working-directory: gui/src-tauri
-        run: cargo clippy --all-targets --features embedded-preview -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Format check Tauri backend
         working-directory: gui/src-tauri

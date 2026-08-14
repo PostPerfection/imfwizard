@@ -5,15 +5,19 @@ Paths: CORE = rust/crates/imfwizard-core/src, CLI = rust/crates/imfwizard-cli/sr
 Genuinely open items are standing limitations and deliberate scope decisions;
 everything advertised is wired (done notes below).
 
-## Guikit extraction phase 2 (confirmed 2026-08-13, not started)
+## Cross-platform embedded preview (phase 2 landed 2026-08-13)
 
-Phase 1 is done: extern/guikit carries preview.js, shortcuts.js and base.css,
-gui/src/style.css is the thin override. Phase 2 moves preview_server.rs and
-preview_surface.rs into a small crate in guikit consumed as a path dep through
-the submodule (not postkit, which must stay free of a tauri dep). Gated on
-phase 1 surviving one real change cycle: a guikit edit landing in both wizards
-under the pin-bump discipline (every guikit change immediately followed by a
-pin bump commit in both, plain commit pins, no tags).
+Phase 2 is done: the preview host is a crate in guikit at extern/guikit/rust,
+both wizards take it as a path dep, and the spawned floating mpv player and the
+embedded-preview feature are gone, so embedded is the only path. Linux works.
+macos and windows are stubs whose `attach` returns Err, so those builds run with
+the preview panel hidden.
+
+The full plan for the two remaining hosts, the verified handles and crate
+versions, and the windows libmpv build requirement live in dcpwizard's
+DESIGN_TODO under "Cross-platform embedded preview". Both wizards consume the
+same guikit crate, so implementing a host there fixes both at once and there is
+nothing imf-specific to do beyond bumping the pin.
 
 ## Deliberately skipped / standing limitations
 
@@ -36,9 +40,9 @@ pin bump commit in both, plain commit pins, no tags).
 - Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
   thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
   measures and adjusts to a target (no other processing). Docs describe these as-is.
-- Preview embeds in the app window on linux builds with the embedded-preview
-  feature (libmpv render API, state in postkit's DESIGN_TODO, shared with
-  dcpwizard); other platforms and builds without the feature spawn a separate
+- Preview embeds in the app window on linux through the libmpv render API (state
+  in postkit's DESIGN_TODO, shared with dcpwizard). macos and windows have no
+  host yet, so the preview is unavailable there rather than opening a separate
   mpv window.
 
 # Done
@@ -279,11 +283,10 @@ Final dedup pass (2026-07-20): shared *logic* already lives in postkit
 pipeline::run_encode_with_ratio). What remains duplicated is app/framework glue
 with no clean cross-repo home. Edit one side, mirror the other:
 
-- gui/src-tauri/src/preview_server.rs — near-identical (only the MpvPlayer app
-  name differs). NOT moved to postkit: all `#[tauri::command]` wrappers and postkit
-  has no tauri dep (used by CLI + wasm too), so hosting there would force tauri onto
-  the core lib. The reusable part is already in postkit::mpv. Note dcpwizard also
-  keeps a windows preview_server_stub this repo doesn't.
+- gui/src-tauri/src/preview_server.rs and preview_surface.rs — moved to the guikit
+  crate 2026-08-13, no longer duplicated. Both wizards depend on
+  extern/guikit/rust and register its commands. It did not go to postkit, which
+  must stay free of a tauri dep since the CLI and wasm use it too.
 - preview.js — no longer duplicated, both wizards import extern/guikit/src/preview.js
   (2026-08-13). Edit it in guikit and bump the pin in both.
 - gui/vite.config.js — still per-app (dev port differs) but now partially aligned:
