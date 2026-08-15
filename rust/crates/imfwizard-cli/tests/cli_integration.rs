@@ -1,5 +1,8 @@
 use assert_cmd::Command;
+use postkit::certificate::KdmFormulation;
 use predicates::prelude::*;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tempfile::TempDir;
 
 fn cmd() -> Command {
@@ -201,4 +204,170 @@ fn loudness_adjust_refuses_when_true_peak_would_clip() {
         .failure()
         .stderr(predicate::str::contains("true-peak ceiling exceeded"));
     assert!(!output.exists(), "clip-safe: nothing written on breach");
+}
+
+/// Any valid UUID identifies the CPL a test KDM targets: nothing reads the
+/// composition itself.
+const TEST_CPL_ID: &str = "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d";
+const TEST_CONTENT_TITLE: &str = "Formulation Test";
+/// The KDMRequiredExtensions element that only the dci- formulations emit.
+const CONTENT_AUTHENTICATOR_ELEMENT: &str = "ContentAuthenticator";
+
+/// A signer chain plus a separate device leaf, generated once per test binary
+/// because each certificate costs an RSA key generation.
+struct KdmCerts {
+    _dir: TempDir,
+    signer_cert: PathBuf,
+    signer_key: PathBuf,
+    device_cert: PathBuf,
+}
+
+fn kdm_certs() -> &'static KdmCerts {
+    static CERTS: OnceLock<KdmCerts> = OnceLock::new();
+    CERTS.get_or_init(|| {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(
+            postkit::certificate::generate_chain("IMF Wizard Test", dir.path()),
+            0,
+            "signer chain generation should succeed"
+        );
+        let device_cert = dir.path().join("device.pem");
+        let device_opts = postkit::certificate::CertOptions {
+            cert_type: postkit::certificate::CertType::Leaf,
+            common_name: "IMF Wizard Test Device".to_string(),
+            output_cert: device_cert.clone(),
+            output_key: dir.path().join("device.key"),
+            issuer_cert: dir.path().join("intermediate.pem"),
+            issuer_key: dir.path().join("intermediate.key"),
+            ..Default::default()
+        };
+        assert_eq!(
+            postkit::certificate::generate_certificate(&device_opts),
+            0,
+            "device certificate generation should succeed"
+        );
+        KdmCerts {
+            signer_cert: dir.path().join("signer.pem"),
+            signer_key: dir.path().join("signer.key"),
+            device_cert,
+            _dir: dir,
+        }
+    })
+}
+
+/// A `kdm` invocation with every required argument filled in, so a test only
+/// adds the formulation and device arguments it is about.
+fn kdm_cmd(certs: &KdmCerts, output: &Path) -> Command {
+    let mut command = cmd();
+    command.args([
+        "kdm",
+        "--cpl-id",
+        TEST_CPL_ID,
+        "--content-title",
+        TEST_CONTENT_TITLE,
+        "--cert",
+        certs.signer_cert.to_str().unwrap(),
+        "--signer-cert",
+        certs.signer_cert.to_str().unwrap(),
+        "--signer-key",
+        certs.signer_key.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+    ]);
+    command
+}
+
+#[test]
+fn every_formulation_reaches_the_kdm() {
+    let certs = kdm_certs();
+    let device_thumbprint = postkit::certificate::read_certificate(&certs.device_cert).thumbprint;
+    assert!(
+        !device_thumbprint.is_empty(),
+        "device certificate should parse"
+    );
+    let dir = TempDir::new().unwrap();
+
+    // (formulation, lists the supplied device, carries a ContentAuthenticator)
+    let cases = [
+        (KdmFormulation::ModifiedTransitional1, false, false),
+        (KdmFormulation::MultipleModifiedTransitional1, true, false),
+        (KdmFormulation::DciAny, false, true),
+        (KdmFormulation::DciSpecific, true, true),
+    ];
+
+    for (formulation, lists_device, content_authenticator) in cases {
+        let output = dir.path().join(format!("{formulation}.kdm.xml"));
+        let mut command = kdm_cmd(certs, &output);
+        command.args(["--formulation", &formulation.to_string()]);
+        if lists_device {
+            command.args(["--device-cert", certs.device_cert.to_str().unwrap()]);
+        }
+        command.assert().success();
+
+        let xml = std::fs::read_to_string(&output).unwrap();
+        assert_eq!(
+            xml.contains(&device_thumbprint),
+            lists_device,
+            "{formulation} device list"
+        );
+        assert_eq!(
+            xml.contains(CONTENT_AUTHENTICATOR_ELEMENT),
+            content_authenticator,
+            "{formulation} ContentAuthenticator"
+        );
+    }
+}
+
+#[test]
+fn unknown_formulation_is_rejected() {
+    let dir = TempDir::new().unwrap();
+    let mut command = kdm_cmd(kdm_certs(), &dir.path().join("unused.kdm.xml"));
+    let mut assertion = command
+        .args(["--formulation", "no-such-formulation"])
+        .assert()
+        .failure();
+    // the error has to name every spelling the user could have meant
+    for formulation in [
+        KdmFormulation::ModifiedTransitional1,
+        KdmFormulation::MultipleModifiedTransitional1,
+        KdmFormulation::DciAny,
+        KdmFormulation::DciSpecific,
+    ] {
+        assertion = assertion.stderr(predicate::str::contains(formulation.to_string()));
+    }
+}
+
+#[test]
+fn device_certificates_must_agree_with_the_formulation() {
+    let certs = kdm_certs();
+    let dir = TempDir::new().unwrap();
+
+    // a device-listing formulation with nothing to list
+    let output = dir.path().join("no-devices.kdm.xml");
+    kdm_cmd(certs, &output)
+        .args(["--formulation", &KdmFormulation::DciSpecific.to_string()])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("device certificate")
+                .and(predicate::str::contains(KdmFormulation::DciAny.to_string())),
+        );
+    assert!(
+        !output.exists(),
+        "nothing written on a rejected formulation"
+    );
+
+    // devices named under the default formulation, which lists none
+    let output = dir.path().join("unlisted-devices.kdm.xml");
+    kdm_cmd(certs, &output)
+        .args(["--device-cert", certs.device_cert.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            KdmFormulation::MultipleModifiedTransitional1.to_string(),
+        ));
+    assert!(
+        !output.exists(),
+        "nothing written on a rejected formulation"
+    );
 }

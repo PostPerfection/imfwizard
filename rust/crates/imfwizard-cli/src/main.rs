@@ -916,9 +916,17 @@ enum Commands {
         #[arg(long, default_value = "2 weeks")]
         valid_to: String,
 
-        /// KDM formulation (modified-transitional-1, dci-any, dci-specific)
-        #[arg(long, default_value = "modified-transitional-1")]
-        formulation: String,
+        /// Device certificate PEM (repeatable): its thumbprint joins the KDM's
+        /// authorized device list, and naming any device drops the assume-trust
+        /// marker
+        #[arg(long = "device-cert")]
+        device_cert: Vec<PathBuf>,
+
+        /// KDM formulation: the dci- ones add a ContentAuthenticator;
+        /// multiple-modified-transitional-1 and dci-specific list the
+        /// --device-cert devices, the other two trust any device
+        #[arg(long, default_value_t = postkit::certificate::KdmFormulation::default())]
+        formulation: postkit::certificate::KdmFormulation,
     },
 
     /// Extract/restore tracks from an IMP back to raw essence files
@@ -2920,6 +2928,7 @@ fn run() {
             output,
             valid_from,
             valid_to,
+            device_cert,
             formulation,
         } => {
             let config = postkit::certificate::KdmConfig {
@@ -2936,9 +2945,9 @@ fn run() {
                 content_keys: Vec::new(),
                 format: postkit::certificate::KdmFormat::Smpte,
                 annotation: None,
-                // empty is the assume-trust thumbprint. a formulation naming
-                // specific devices would need certificates this cli cannot take yet
-                device_cert_files: Vec::new(),
+                // empty is the assume-trust thumbprint. postkit rejects a device
+                // list that contradicts the formulation, so no check here
+                device_cert_files: device_cert,
             };
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),
