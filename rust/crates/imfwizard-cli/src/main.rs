@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -14,6 +14,24 @@ struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
+}
+
+/// postkit's `KdmFormat` carries no clap or `FromStr` impl, so the command line
+/// spelling of it lives here. Clap derives the two names from the variants.
+#[derive(Copy, Clone, Default, PartialEq, Eq, ValueEnum)]
+enum KdmFormatArgument {
+    #[default]
+    Smpte,
+    Interop,
+}
+
+impl From<KdmFormatArgument> for postkit::certificate::KdmFormat {
+    fn from(argument: KdmFormatArgument) -> Self {
+        match argument {
+            KdmFormatArgument::Smpte => Self::Smpte,
+            KdmFormatArgument::Interop => Self::Interop,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -879,6 +897,10 @@ enum Commands {
     },
 
     /// Generate a SMPTE 430-1 Key Delivery Message (KDM)
+    ///
+    /// There is no way to supply content keys yet, and imfwizard does not
+    /// encrypt an IMP, so the KDM carries a freshly minted key and unlocks no
+    /// existing essence. It is usable as a test or template KDM only.
     Kdm {
         /// CPL UUID to target
         #[arg(long)]
@@ -927,6 +949,24 @@ enum Commands {
         /// --device-cert devices, the other two trust any device
         #[arg(long, default_value_t = postkit::certificate::KdmFormulation::default())]
         formulation: postkit::certificate::KdmFormulation,
+
+        /// KDM format: smpte (default) or interop (legacy, needs real-gear validation)
+        #[arg(long, value_enum, default_value_t = KdmFormatArgument::default())]
+        format: KdmFormatArgument,
+
+        /// AnnotationText override (default: "<title> KDM for <recipient>")
+        #[arg(long)]
+        annotation: Option<String>,
+
+        /// Disable forensic marking of the picture essence, as press and
+        /// festival screenings are usually ordered
+        #[arg(short = 'p', long)]
+        disable_forensic_marking_picture: bool,
+
+        /// Disable forensic marking of the audio essence, optionally only above
+        /// a given channel (e.g. 12) so the HI/VI tracks below it keep theirs
+        #[arg(short = 'a', long, num_args = 0..=1, value_name = "CHANNEL")]
+        disable_forensic_marking_audio: Option<Option<u32>>,
     },
 
     /// Extract/restore tracks from an IMP back to raw essence files
@@ -2930,7 +2970,26 @@ fn run() {
             valid_to,
             device_cert,
             formulation,
+            format,
+            annotation,
+            disable_forensic_marking_picture,
+            disable_forensic_marking_audio,
         } => {
+            use postkit::certificate::{AudioForensicMarking, PictureForensicMarking};
+
+            let picture_forensic_marking = if disable_forensic_marking_picture {
+                PictureForensicMarking::Disabled
+            } else {
+                PictureForensicMarking::Enabled
+            };
+            // dcpomatic's -a: absent leaves marking on, bare disables every
+            // channel, and a number disables the channels above it
+            let audio_forensic_marking = match disable_forensic_marking_audio {
+                None => AudioForensicMarking::Enabled,
+                Some(None) => AudioForensicMarking::Disabled,
+                Some(Some(channel)) => AudioForensicMarking::DisabledAboveChannel(channel),
+            };
+
             let config = postkit::certificate::KdmConfig {
                 cpl_id,
                 content_title,
@@ -2943,12 +3002,22 @@ fn run() {
                 valid_to,
                 formulation,
                 content_keys: Vec::new(),
-                format: postkit::certificate::KdmFormat::Smpte,
-                annotation: None,
+                format: format.into(),
+                annotation,
                 // empty is the assume-trust thumbprint. postkit rejects a device
                 // list that contradicts the formulation, so no check here
                 device_cert_files: device_cert,
+                picture_forensic_marking,
+                audio_forensic_marking,
             };
+            // postkit mints a fresh key when the caller supplies none, so this
+            // goes quiet by itself once imfwizard can carry real content keys
+            if config.content_keys.is_empty() {
+                eprintln!(
+                    "warning: no content keys were supplied, so this KDM carries a freshly \
+                     minted key and will not unlock any existing essence"
+                );
+            }
             match postkit::certificate::generate_kdm(&config) {
                 Ok(()) => println!("KDM written to {}", output.display()),
                 Err(e) => {

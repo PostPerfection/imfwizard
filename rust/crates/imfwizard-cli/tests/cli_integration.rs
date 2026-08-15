@@ -219,6 +219,9 @@ struct KdmCerts {
     _dir: TempDir,
     signer_cert: PathBuf,
     signer_key: PathBuf,
+    /// Intermediate then root: postkit walks the signer chain to a self-issued
+    /// certificate before it will issue a KDM, so the leaf alone is refused.
+    signer_chain: Vec<PathBuf>,
     device_cert: PathBuf,
 }
 
@@ -249,10 +252,30 @@ fn kdm_certs() -> &'static KdmCerts {
         KdmCerts {
             signer_cert: dir.path().join("signer.pem"),
             signer_key: dir.path().join("signer.key"),
+            signer_chain: vec![
+                dir.path().join("intermediate.pem"),
+                dir.path().join("root.pem"),
+            ],
             device_cert,
             _dir: dir,
         }
     })
+}
+
+/// A KDM validity start one day out, as an ST 430-1 timestamp. postkit refuses
+/// a KDM whose window starts on the day its signer certificate does, and the
+/// fixture chain is minted now, so a window starting "now" would be rejected.
+fn kdm_valid_from() -> String {
+    let start = time::OffsetDateTime::now_utc() + time::Duration::days(1);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+        start.year(),
+        u8::from(start.month()),
+        start.day(),
+        start.hour(),
+        start.minute(),
+        start.second()
+    )
 }
 
 /// A `kdm` invocation with every required argument filled in, so a test only
@@ -271,9 +294,14 @@ fn kdm_cmd(certs: &KdmCerts, output: &Path) -> Command {
         certs.signer_cert.to_str().unwrap(),
         "--signer-key",
         certs.signer_key.to_str().unwrap(),
+        "--valid-from",
+        &kdm_valid_from(),
         "-o",
         output.to_str().unwrap(),
     ]);
+    for link in &certs.signer_chain {
+        command.args(["--signer-chain", link.to_str().unwrap()]);
+    }
     command
 }
 
@@ -370,4 +398,146 @@ fn device_certificates_must_agree_with_the_formulation() {
         !output.exists(),
         "nothing written on a rejected formulation"
     );
+}
+
+/// ST 430-1 Annex C ForensicMarkFlag URIs. A KDM carries one per essence type
+/// whose marking is off, and none at all while marking stays on.
+const FORENSIC_MARK_PICTURE_DISABLE: &str =
+    "http://www.smpte-ra.org/430-1/2006/KDM#mrkflg-picture-disable";
+const FORENSIC_MARK_AUDIO_DISABLE: &str =
+    "http://www.smpte-ra.org/430-1/2006/KDM#mrkflg-audio-disable";
+/// Appended to the audio URI, with a channel number, when marking stops above a
+/// channel rather than on all of them.
+const FORENSIC_MARK_ABOVE_CHANNEL_SUFFIX: &str = "-above-channel-";
+/// The channel a 7.1 + HI/VI order names: the HI and VI tracks sit above it.
+const HI_VI_CHANNEL: u32 = 12;
+
+#[test]
+fn every_forensic_marking_state_reaches_the_kdm() {
+    let certs = kdm_certs();
+    let dir = TempDir::new().unwrap();
+    let audio_above_channel =
+        format!("{FORENSIC_MARK_AUDIO_DISABLE}{FORENSIC_MARK_ABOVE_CHANNEL_SUFFIX}{HI_VI_CHANNEL}");
+
+    // (label, extra arguments, picture marking off, the audio flag expected)
+    let cases: [(&str, Vec<String>, bool, Option<&str>); 5] = [
+        ("marking-on", vec![], false, None),
+        (
+            "picture-off",
+            vec!["--disable-forensic-marking-picture".to_string()],
+            true,
+            None,
+        ),
+        (
+            "audio-off",
+            vec!["--disable-forensic-marking-audio".to_string()],
+            false,
+            Some(FORENSIC_MARK_AUDIO_DISABLE),
+        ),
+        (
+            "audio-off-above-channel",
+            vec![
+                "--disable-forensic-marking-audio".to_string(),
+                HI_VI_CHANNEL.to_string(),
+            ],
+            false,
+            Some(&audio_above_channel),
+        ),
+        (
+            "both-off",
+            vec![
+                "-p".to_string(),
+                "-a".to_string(),
+                HI_VI_CHANNEL.to_string(),
+            ],
+            true,
+            Some(&audio_above_channel),
+        ),
+    ];
+
+    for (label, arguments, picture_disabled, audio_flag) in cases {
+        let output = dir.path().join(format!("{label}.kdm.xml"));
+        kdm_cmd(certs, &output).args(&arguments).assert().success();
+
+        let xml = std::fs::read_to_string(&output).unwrap();
+        assert_eq!(
+            xml.contains(FORENSIC_MARK_PICTURE_DISABLE),
+            picture_disabled,
+            "{label} picture flag"
+        );
+        assert_eq!(
+            xml.contains(FORENSIC_MARK_AUDIO_DISABLE),
+            audio_flag.is_some(),
+            "{label} audio flag"
+        );
+        if let Some(flag) = audio_flag {
+            assert!(xml.contains(flag), "{label} audio flag spelling");
+        }
+        // the bare form must not smuggle in an above-channel limit
+        assert_eq!(
+            xml.contains(FORENSIC_MARK_ABOVE_CHANNEL_SUFFIX),
+            audio_flag.is_some_and(|flag| flag.contains(FORENSIC_MARK_ABOVE_CHANNEL_SUFFIX)),
+            "{label} above-channel limit"
+        );
+    }
+}
+
+/// The KeyIdList wrapper that only SMPTE output carries: Interop lists bare
+/// KeyId elements instead.
+const TYPED_KEY_ID_ELEMENT: &str = "TypedKeyId";
+
+#[test]
+fn the_kdm_format_chooses_the_key_id_layout() {
+    let certs = kdm_certs();
+    let dir = TempDir::new().unwrap();
+
+    // (format argument, carries the SMPTE TypedKeyId wrapper)
+    for (format, typed_key_id) in [("smpte", true), ("interop", false)] {
+        let output = dir.path().join(format!("{format}.kdm.xml"));
+        kdm_cmd(certs, &output)
+            .args(["--format", format])
+            .assert()
+            .success();
+
+        let xml = std::fs::read_to_string(&output).unwrap();
+        assert_eq!(
+            xml.contains(TYPED_KEY_ID_ELEMENT),
+            typed_key_id,
+            "{format} key id layout"
+        );
+    }
+}
+
+#[test]
+fn the_annotation_override_reaches_the_kdm() {
+    let certs = kdm_certs();
+    let dir = TempDir::new().unwrap();
+    let annotation = "Press screening, no marking";
+
+    let output = dir.path().join("annotated.kdm.xml");
+    kdm_cmd(certs, &output)
+        .args(["--annotation", annotation])
+        .assert()
+        .success();
+    let xml = std::fs::read_to_string(&output).unwrap();
+    assert!(xml.contains(annotation), "annotation override");
+
+    // the default still derives its text from the content title
+    let output = dir.path().join("default-annotation.kdm.xml");
+    kdm_cmd(certs, &output).assert().success();
+    let xml = std::fs::read_to_string(&output).unwrap();
+    assert!(!xml.contains(annotation), "override is not the default");
+    assert!(xml.contains(TEST_CONTENT_TITLE), "derived annotation");
+}
+
+#[test]
+fn a_kdm_without_content_keys_warns_that_it_unlocks_nothing() {
+    let dir = TempDir::new().unwrap();
+    kdm_cmd(kdm_certs(), &dir.path().join("minted.kdm.xml"))
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("freshly minted")
+                .and(predicate::str::contains("will not unlock")),
+        );
 }
