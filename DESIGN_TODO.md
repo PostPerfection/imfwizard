@@ -95,14 +95,6 @@ repos plus postkit, not an imfwizard-only fix.
   in the struct but no flag reaches them, and outline, shadow, effect colour and
   outline width are not in the rasteriser at all. They land in PK
   subtitle_raster.rs and are tracked in dcpwizard's DESIGN_TODO, one shared fix.
-- `--hdr` only contradicts a source colour space when one was spelled out.
-  `create` refuses `--hdr` together with a `--source-colourspace` the encoder
-  would transform, but the check reads the flag rather than the resolved colour,
-  so `--hdr pq-bt2020` on its own falls through to the rec709 default and the
-  encoder runs its X'Y'Z' transform over essence the CPL has just labelled
-  untransformed. Reading the resolved `SourceColour` instead of `colourspace`
-  fixes it, and would make the `--burn-subtitle` refusal one condition rather
-  than two.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop
@@ -123,7 +115,9 @@ repos plus postkit, not an imfwizard-only fix.
   guard in the create handler, so `--hdr pq-bt2020` alone still runs the encoder's
   X'Y'Z' transform over the essence it just declared untransformed. Wrong picture,
   not a refusal. The new burn refusal covers `--hdr` unconditionally, the encode
-  guard should too. Found 2026-08-16 while mirroring the burn.
+  guard should too: reading the resolved `SourceColour` rather than the
+  `colourspace` flag fixes it, and collapses the burn refusal to one condition.
+  Found 2026-08-16 while mirroring the burn.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
   items in dcpwizard's DESIGN_TODO): playback overlays (safe area, aspect mask,
   center cross, thirds grid, subtitle/CC render toggles), decode resolution
