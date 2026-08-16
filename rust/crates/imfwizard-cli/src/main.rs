@@ -2383,7 +2383,7 @@ fn run() {
             format,
         } => {
             let imp_dir = std::path::Path::new(&imp);
-            let validate_result = imfwizard_core::validate::validate_imp(imp_dir);
+            let validate_result = imfwizard_core::validate::validate_imp_for_report(imp_dir);
             let report_format = match format.as_str() {
                 "json" => postkit::report::ReportFormat::Json,
                 "text" => postkit::report::ReportFormat::Text,
@@ -2409,6 +2409,14 @@ fn run() {
                     severity: "warning".to_string(),
                     category: "validation".to_string(),
                     message: warn.clone(),
+                    details: String::new(),
+                });
+            }
+            for info in &validate_result.infos {
+                report.entries.push(postkit::report::ReportEntry {
+                    severity: "info".to_string(),
+                    category: "validation".to_string(),
+                    message: info.clone(),
                     details: String::new(),
                 });
             }
