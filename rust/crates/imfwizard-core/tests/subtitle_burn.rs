@@ -5,7 +5,10 @@
 //! can decode a codestream back to pixels. What matters here is that the flag
 //! combinations fail before an encode starts.
 
-use imfwizard_core::subtitle_burn::{BurnTarget, check_burn_supported, prepare_subtitle_burn};
+use imfwizard_core::subtitle_burn::{
+    BurnTarget, check_burn_supported, prepare_subtitle_burn, resolve_burn_style,
+};
+use postkit::subtitle_raster::{BurnEffect, BurnStyleOverrides};
 use std::path::{Path, PathBuf};
 
 const FPS: u32 = 24;
@@ -90,7 +93,7 @@ fn ttml_is_refused_with_a_message_naming_what_to_pass_instead() {
         r#"<?xml version="1.0"?><tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="0s" end="1s">hi</p></div></body></tt>"#,
     )
     .unwrap();
-    let err = prepare_subtitle_burn(&ttml, None, FPS).unwrap_err();
+    let err = prepare_subtitle_burn(&ttml, None, &BurnStyleOverrides::default(), FPS).unwrap_err();
     assert!(err.contains("TTML/IMSC"), "got: {err}");
     assert!(
         err.contains("SRT"),
@@ -104,7 +107,8 @@ fn a_format_with_no_cue_reader_is_refused_by_extension() {
     for name in ["subs.vtt", "subs.stl", "subs.pac"] {
         let path = dir.path().join(name);
         std::fs::write(&path, "whatever").unwrap();
-        let err = prepare_subtitle_burn(&path, None, FPS).unwrap_err();
+        let err =
+            prepare_subtitle_burn(&path, None, &BurnStyleOverrides::default(), FPS).unwrap_err();
         assert!(err.contains("SRT"), "{name}: {err}");
     }
 }
@@ -114,7 +118,8 @@ fn a_missing_burn_in_font_is_named() {
     let dir = tempfile::tempdir().unwrap();
     let srt = write_srt(dir.path());
     let font = dir.path().join("nothere.ttf");
-    let err = prepare_subtitle_burn(&srt, Some(&font), FPS).unwrap_err();
+    let err =
+        prepare_subtitle_burn(&srt, Some(&font), &BurnStyleOverrides::default(), FPS).unwrap_err();
     assert!(err.contains("font not found"), "got: {err}");
 }
 
@@ -125,7 +130,7 @@ fn an_empty_cue_file_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let srt = dir.path().join("empty.srt");
     std::fs::write(&srt, "").unwrap();
-    let err = prepare_subtitle_burn(&srt, None, FPS).unwrap_err();
+    let err = prepare_subtitle_burn(&srt, None, &BurnStyleOverrides::default(), FPS).unwrap_err();
     assert!(err.contains("no subtitle cues"), "got: {err}");
 }
 
@@ -149,4 +154,44 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
     let cues = imfwizard_core::subtitle_burn::load_styled_cues(&ass).unwrap();
     assert_eq!(cues.len(), 1);
     assert_eq!(cues[0].plain_text(), "hello");
+}
+
+/// A named appearance has to reach the built burn, and a value outside the
+/// rasteriser's range has to stop before an encode does anything.
+#[test]
+fn an_appearance_override_builds_a_burn_and_a_bad_one_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let srt = write_srt(dir.path());
+    let appearance = BurnStyleOverrides {
+        font_size_percent: Some(8.0),
+        effect: Some(BurnEffect::Outline),
+        colour: Some(postkit::subtitle_formats::Rgba {
+            r: 255,
+            g: 255,
+            b: 0,
+            a: 255,
+        }),
+        ..BurnStyleOverrides::default()
+    };
+
+    let style = resolve_burn_style(&appearance).expect("a drawable appearance");
+    assert_eq!(style.font_size_ratio, 0.08);
+    assert_eq!(style.effect, BurnEffect::Outline);
+    assert_eq!(style.default_colour.g, 255);
+    assert_eq!(style.default_colour.b, 0);
+
+    match prepare_subtitle_burn(&srt, None, &appearance, FPS) {
+        Ok(_) => {}
+        Err(error) => assert!(
+            error.contains("cannot burn"),
+            "an override must not be what fails: {error}"
+        ),
+    }
+
+    let err = resolve_burn_style(&BurnStyleOverrides {
+        x_scale: Some(0.0),
+        ..BurnStyleOverrides::default()
+    })
+    .unwrap_err();
+    assert!(err.contains("burn-in appearance"), "got: {err}");
 }

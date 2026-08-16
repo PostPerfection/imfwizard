@@ -1,5 +1,5 @@
 use postkit::packaging::escape_xml;
-use postkit::subtitle_formats::{HAlign, StyledCue, StyledRun, VAlign, to_srt_cues};
+use postkit::subtitle_formats::{HAlign, Rgba, StyledCue, StyledRun, VAlign, to_srt_cues};
 use postkit::subtitle_retime::{SrtCue, parse_srt};
 use serde::{Deserialize, Serialize};
 
@@ -46,17 +46,85 @@ impl SubtitleFormat {
     }
 }
 
+/// The `xml:id` of the style every `<p>` the writers emit points at, so a cue
+/// with no styling of its own lands at the named look and a run's own
+/// `tts:color` still wins.
+const DEFAULT_STYLE_ID: &str = "default";
+
+/// Rows and columns the cell grid is divided into, written out because the
+/// default text size is a cell-relative length and a cell is a row of this grid.
+/// These are TTML's own defaults, so declaring them changes nothing else.
+const CELL_ROWS: u32 = 15;
+const CELL_COLUMNS: u32 = 32;
+
+/// A whole, as the size flag spells its fraction.
+const PERCENT_OF_A_WHOLE: f32 = 100.0;
+
+/// How the written TTML looks where neither the source nor a run says for
+/// itself. Each field stays `None` until the caller names it, and a TTML with
+/// nothing named carries no styling of its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TextAppearance {
+    /// Text height as a percent of the frame height.
+    pub font_size_percent: Option<f32>,
+    pub colour: Option<Rgba>,
+}
+
+impl TextAppearance {
+    /// Refuse a size the TTML could not carry. The range is the rasteriser's,
+    /// which measures the same percent of the frame height.
+    pub fn check(&self) -> Result<(), String> {
+        postkit::subtitle_raster::BurnStyleOverrides {
+            font_size_percent: self.font_size_percent,
+            ..Default::default()
+        }
+        .apply(postkit::subtitle_raster::BurnStyle::default())
+        .map(|_| ())
+    }
+
+    /// The `tts:` attributes for the default style, or None when the caller
+    /// named nothing.
+    fn style_attributes(&self) -> Option<String> {
+        let mut attributes: Vec<String> = Vec::new();
+        if let Some(percent) = self.font_size_percent {
+            // a bare percent is read against the parent element's size, not the
+            // frame, so the height goes out in cells, which are frame-relative
+            let cells = percent / PERCENT_OF_A_WHOLE * CELL_ROWS as f32;
+            attributes.push(format!(r#"tts:fontSize="{cells:.3}c""#));
+        }
+        if let Some(colour) = self.colour {
+            attributes.push(format!(
+                r##"tts:color="#{:02X}{:02X}{:02X}{:02X}""##,
+                colour.r, colour.g, colour.b, colour.a
+            ));
+        }
+        (!attributes.is_empty()).then(|| attributes.join(" "))
+    }
+
+    /// The cell grid declaration for the `<tt>` element, needed only where a
+    /// cell-relative size is written against it.
+    fn cell_resolution(&self) -> String {
+        match self.font_size_percent {
+            Some(_) => format!(r#" ttp:cellResolution="{CELL_COLUMNS} {CELL_ROWS}""#),
+            None => String::new(),
+        }
+    }
+}
+
 /// Convert subtitles between formats.
 ///
 /// TTML/IMSC targets keep the styling and placement the source supplies (ASS,
 /// FCPXML, MKS carry it via `StyledCue`); plain timed-text targets flatten to
 /// text-only. Authored TTML passes through unchanged, and SCC keeps its
-/// existing plain-cue path.
+/// existing plain-cue path. `appearance` is written as the document's default
+/// style, which anything the source styled for itself overrides.
 pub fn convert_subtitles(
     input: &std::path::Path,
     output: &std::path::Path,
     target_format: SubtitleFormat,
+    appearance: &TextAppearance,
 ) -> Result<(), String> {
+    appearance.check()?;
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
     let source_format = SubtitleFormat::from_extension(ext)
         .ok_or_else(|| format!("Unknown subtitle format: {ext}"))?;
@@ -67,6 +135,13 @@ pub fn convert_subtitles(
             SubtitleFormat::Ttml | SubtitleFormat::ImscTtml
         )
     {
+        if appearance.style_attributes().is_some() {
+            return Err(
+                "authored TTML is copied unchanged, so a default size or colour asked for here \
+                 would be dropped: edit the TTML's own styling instead"
+                    .into(),
+            );
+        }
         std::fs::copy(input, output).map_err(|e| format!("Failed to copy TTML: {e}"))?;
         return Ok(());
     }
@@ -86,19 +161,19 @@ pub fn convert_subtitles(
             for w in &parsed.warnings {
                 eprintln!("warning: unsupported ASS override tag {w}");
             }
-            return write_styled_or_flat(&parsed.cues, output, target_styled);
+            return write_styled_or_flat(&parsed.cues, output, target_styled, appearance);
         }
         SubtitleFormat::Fcpxml => {
             let content =
                 std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"))?;
             let cues = postkit::subtitle_formats::fcpxml::parse_fcpxml(&content)
                 .map_err(|e| format!("FCPXML parse: {e}"))?;
-            return write_styled_or_flat(&cues, output, target_styled);
+            return write_styled_or_flat(&cues, output, target_styled, appearance);
         }
         SubtitleFormat::Mks => {
             let cues = postkit::subtitle_formats::mks::parse_mks(input, None)
                 .map_err(|e| format!("MKS parse: {e}"))?;
-            return write_styled_or_flat(&cues, output, target_styled);
+            return write_styled_or_flat(&cues, output, target_styled, appearance);
         }
         _ => {}
     }
@@ -112,32 +187,71 @@ pub fn convert_subtitles(
     };
 
     // Write output as TTML (IMF standard)
-    write_ttml(&cues, output)
+    write_ttml(&cues, output, appearance)
 }
 
 fn write_styled_or_flat(
     cues: &[StyledCue],
     output: &std::path::Path,
     target_styled: bool,
+    appearance: &TextAppearance,
 ) -> Result<(), String> {
     if target_styled {
-        write_ttml_styled(cues, output)
+        write_ttml_styled(cues, output, appearance)
     } else {
-        write_ttml(&to_srt_cues(cues), output)
+        write_ttml(&to_srt_cues(cues), output, appearance)
     }
 }
 
-fn write_ttml(cues: &[SrtCue], output: &std::path::Path) -> Result<(), String> {
+/// The `<styling>` block carrying the document's default style.
+fn write_styling(f: &mut std::fs::File, attributes: &str) -> Result<(), String> {
+    use std::io::Write;
+    writeln!(f, "    <styling>").map_err(|e| e.to_string())?;
+    writeln!(
+        f,
+        r#"      <style xml:id="{DEFAULT_STYLE_ID}" {attributes}/>"#
+    )
+    .map_err(|e| e.to_string())?;
+    writeln!(f, "    </styling>").map_err(|e| e.to_string())
+}
+
+/// The `style` attribute a `<p>` carries when there is a default style, spelled
+/// with its leading space so it drops out cleanly when there is none.
+fn paragraph_style(style: Option<&String>) -> String {
+    match style {
+        Some(_) => format!(r#" style="{DEFAULT_STYLE_ID}""#),
+        None => String::new(),
+    }
+}
+
+fn write_ttml(
+    cues: &[SrtCue],
+    output: &std::path::Path,
+    appearance: &TextAppearance,
+) -> Result<(), String> {
     use std::io::Write;
     let mut f =
         std::fs::File::create(output).map_err(|e| format!("Failed to create output: {e}"))?;
+    let style = appearance.style_attributes();
 
     writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#).map_err(|e| e.to_string())?;
-    writeln!(
-        f,
-        r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter">"#
-    )
+    match &style {
+        Some(_) => writeln!(
+            f,
+            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}>"#,
+            appearance.cell_resolution()
+        ),
+        None => writeln!(
+            f,
+            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter">"#
+        ),
+    }
     .map_err(|e| e.to_string())?;
+    if let Some(attributes) = &style {
+        writeln!(f, "  <head>").map_err(|e| e.to_string())?;
+        write_styling(&mut f, attributes)?;
+        writeln!(f, "  </head>").map_err(|e| e.to_string())?;
+    }
     writeln!(f, "  <body>").map_err(|e| e.to_string())?;
     writeln!(f, "    <div>").map_err(|e| e.to_string())?;
 
@@ -149,8 +263,12 @@ fn write_ttml(cues: &[SrtCue], output: &std::path::Path) -> Result<(), String> {
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
-        writeln!(f, r#"      <p begin="{start}" end="{end}">{escaped}</p>"#)
-            .map_err(|e| e.to_string())?;
+        writeln!(
+            f,
+            r#"      <p begin="{start}" end="{end}"{}>{escaped}</p>"#,
+            paragraph_style(style.as_ref())
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     writeln!(f, "    </div>").map_err(|e| e.to_string())?;
@@ -161,7 +279,11 @@ fn write_ttml(cues: &[SrtCue], output: &std::path::Path) -> Result<(), String> {
 
 /// Write styled cues as IMSC-flavoured TTML, keeping per-run styling and one
 /// `<region>` per distinct placement.
-fn write_ttml_styled(cues: &[StyledCue], output: &std::path::Path) -> Result<(), String> {
+fn write_ttml_styled(
+    cues: &[StyledCue],
+    output: &std::path::Path,
+    appearance: &TextAppearance,
+) -> Result<(), String> {
     use std::io::Write;
 
     // dedup regions by their attribute string, in first-seen order.
@@ -183,12 +305,17 @@ fn write_ttml_styled(cues: &[StyledCue], output: &std::path::Path) -> Result<(),
     let mut f =
         std::fs::File::create(output).map_err(|e| format!("Failed to create output: {e}"))?;
     writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#).map_err(|e| e.to_string())?;
+    let style = appearance.style_attributes();
     writeln!(
         f,
-        r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter">"#
+        r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}>"#,
+        appearance.cell_resolution()
     )
     .map_err(|e| e.to_string())?;
     writeln!(f, "  <head>").map_err(|e| e.to_string())?;
+    if let Some(attributes) = &style {
+        write_styling(&mut f, attributes)?;
+    }
     writeln!(f, "    <layout>").map_err(|e| e.to_string())?;
     for (i, attrs) in regions.iter().enumerate() {
         writeln!(f, r#"      <region xml:id="r{i}" {attrs}/>"#).map_err(|e| e.to_string())?;
@@ -204,7 +331,8 @@ fn write_ttml_styled(cues: &[StyledCue], output: &std::path::Path) -> Result<(),
         let body = render_runs(&cue.runs);
         writeln!(
             f,
-            r#"      <p begin="{start}" end="{end}" region="r{region}">{body}</p>"#
+            r#"      <p begin="{start}" end="{end}" region="r{region}"{}>{body}</p>"#,
+            paragraph_style(style.as_ref())
         )
         .map_err(|e| e.to_string())?;
     }
@@ -295,7 +423,13 @@ mod tests {
             "1\n00:00:01,000 --> 00:00:04,000\nHello world\n\n2\n00:00:05,000 --> 00:00:08,000\nSecond cue\n",
         )
         .unwrap();
-        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains(r#"<p begin="00:00:01.000" end="00:00:04.000">Hello world</p>"#));
         assert!(ttml.contains("Second cue"));
@@ -313,7 +447,13 @@ mod tests {
 00:00:03:00\t942c 942c\n",
         )
         .unwrap();
-        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains("HELLO"), "ttml: {ttml}");
         assert!(ttml.contains(r#"begin="00:00:01.001""#), "ttml: {ttml}");
@@ -327,7 +467,13 @@ mod tests {
         let authored = r#"<tt><head><styling><style xml:id="top"/></styling></head><body><div><p region="top">Hello</p></div></body></tt>"#;
         std::fs::write(&input, authored).unwrap();
 
-        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(output).unwrap(), authored);
     }
@@ -350,7 +496,13 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,plain {\\b1}bold{\\b0}\n\
 Dialogue: 0,0:00:04.00,0:00:05.00,Top,,0,0,0,,{\\an9}corner\n",
         )
         .unwrap();
-        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         // base Default style is italic (-1)
         assert!(ttml.contains(r#"tts:fontStyle="italic""#), "ttml: {ttml}");
@@ -380,7 +532,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\
 Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
         )
         .unwrap();
-        convert_subtitles(&input, &output, SubtitleFormat::Srt).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::Srt,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(
             !ttml.contains("tts:"),
@@ -411,7 +569,13 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
 </fcpxml>"#,
         )
         .unwrap();
-        convert_subtitles(&input, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &input,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains(r#"tts:fontStyle="italic""#), "ttml: {ttml}");
         assert!(ttml.contains(r##"tts:color="#FF0000FF""##), "ttml: {ttml}");
@@ -449,7 +613,13 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
             return;
         }
         let output = dir.path().join("out.ttml");
-        convert_subtitles(&mks, &output, SubtitleFormat::ImscTtml).unwrap();
+        convert_subtitles(
+            &mks,
+            &output,
+            SubtitleFormat::ImscTtml,
+            &TextAppearance::default(),
+        )
+        .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains("hi there"), "ttml: {ttml}");
     }

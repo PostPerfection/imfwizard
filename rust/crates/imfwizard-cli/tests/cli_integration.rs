@@ -502,7 +502,14 @@ fn a_burnt_subtitle_changes_the_encoded_picture() {
     let dir = TempDir::new().unwrap();
     let srt = dir.path().join("cues.srt");
     std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\nburnt in\n\n").unwrap();
-    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(&srt, None, 24).is_err() {
+    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+        &srt,
+        None,
+        &postkit::subtitle_raster::BurnStyleOverrides::default(),
+        24,
+    )
+    .is_err()
+    {
         eprintln!("skipping: no font available to burn with");
         return;
     }
@@ -580,7 +587,14 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
          2\n00:00:02,000 --> 00:00:03,000\nsecond line\n\n",
     )
     .unwrap();
-    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(&srt, None, 24).is_err() {
+    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+        &srt,
+        None,
+        &postkit::subtitle_raster::BurnStyleOverrides::default(),
+        24,
+    )
+    .is_err()
+    {
         eprintln!("skipping: no font available to burn with");
         return;
     }
@@ -1314,4 +1328,125 @@ fn write_stereo_ramp_wav(path: &std::path::Path) {
         writer.write_sample(-sample).unwrap();
     }
     writer.finalize().unwrap();
+}
+
+/// The appearance flags reach postkit's parsers, so a value it cannot read has
+/// to name the flag that carried it, and a flag with no burn to style has to
+/// name itself rather than the group.
+#[test]
+fn a_burn_appearance_flag_is_refused_by_name() {
+    let dir = TempDir::new().unwrap();
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:02,000\nhello\n\n").unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"not really a movie").unwrap();
+
+    let create = |extra: &[&str], with_burn: bool| {
+        let mut command = cmd();
+        command.args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Burn",
+            "--video",
+            &clip.to_string_lossy(),
+        ]);
+        if with_burn {
+            command.args(["--burn-subtitle", &srt.to_string_lossy()]);
+        }
+        command.args(extra);
+        command
+    };
+
+    for (mut command, needle) in [
+        (
+            create(&["--burn-colour", "octarine"], true),
+            "--burn-colour: octarine is not a colour",
+        ),
+        (
+            create(&["--burn-effect-colour", "12345"], true),
+            "--burn-effect-colour: 12345 is not a colour",
+        ),
+        (
+            create(&["--burn-effect", "glow"], true),
+            "--burn-effect: glow is not an effect",
+        ),
+        (
+            create(&["--burn-font-size", "0"], true),
+            "burn-in appearance:",
+        ),
+        (
+            create(&["--burn-font-size", "8"], false),
+            "--burn-font-size needs --burn-subtitle",
+        ),
+        (
+            create(&["--burn-fade-up", "250"], false),
+            "--burn-fade-up needs --burn-subtitle",
+        ),
+    ] {
+        command
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(needle));
+    }
+}
+
+/// `subtitle-convert` writes the named size and colour as the document's own
+/// default style, so a cue that says nothing for itself lands at that look.
+#[test]
+fn subtitle_convert_writes_a_default_size_and_colour() {
+    let dir = TempDir::new().unwrap();
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:02,000\nhello\n\n").unwrap();
+    let ttml = dir.path().join("cues.ttml");
+
+    cmd()
+        .args([
+            "subtitle-convert",
+            "-i",
+            &srt.to_string_lossy(),
+            "-o",
+            &ttml.to_string_lossy(),
+            "--font-size",
+            "6",
+            "--colour",
+            "FFFF00",
+        ])
+        .assert()
+        .success();
+
+    // a bare percent would be read against the parent's size, so 6% of the frame
+    // height goes out as 6% of the 15-row cell grid, 0.9 cells
+    let written = std::fs::read_to_string(&ttml).unwrap();
+    assert!(
+        written.contains(r#"tts:fontSize="0.900c""#),
+        "ttml: {written}"
+    );
+    assert!(
+        written.contains(r#"ttp:cellResolution="32 15""#),
+        "a cell-relative size needs the grid it is against: {written}"
+    );
+    assert!(
+        written.contains(r##"tts:color="#FFFF00FF""##),
+        "ttml: {written}"
+    );
+    assert!(
+        written.contains(r#"style="default""#),
+        "the default style has to reach the cues: {written}"
+    );
+
+    cmd()
+        .args([
+            "subtitle-convert",
+            "-i",
+            &srt.to_string_lossy(),
+            "-o",
+            &ttml.to_string_lossy(),
+            "--colour",
+            "octarine",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--colour: octarine is not"));
 }

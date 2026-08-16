@@ -70,15 +70,30 @@ fn plain_cues(cues: Vec<postkit::subtitle_retime::SrtCue>) -> Vec<StyledCue> {
         .collect()
 }
 
+/// Lay the caller's appearance settings over the burn defaults, naming the flag
+/// group so a range error points at the appearance rather than at the cue file.
+///
+/// Both front ends call this before an encode starts, so a bad size or scale is
+/// refused alongside the other burn refusals.
+pub fn resolve_burn_style(
+    appearance: &postkit::subtitle_raster::BurnStyleOverrides,
+) -> Result<postkit::subtitle_raster::BurnStyle, String> {
+    appearance
+        .apply(postkit::subtitle_raster::BurnStyle::default())
+        .map_err(|e| format!("burn-in appearance: {e}"))
+}
+
 /// Prepare `create --burn-subtitle`: parse the cue file and build the burn the
 /// encoder threads composite onto every decoded frame.
 ///
 /// `font` is the face to shape text with; without one the system faces fontdb
 /// finds are used, and a machine with no font at all is an error rather than a
-/// silently subtitle-free encode.
+/// silently subtitle-free encode. `appearance` carries whatever the caller named
+/// about how the text looks, and leaves the rest at the burn defaults.
 pub fn prepare_subtitle_burn(
     input: &Path,
     font: Option<&Path>,
+    appearance: &postkit::subtitle_raster::BurnStyleOverrides,
     fps: u32,
 ) -> Result<Arc<postkit::subtitle_raster::SubtitleBurn>, String> {
     if let Some(path) = font
@@ -86,15 +101,11 @@ pub fn prepare_subtitle_burn(
     {
         return Err(format!("burn-in font not found: {}", path.display()));
     }
+    let style = resolve_burn_style(appearance)?;
     let cues = load_styled_cues(input)?;
-    postkit::subtitle_raster::SubtitleBurn::new(
-        cues,
-        font,
-        postkit::subtitle_raster::BurnStyle::default(),
-        fps.max(1) as f64,
-    )
-    .map(Arc::new)
-    .map_err(|e| format!("cannot burn {}: {e}", input.display()))
+    postkit::subtitle_raster::SubtitleBurn::new(cues, font, style, fps.max(1) as f64)
+        .map(Arc::new)
+        .map_err(|e| format!("cannot burn {}: {e}", input.display()))
 }
 
 /// What the encode would hand a burn, as the pre-encode checks see it.

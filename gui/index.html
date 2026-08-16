@@ -230,6 +230,26 @@
                     </div>
                   </div>
                   <div class="prop-field">
+                    <label>Burn-in appearance (blank keeps the default)</label>
+                    <div class="crop-grid">
+                      <label for="prop-burn-font-size">Font size (%)<input type="number" id="prop-burn-font-size" min="0" max="100" step="0.1" placeholder="4.5"></label>
+                      <label for="prop-burn-outline-width">Outline width (%)<input type="number" id="prop-burn-outline-width" min="0" step="0.1" placeholder="5.0"></label>
+                      <label for="prop-burn-colour">Colour<input type="text" id="prop-burn-colour" placeholder="FFFFFF"></label>
+                      <label for="prop-burn-effect-colour">Effect colour<input type="text" id="prop-burn-effect-colour" placeholder="000000"></label>
+                      <label for="prop-burn-fade-up">Fade up (ms)<input type="number" id="prop-burn-fade-up" min="0" step="1" placeholder="0"></label>
+                      <label for="prop-burn-fade-down">Fade down (ms)<input type="number" id="prop-burn-fade-down" min="0" step="1" placeholder="0"></label>
+                    </div>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-burn-effect">Burn-in effect</label>
+                    <select id="prop-burn-effect">
+                      <option value="">Shadow (default)</option>
+                      <option value="none">None</option>
+                      <option value="outline">Outline</option>
+                      <option value="shadow">Shadow</option>
+                    </select>
+                  </div>
+                  <div class="prop-field">
                     <label>Crop (source pixels, before any rotation)</label>
                     <div class="crop-grid">
                       <label for="prop-crop-left">Left<input type="number" id="prop-crop-left" value="0" min="0"></label>

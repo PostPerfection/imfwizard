@@ -68,6 +68,23 @@ pub struct SourceSettings {
     pub burn_subtitle: Option<String>,
     #[serde(default)]
     pub burn_subtitle_font: Option<String>,
+    /// How the burnt-in text looks. Each field is None until the panel names it,
+    /// so the rest keep the rasteriser's own defaults. The horizontal and
+    /// vertical stretches are CLI-only.
+    #[serde(default)]
+    pub burn_font_size: Option<f32>,
+    #[serde(default)]
+    pub burn_colour: Option<String>,
+    #[serde(default)]
+    pub burn_effect: Option<String>,
+    #[serde(default)]
+    pub burn_effect_colour: Option<String>,
+    #[serde(default)]
+    pub burn_outline_width: Option<f32>,
+    #[serde(default)]
+    pub burn_fade_up: Option<u64>,
+    #[serde(default)]
+    pub burn_fade_down: Option<u64>,
     #[serde(default)]
     pub crop_left: u32,
     #[serde(default)]
@@ -135,6 +152,43 @@ impl SourceSettings {
         options.check()?;
         Ok(options)
     }
+
+    /// Read the burn appearance fields into the rasteriser's overrides.
+    fn burn_style(&self) -> Result<postkit::subtitle_raster::BurnStyleOverrides, String> {
+        let colour = |label: &str, value: &Option<String>| match value
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            Some(text) => postkit::subtitle_formats::Rgba::parse_hex(text)
+                .map(Some)
+                .map_err(|e| format!("{label}: {e}")),
+            None => Ok(None),
+        };
+        let effect = match self
+            .burn_effect
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            Some(text) => Some(
+                postkit::subtitle_raster::parse_burn_effect(text)
+                    .map_err(|e| format!("Burn-in effect: {e}"))?,
+            ),
+            None => None,
+        };
+        Ok(postkit::subtitle_raster::BurnStyleOverrides {
+            font_size_percent: self.burn_font_size,
+            colour: colour("Burn-in colour", &self.burn_colour)?,
+            effect,
+            effect_colour: colour("Burn-in effect colour", &self.burn_effect_colour)?,
+            outline_width_percent: self.burn_outline_width,
+            x_scale: None,
+            y_scale: None,
+            fade_up_ms: self.burn_fade_up,
+            fade_down_ms: self.burn_fade_down,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -152,6 +206,7 @@ struct JobConfig {
     still_frames: Option<u64>,
     burn_subtitle: Option<PathBuf>,
     burn_subtitle_font: Option<PathBuf>,
+    burn_style: postkit::subtitle_raster::BurnStyleOverrides,
     picture: imfwizard_core::source_picture::SourcePictureOptions,
     audio_map: Option<String>,
 }
@@ -278,6 +333,9 @@ pub async fn submit_job(
         None => None,
     };
     let picture_options = settings.picture()?;
+    // a bad size or colour has to stop the build here, not part way through the encode
+    let burn_style = settings.burn_style()?;
+    imfwizard_core::subtitle_burn::resolve_burn_style(&burn_style)?;
     let burn_subtitle = settings
         .burn_subtitle
         .filter(|s| !s.is_empty())
@@ -347,6 +405,7 @@ pub async fn submit_job(
         imfwizard_core::subtitle_burn::prepare_subtitle_burn(
             burn,
             burn_subtitle_font.as_deref(),
+            &burn_style,
             fps_num,
         )?;
     }
@@ -378,6 +437,7 @@ pub async fn submit_job(
         still_frames,
         burn_subtitle,
         burn_subtitle_font,
+        burn_style,
         picture: picture_options,
         audio_map,
     };
@@ -674,6 +734,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         Some(path) => Some(imfwizard_core::subtitle_burn::prepare_subtitle_burn(
             path,
             job.burn_subtitle_font.as_deref(),
+            &job.burn_style,
             job.fps_num,
         )?),
         None => None,

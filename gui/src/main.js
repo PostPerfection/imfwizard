@@ -609,6 +609,13 @@ function readSourceSettings() {
     stillLength: duration("prop-still-length", "Still length"),
     burnSubtitle: document.getElementById("prop-burn-subtitle")?.value || null,
     burnSubtitleFont: document.getElementById("prop-burn-subtitle-font")?.value || null,
+    burnFontSize: burnPercent("prop-burn-font-size", "Burn-in font size"),
+    burnColour: document.getElementById("prop-burn-colour")?.value?.trim() || null,
+    burnEffect: document.getElementById("prop-burn-effect")?.value || null,
+    burnEffectColour: document.getElementById("prop-burn-effect-colour")?.value?.trim() || null,
+    burnOutlineWidth: burnPercent("prop-burn-outline-width", "Burn-in outline width"),
+    burnFadeUp: burnMilliseconds("prop-burn-fade-up", "Burn-in fade up"),
+    burnFadeDown: burnMilliseconds("prop-burn-fade-down", "Burn-in fade down"),
     cropLeft: cropPixels("prop-crop-left", "Crop left"),
     cropRight: cropPixels("prop-crop-right", "Crop right"),
     cropTop: cropPixels("prop-crop-top", "Crop top"),
@@ -621,6 +628,28 @@ function readSourceSettings() {
     raster: document.getElementById("prop-raster")?.value || null,
     audioMap: readAudioMap(),
   };
+}
+
+// Blank means the burn keeps the rasteriser's own default, so only a filled
+// field is read. The range itself is checked in the build, not here.
+function burnPercent(id, label) {
+  const value = document.getElementById(id)?.value?.trim();
+  if (!value) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent) || percent < 0) {
+    throw new Error(`${label} "${value}" is not a percent`);
+  }
+  return percent;
+}
+
+function burnMilliseconds(id, label) {
+  const value = document.getElementById(id)?.value?.trim();
+  if (!value) return null;
+  const milliseconds = Number(value);
+  if (!Number.isInteger(milliseconds) || milliseconds < 0) {
+    throw new Error(`${label} "${value}" is not a whole number of milliseconds`);
+  }
+  return milliseconds;
 }
 
 // A crop is whole pixels off one side, so anything else is a typo, not a crop.

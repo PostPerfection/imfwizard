@@ -176,6 +176,123 @@ impl PictureArguments {
     }
 }
 
+/// A whole, as the appearance flags spell their fractions.
+const PERCENT_OF_A_WHOLE: f32 = 100.0;
+
+/// Written out so the help text cannot drift from the ratio the rasteriser
+/// actually starts from.
+static BURN_FONT_SIZE_HELP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Burnt-in text height as a percent of the frame height (default: {:.1})",
+        postkit::subtitle_raster::DEFAULT_FONT_SIZE_RATIO * PERCENT_OF_A_WHOLE
+    )
+});
+
+static BURN_OUTLINE_WIDTH_HELP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Outline thickness as a percent of the burnt-in text height (default: {:.1})",
+        postkit::subtitle_raster::DEFAULT_OUTLINE_WIDTH_RATIO * PERCENT_OF_A_WHOLE
+    )
+});
+
+/// Everything `create` takes about a burnt-in subtitle: the cue file, the face
+/// to draw it with, and how the text looks. Boxed where it is flattened, for the
+/// reason `PictureArguments` is. Every appearance flag is optional, so a value
+/// the caller never names keeps the rasteriser's own default.
+#[derive(clap::Args)]
+struct BurnArguments {
+    /// Subtitle file rendered into the picture during the encode (SRT, ASS,
+    /// SCC, FCPXML or MKS). Burnt-in text is part of the image and registers
+    /// no timed-text track.
+    #[arg(long = "burn-subtitle")]
+    burn_subtitle: Option<String>,
+
+    /// TTF/OTF font to draw --burn-subtitle with (default: a system font)
+    #[arg(long = "burn-subtitle-font")]
+    burn_subtitle_font: Option<String>,
+
+    #[arg(long = "burn-font-size", help = BURN_FONT_SIZE_HELP.as_str())]
+    burn_font_size: Option<f32>,
+
+    /// Burnt-in text colour as RRGGBB or RRGGBBAA (default: white).
+    #[arg(long = "burn-colour")]
+    burn_colour: Option<String>,
+
+    /// What is drawn under the burnt-in text: none, outline or shadow
+    /// (default: shadow).
+    #[arg(long = "burn-effect")]
+    burn_effect: Option<String>,
+
+    /// Colour of that outline or shadow, as RRGGBB or RRGGBBAA (default: black).
+    #[arg(long = "burn-effect-colour")]
+    burn_effect_colour: Option<String>,
+
+    #[arg(long = "burn-outline-width", help = BURN_OUTLINE_WIDTH_HELP.as_str())]
+    burn_outline_width: Option<f32>,
+
+    /// Horizontal stretch of the burnt-in text, where 1.0 leaves it alone.
+    #[arg(long = "burn-x-scale")]
+    burn_x_scale: Option<f32>,
+
+    /// Vertical stretch of the burnt-in text, where 1.0 leaves it alone.
+    #[arg(long = "burn-y-scale")]
+    burn_y_scale: Option<f32>,
+
+    /// Milliseconds a burnt-in cue takes to ramp up from transparent.
+    #[arg(long = "burn-fade-up")]
+    burn_fade_up: Option<u64>,
+
+    /// Milliseconds a burnt-in cue takes to ramp down to transparent.
+    #[arg(long = "burn-fade-down")]
+    burn_fade_down: Option<u64>,
+}
+
+impl BurnArguments {
+    /// Read the flags into the rasteriser's overrides, failing on a colour or an
+    /// effect name that cannot be read.
+    fn resolve(&self) -> postkit::subtitle_raster::BurnStyleOverrides {
+        let colour = |flag: &str, value: &Option<String>| {
+            value.as_deref().map(|text| {
+                postkit::subtitle_formats::Rgba::parse_hex(text)
+                    .unwrap_or_else(|e| fail(format!("{flag}: {e}")))
+            })
+        };
+        postkit::subtitle_raster::BurnStyleOverrides {
+            font_size_percent: self.burn_font_size,
+            colour: colour("--burn-colour", &self.burn_colour),
+            effect: self.burn_effect.as_deref().map(|text| {
+                postkit::subtitle_raster::parse_burn_effect(text)
+                    .unwrap_or_else(|e| fail(format!("--burn-effect: {e}")))
+            }),
+            effect_colour: colour("--burn-effect-colour", &self.burn_effect_colour),
+            outline_width_percent: self.burn_outline_width,
+            x_scale: self.burn_x_scale,
+            y_scale: self.burn_y_scale,
+            fade_up_ms: self.burn_fade_up,
+            fade_down_ms: self.burn_fade_down,
+        }
+    }
+
+    /// The first appearance flag the caller named, so a burn-less run can be
+    /// refused by the flag's own name rather than by the group's.
+    fn first_named(&self) -> Option<&'static str> {
+        [
+            ("--burn-font-size", self.burn_font_size.is_some()),
+            ("--burn-colour", self.burn_colour.is_some()),
+            ("--burn-effect", self.burn_effect.is_some()),
+            ("--burn-effect-colour", self.burn_effect_colour.is_some()),
+            ("--burn-outline-width", self.burn_outline_width.is_some()),
+            ("--burn-x-scale", self.burn_x_scale.is_some()),
+            ("--burn-y-scale", self.burn_y_scale.is_some()),
+            ("--burn-fade-up", self.burn_fade_up.is_some()),
+            ("--burn-fade-down", self.burn_fade_down.is_some()),
+        ]
+        .into_iter()
+        .find(|(_, given)| *given)
+        .map(|(name, _)| name)
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create a new IMP (Interoperable Master Package)
@@ -210,15 +327,8 @@ enum Commands {
         #[arg(long = "subtitle")]
         subtitles: Vec<String>,
 
-        /// Subtitle file rendered into the picture during the encode (SRT, ASS,
-        /// SCC, FCPXML or MKS). Burnt-in text is part of the image and registers
-        /// no timed-text track.
-        #[arg(long = "burn-subtitle")]
-        burn_subtitle: Option<String>,
-
-        /// TTF/OTF font to draw --burn-subtitle with (default: a system font)
-        #[arg(long = "burn-subtitle-font")]
-        burn_subtitle_font: Option<String>,
+        #[command(flatten)]
+        burn: Box<BurnArguments>,
 
         /// Content kind (feature, trailer, etc.)
         #[arg(short, long, default_value = "feature")]
@@ -339,6 +449,16 @@ enum Commands {
         /// Output TTML file
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Default text height as a percent of the frame height, written as a
+        /// cell-relative tts:fontSize on every cue.
+        #[arg(long = "font-size")]
+        font_size: Option<f32>,
+
+        /// Default text colour as RRGGBB or RRGGBBAA, written as the document's
+        /// tts:color. A run that carries its own colour keeps it.
+        #[arg(long = "colour")]
+        colour: Option<String>,
     },
 
     /// Extract HDR10+ metadata
@@ -1250,8 +1370,7 @@ fn run() {
             audio_lang,
             audio_role,
             subtitles,
-            burn_subtitle,
-            burn_subtitle_font,
+            burn: burn_arguments,
             kind,
             profile,
             fps_num,
@@ -1381,7 +1500,16 @@ fn run() {
             // a burn draws display-RGB text onto decoded frames, so refuse every
             // route that hands the encoder X'Y'Z' or nothing to draw on, before
             // anything is encoded
-            if let Some(burn) = burn_subtitle.as_deref() {
+            if burn_arguments.burn_subtitle.is_none()
+                && let Some(name) = burn_arguments.first_named()
+            {
+                fail(format!("{name} needs --burn-subtitle"));
+            }
+            let burn_style = burn_arguments.resolve();
+            imfwizard_core::subtitle_burn::resolve_burn_style(&burn_style)
+                .unwrap_or_else(|e| fail(e));
+
+            if let Some(burn) = burn_arguments.burn_subtitle.as_deref() {
                 let Some(picture) = video.as_deref().map(std::path::Path::new) else {
                     fail("--burn-subtitle needs --video: there is no picture to draw on");
                 };
@@ -1401,11 +1529,15 @@ fn run() {
             // read against it, so the burn is built there
             let build_subtitle_burn =
                 |fps: u32| -> Option<std::sync::Arc<postkit::subtitle_raster::SubtitleBurn>> {
-                    let path = burn_subtitle.as_deref()?;
+                    let path = burn_arguments.burn_subtitle.as_deref()?;
                     Some(
                         imfwizard_core::subtitle_burn::prepare_subtitle_burn(
                             std::path::Path::new(path),
-                            burn_subtitle_font.as_deref().map(std::path::Path::new),
+                            burn_arguments
+                                .burn_subtitle_font
+                                .as_deref()
+                                .map(std::path::Path::new),
+                            &burn_style,
                             fps,
                         )
                         .unwrap_or_else(|e| fail(e)),
@@ -1720,11 +1852,24 @@ fn run() {
             }
         }
 
-        Commands::SubtitleConvert { input, output } => {
+        Commands::SubtitleConvert {
+            input,
+            output,
+            font_size,
+            colour,
+        } => {
+            let appearance = imfwizard_core::subtitle_convert::TextAppearance {
+                font_size_percent: font_size,
+                colour: colour.as_deref().map(|text| {
+                    postkit::subtitle_formats::Rgba::parse_hex(text)
+                        .unwrap_or_else(|e| fail(format!("--colour: {e}")))
+                }),
+            };
             match imfwizard_core::subtitle_convert::convert_subtitles(
                 &input,
                 &output,
                 imfwizard_core::subtitle_convert::SubtitleFormat::ImscTtml,
+                &appearance,
             ) {
                 Ok(()) => println!("Converted to {}", output.display()),
                 Err(e) => {
