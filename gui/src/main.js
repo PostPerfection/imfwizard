@@ -650,7 +650,7 @@ function readSourceSettings() {
     burnEffect: document.getElementById("prop-burn-effect")?.value || null,
     burnEffectColour: document.getElementById("prop-burn-effect-colour")?.value?.trim() || null,
     burnOutlineWidth: burnPercent("prop-burn-outline-width", "Burn-in outline width"),
-    burnLineHeight: burnPercent("prop-burn-line-height", "Burn-in line height"),
+    burnLineHeight: burnMultiple("prop-burn-line-height", "Burn-in line height"),
     burnMargin: burnPercent("prop-burn-margin", "Burn-in margin"),
     burnFadeUp: burnMilliseconds("prop-burn-fade-up", "Burn-in fade up"),
     burnFadeDown: burnMilliseconds("prop-burn-fade-down", "Burn-in fade down"),
@@ -671,13 +671,21 @@ function readSourceSettings() {
 // Blank means the burn keeps the rasteriser's own default, so only a filled
 // field is read. The range itself is checked in the build, not here.
 function burnPercent(id, label) {
+  return burnNonNegativeNumber(id, label, "a percent");
+}
+
+function burnMultiple(id, label) {
+  return burnNonNegativeNumber(id, label, "a multiple");
+}
+
+function burnNonNegativeNumber(id, label, unit) {
   const value = document.getElementById(id)?.value?.trim();
   if (!value) return null;
-  const percent = Number(value);
-  if (!Number.isFinite(percent) || percent < 0) {
-    throw new Error(`${label} "${value}" is not a percent`);
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new Error(`${label} "${value}" is not ${unit}`);
   }
-  return percent;
+  return number;
 }
 
 function burnMilliseconds(id, label) {
