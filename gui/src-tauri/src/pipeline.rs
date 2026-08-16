@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
 // ─── Progress / Events ─────────────────────────────────────────────────────
@@ -723,7 +724,21 @@ fn log_to(log_file: &Arc<Mutex<Option<std::fs::File>>>, msg: &str) {
     }
 }
 
+const SECONDS_PER_MINUTE: u64 = 60;
+
+/// One `[TIMING]` line for the job log, sitting alongside the `[ENCODE]` and
+/// `[PACKAGE]` lines the same stage writes.
+fn format_stage_timing(stage: &str, duration: std::time::Duration) -> String {
+    let seconds = duration.as_secs();
+    format!(
+        "[TIMING] {stage} took {}m{}s",
+        seconds / SECONDS_PER_MINUTE,
+        seconds % SECONDS_PER_MINUTE
+    )
+}
+
 fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
+    let job_started = Instant::now();
     let queue = app.state::<JobQueue>();
     let cancel = queue.cancel.clone();
     let pause = queue.pause.clone();
@@ -796,6 +811,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
         // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
         // input; image/J2K sequences fall back to the encoder default.
+        let probe_started = Instant::now();
         let probed = imfwizard_core::probe::probe_video(&video_path);
         let input_type = postkit::encode::detect_input_type(&video_path);
         // a J2K directory reaches the wrapper with no decode at all, so it has
@@ -831,6 +847,13 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
             _ => imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
         };
+        log_to(
+            &log_file,
+            &format_stage_timing(
+                &format!("probe composition {}", idx + 1),
+                probe_started.elapsed(),
+            ),
+        );
 
         // per-composition scratch dir so multiple encodes don't clobber each other
         let enc_dir = output.join(format!("enc_{idx}"));
@@ -838,6 +861,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let log_ref = log_file.clone();
         // a still never reaches the pipeline: it is one encode per run of frames
         // sharing a cue set, linked for the rest of the hold
+        let encode_started = Instant::now();
         let picture_dir = match job.still_frames {
             Some(hold_for) => {
                 let plan = picture
@@ -902,9 +926,17 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 encode_result.j2k_dir
             }
         };
+        log_to(
+            &log_file,
+            &format_stage_timing(
+                &format!("encode composition {}", idx + 1),
+                encode_started.elapsed(),
+            ),
+        );
 
         // the map runs before the delay, the trim and the MCA labels, so the
         // labelled layout describes the file that is actually packaged
+        let audio_map_started = Instant::now();
         let audio_files: Vec<PathBuf> = match &job.audio_map {
             Some(spec) => ci
                 .audio_path
@@ -920,7 +952,17 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 .collect::<Result<Vec<_>, String>>()?,
             None => ci.audio_path.iter().map(PathBuf::from).collect(),
         };
+        if job.audio_map.is_some() {
+            log_to(
+                &log_file,
+                &format_stage_timing(
+                    &format!("audio map composition {}", idx + 1),
+                    audio_map_started.elapsed(),
+                ),
+            );
+        }
 
+        let edits_started = Instant::now();
         let source = imfwizard_core::source_edits::apply_source_edits(
             &job.edits,
             &imfwizard_core::source_edits::CompositionSource {
@@ -932,6 +974,13 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             job.fps_num,
             job.fps_den,
         )?;
+        log_to(
+            &log_file,
+            &format_stage_timing(
+                &format!("source edits composition {}", idx + 1),
+                edits_started.elapsed(),
+            ),
+        );
 
         let audio_files = source
             .audio_files
@@ -969,6 +1018,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         99.0,
     );
     log_to(&log_file, "[PACKAGE] Creating IMP...");
+    let package_started = Instant::now();
 
     let opts = imfwizard_core::imp::ImpOptions {
         output_dir: job.output_dir.clone(),
@@ -986,6 +1036,14 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     log_to(
         &log_file,
         &format!("[PACKAGE] Done, {} CPL(s)", result.cpl_paths.len()),
+    );
+    log_to(
+        &log_file,
+        &format_stage_timing("package", package_started.elapsed()),
+    );
+    log_to(
+        &log_file,
+        &format_stage_timing("total", job_started.elapsed()),
     );
 
     log_to(
@@ -1022,4 +1080,26 @@ fn emit_progress(
             percent,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_stage_timing;
+    use std::time::Duration;
+
+    #[test]
+    fn stage_timing_reads_as_minutes_and_seconds() {
+        assert_eq!(
+            format_stage_timing("encode composition 1", Duration::from_secs(192)),
+            "[TIMING] encode composition 1 took 3m12s"
+        );
+        assert_eq!(
+            format_stage_timing("package", Duration::from_millis(1900)),
+            "[TIMING] package took 0m1s"
+        );
+        assert_eq!(
+            format_stage_timing("total", Duration::from_secs(3600)),
+            "[TIMING] total took 60m0s"
+        );
+    }
 }

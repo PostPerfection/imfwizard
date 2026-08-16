@@ -107,6 +107,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
+- **Post-build actions**, a finished build offers Play (the new IMP in the embedded preview), Inspect (the Validate view, already pointed at the output and running) and Reveal (the output folder in the file manager), beside the progress bar. Starting another build clears the row
+- **Per-stage timings in the job log**, `[TIMING]` lines next to the stage's own log lines giving probe, encode, audio map, source edits and packaging time per composition, plus the total
 - **Job queue manager**, submit, monitor, cancel background jobs
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs

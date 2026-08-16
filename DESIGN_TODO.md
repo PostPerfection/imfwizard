@@ -137,9 +137,14 @@ order `create` builds its sources in.
   center cross, thirds grid, subtitle/CC render toggles), decode resolution
   full/half/quarter (J2K discards DWT levels natively), a codestream forensics
   section in the QC report (decomp levels, precincts, tile-parts, POC, MCT, worst
-  frame vs cap), post-build Inspect/Play/Reveal buttons, per-stage encode log
-  timings, and player HUD buffer and dropped-frame counters. The CLI did have
-  dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>` closes it.
+  frame vs cap), and player HUD buffer and dropped-frame counters. The CLI did
+  have dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>`
+  closes it. The post-build Play/Inspect/Reveal buttons and the per-stage
+  `[TIMING]` lines in the job log are done. What the timings do not give is the
+  breakdown inside an encode, colour convert against frame prep against the J2K
+  encode itself: postkit's `PipelineProgress` carries a stage name, a frame
+  count and an elapsed clock, and nothing that separates the three, so it would
+  take a wider progress payload from postkit first.
   The survey's crop indicator is
   served for now by the `PicturePlan::describe()` line the CLI and the GUI both
   log, and by the plan the GUI's Auto-crop button shows. Drawing the crop over
