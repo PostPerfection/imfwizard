@@ -104,11 +104,11 @@ order `create` builds its sources in.
 - The GUI frame-rate menu stops at 60 while the CLI takes arbitrary
   --fps-num/--fps-den. easyDCP advertises 23.98 to 120. Extending the menu is
   cheap once the build path is validated at the higher rates.
-- Burn-in styling flags. `create --burn-subtitle` composites with
-  `BurnStyle::default()` only: size, line height, margin and default colour exist
-  in the struct but no flag reaches them, and outline, shadow, effect colour and
-  outline width are not in the rasteriser at all. They land in PK
-  subtitle_raster.rs and are tracked in dcpwizard's DESIGN_TODO, one shared fix.
+- Burn-in line height and margin. `create` reaches every field of postkit's
+  `BurnStyleOverrides`, but `BurnStyle::line_height_ratio` and `margin_ratio`
+  have no override field, so a caller cannot set line spacing or the distance
+  from the anchored edge. They land in PK subtitle_raster.rs and are tracked in
+  dcpwizard's DESIGN_TODO, one shared fix.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop

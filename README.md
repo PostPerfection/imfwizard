@@ -29,6 +29,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source or a J2K directory is refused
+- **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
 - **Source picture processing**, `create --crop-left/--crop-right/--crop-top/--crop-bottom` cut source pixels off each side, `--auto-crop` (`--auto-crop-threshold`) measures the black borders and cuts them, `--fill-crop` crops to the target aspect instead of padding to it, `--deinterlace`, `--denoise`, `--rotate 90|180|270`, `--flip horizontal|vertical|both`, and `--raster <WxH>` fits the result into one of the App 2E rasters. Anything other than the untouched source is fitted into a raster, so the App 2E check runs on what the encoder writes rather than on the source
@@ -311,6 +312,21 @@ imfwizard create \
   --output /path/to/output/
 ```
 
+### Burn subtitles into the picture
+
+```bash
+# Sizes are percents: --burn-font-size of the frame height, --burn-outline-width
+# of the text height. Colours are RRGGBB or RRGGBBAA. Left out, each keeps its
+# default: 4.5% white text with a black shadow.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --burn-subtitle /path/to/subs.srt \
+  --burn-font-size 8 --burn-colour FFFF00 \
+  --burn-effect outline --burn-effect-colour 000000 --burn-outline-width 6 \
+  --output /path/to/output/
+```
+
 ### Route and mix the audio channels
 
 ```bash
@@ -373,6 +389,14 @@ imfwizard loudness in.wav --adjust-to -24 --true-peak -0.5 -o out.wav
 ```bash
 # SRT/SCC flatten to text; ASS/SSA, FCPXML, and MKS keep styling and placement
 imfwizard subtitle-convert -i subs.ass -o subs.ttml
+
+# --font-size (percent of the frame height) and --colour (RRGGBB or RRGGBBAA)
+# are written as the document's default style, which a run carrying its own
+# colour still overrides. The size goes out as a cell-relative tts:fontSize
+# against a declared ttp:cellResolution, since a bare TTML percentage is read
+# against the parent element's size, not the frame. Authored TTML is copied
+# unchanged, so asking for either alongside a .ttml input is refused.
+imfwizard subtitle-convert -i subs.srt -o subs.ttml --font-size 6 --colour FFFF00
 ```
 
 ### Supplemental IMP (OV + supplemental)
