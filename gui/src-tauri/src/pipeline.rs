@@ -209,6 +209,9 @@ struct JobConfig {
     burn_style: postkit::subtitle_raster::BurnStyleOverrides,
     picture: imfwizard_core::source_picture::SourcePictureOptions,
     audio_map: Option<String>,
+    /// What the pre-build check found, carried through so the job log lists it
+    /// without measuring the source a second time.
+    hints: Vec<String>,
 }
 
 // ─── Queue state (managed by Tauri) ────────────────────────────────────────
@@ -259,6 +262,15 @@ fn holds_imp(dir: &std::path::Path) -> bool {
     IMP_ROOT_FILES.iter().any(|name| dir.join(name).exists())
 }
 
+/// What a submitted build came back with: the queued job, or the hints that
+/// stopped it short of queueing so the panel can show them.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitResult {
+    pub job_id: Option<u64>,
+    pub hints: Vec<String>,
+}
+
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -275,7 +287,8 @@ pub async fn submit_job(
     bandwidth: Option<u32>,
     compositions: Option<Vec<CompositionInput>>,
     source_settings: Option<SourceSettings>,
-) -> Result<u64, String> {
+    hints_accepted: Option<bool>,
+) -> Result<SubmitResult, String> {
     let queue = app.state::<JobQueue>();
     let id = queue.next_id.fetch_add(1, Ordering::Relaxed);
 
@@ -348,36 +361,14 @@ pub async fn submit_job(
         .audio_map
         .clone()
         .filter(|spec| !spec.trim().is_empty());
+    let mut hints: Vec<String> = Vec::new();
     for composition in &compositions {
         let picture = PathBuf::from(&composition.video_path);
-        imfwizard_core::source_colourspace::reject_on_precompressed_picture(
-            &picture,
-            &source_colour,
-        )?;
-        imfwizard_core::source_picture::reject_on_precompressed_picture(
-            &picture,
-            &picture_options,
-        )?;
         if audio_map.is_some() && composition.audio_path.is_none() {
             return Err(format!(
                 "{} has no sound to map: drop a WAV on its Sound track or clear the audio map",
                 composition.title
             ));
-        }
-        // a burn draws display-RGB text onto decoded frames, so refuse every
-        // route that hands the encoder X'Y'Z' or nothing to draw on
-        if let Some(burn) = &burn_subtitle {
-            let timed_text: Vec<PathBuf> =
-                composition.subtitles.iter().map(PathBuf::from).collect();
-            imfwizard_core::subtitle_burn::check_burn_supported(
-                burn,
-                &imfwizard_core::subtitle_burn::BurnTarget {
-                    timed_text: &timed_text,
-                    frames_already_xyz: !source_colour.applies_xyz_transform(),
-                    input_is_codestreams: postkit::encode::detect_input_type(&picture)
-                        == postkit::encode::InputType::J2kSequence,
-                },
-            )?;
         }
         match (
             imfwizard_core::still::is_still_image(&picture),
@@ -397,17 +388,38 @@ pub async fn submit_job(
             }
             _ => {}
         }
+
+        let plan = imfwizard_core::preflight::CreatePlan {
+            picture: Some(picture),
+            audio_files: composition.audio_path.iter().map(PathBuf::from).collect(),
+            audio_language: composition.audio_lang.clone(),
+            timed_text_files: composition.subtitles.iter().map(PathBuf::from).collect(),
+            fps_num,
+            fps_den,
+            edits,
+            audio_map: audio_map.clone(),
+            burn_subtitle: burn_subtitle.clone(),
+            burn_subtitle_font: burn_subtitle_font.clone(),
+            burn_style: burn_style.clone(),
+            picture_options: picture_options.clone(),
+            source_colour: source_colour.clone(),
+            still_frames,
+        };
+        imfwizard_core::preflight::check_before_encode(&plan)?;
+        hints.extend(
+            imfwizard_core::hints::gather_hints(&plan)
+                .into_iter()
+                .map(|hint| hint.text),
+        );
     }
 
-    // parse the cue file and build the burn now, so a bad file or a missing font
-    // fails here instead of part way through the encode
-    if let Some(burn) = &burn_subtitle {
-        imfwizard_core::subtitle_burn::prepare_subtitle_burn(
-            burn,
-            burn_subtitle_font.as_deref(),
-            &burn_style,
-            fps_num,
-        )?;
+    // the pref lives in the panel, which says it has taken the hints by sending
+    // hintsAccepted rather than by naming the pref here
+    if !hints.is_empty() && hints_accepted != Some(true) {
+        return Ok(SubmitResult {
+            job_id: None,
+            hints,
+        });
     }
 
     // packages are folders named by title, so a reused title lands in the old
@@ -440,6 +452,7 @@ pub async fn submit_job(
         burn_style,
         picture: picture_options,
         audio_map,
+        hints: hints.clone(),
     };
 
     {
@@ -454,7 +467,10 @@ pub async fn submit_job(
         });
     }
 
-    Ok(id)
+    Ok(SubmitResult {
+        job_id: Some(id),
+        hints,
+    })
 }
 
 /// The black borders of a source, and the plan cropping them away resolves to.
@@ -727,6 +743,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
         ),
     );
+
+    for hint in &job.hints {
+        log_to(&log_file, &format!("[HINT] {hint}"));
+    }
 
     // submit_job already proved the file parses, so a failure here is a file that
     // changed underneath

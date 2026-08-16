@@ -113,6 +113,7 @@ const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
   bandwidth: 250, colourspace: "Rec.709", hdr: "SDR",
   signingCert: "", signingKey: "", outputDir: "",
+  showHintsBeforeBuild: true,
 };
 
 function getPrefs() {
@@ -144,6 +145,8 @@ function loadSettings() {
     const el = document.getElementById(id);
     if (el) el.value = val;
   }
+  const showHints = document.getElementById("set-show-hints");
+  if (showHints) showHints.checked = prefs.showHintsBeforeBuild;
 }
 
 document.getElementById("settings-form")?.addEventListener("submit", (e) => {
@@ -158,9 +161,42 @@ document.getElementById("settings-form")?.addEventListener("submit", (e) => {
     signingCert: document.getElementById("set-signing-cert")?.value,
     signingKey: document.getElementById("set-signing-key")?.value,
     outputDir: document.getElementById("set-output-dir")?.value,
+    showHintsBeforeBuild: !!document.getElementById("set-show-hints")?.checked,
   });
   setStatus("Settings saved");
 });
+
+// Advisory findings the pre-build check made. Returns true to build anyway.
+function showHintsDialog(hints) {
+  const dialog = document.getElementById("hints-dialog");
+  const list = document.getElementById("hints-list");
+  const silence = document.getElementById("hints-silence");
+  if (!dialog || !list) return Promise.resolve(true);
+
+  list.innerHTML = "";
+  for (const hint of hints) {
+    const item = document.createElement("li");
+    item.textContent = hint;
+    list.appendChild(item);
+  }
+  silence.checked = false;
+  dialog.hidden = false;
+
+  return new Promise((resolve) => {
+    const close = (build) => {
+      dialog.hidden = true;
+      if (silence.checked) savePrefs({ ...getPrefs(), showHintsBeforeBuild: false });
+      loadSettings();
+      document.getElementById("hints-build").removeEventListener("click", onBuild);
+      document.getElementById("hints-back").removeEventListener("click", onBack);
+      resolve(build);
+    };
+    const onBuild = () => close(true);
+    const onBack = () => close(false);
+    document.getElementById("hints-build").addEventListener("click", onBuild);
+    document.getElementById("hints-back").addEventListener("click", onBack);
+  });
+}
 
 document.getElementById("set-reset")?.addEventListener("click", () => {
   localStorage.removeItem(PREFS_KEY);
@@ -754,11 +790,23 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
 
   try {
     beginBuild();
-    currentJobId = await invoke("submit_job", {
-      title, outputDir: output, compositions: comps, sourceSettings,
+    const submit = (hintsAccepted) => invoke("submit_job", {
+      title, outputDir: output, compositions: comps, sourceSettings, hintsAccepted,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
       bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     });
+    let result = await submit(!getPrefs().showHintsBeforeBuild);
+    if (result.jobId === null) {
+      if (!await showHintsDialog(result.hints)) {
+        progressSection.style.display = "none";
+        setStatus("Build cancelled");
+        endBuild();
+        unlisten();
+        return;
+      }
+      result = await submit(true);
+    }
+    currentJobId = result.jobId;
     setStatus("Building IMP...");
   } catch (e) {
     stageEl.textContent = "Failed";
@@ -1018,16 +1066,18 @@ document.getElementById("del-start")?.addEventListener("click", async () => {
   const jobIds = [];
   for (const target of targets) {
     try {
-      const jobId = await invoke("submit_job", {
+      // no dialog here: the panel picks its own source and queues a run per target
+      const result = await invoke("submit_job", {
         videoPath: video,
         title: `${title} [${target}]`,
         outputDir: `${output}/${target}`,
         audioPath: audio || null,
+        hintsAccepted: true,
         framerate: document.getElementById("prop-framerate")?.value || "24/1",
         contentKind: document.getElementById("prop-content-kind")?.value || "feature",
         bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
       });
-      jobIds.push(jobId);
+      jobIds.push(result.jobId);
     } catch (e) {
       box.textContent += `\n✗ Failed to queue ${target}: ${e}`;
     }

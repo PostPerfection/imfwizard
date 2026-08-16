@@ -14,6 +14,20 @@
     </div>
   </div>
 
+  <!-- Pre-build hints -->
+  <div id="hints-dialog" class="hints-dialog" hidden>
+    <div class="hints-panel">
+      <h2>Before you build</h2>
+      <p class="hints-lead">These will build, but they are worth a look first.</p>
+      <ul id="hints-list" class="hints-list"></ul>
+      <label class="hints-silence"><input type="checkbox" id="hints-silence"> Don't show hints again</label>
+      <div class="hints-actions">
+        <button type="button" id="hints-back" class="btn-secondary">Go back</button>
+        <button type="button" id="hints-build" class="btn-primary">Build anyway</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Context menu -->
   <div id="context-menu" class="context-menu" hidden>
     <button data-action="preview">▶ Preview</button>
@@ -741,6 +755,9 @@
                 <div class="prop-field">
                   <label for="set-language">Default Language</label>
                   <input type="text" id="set-language" value="en" placeholder="en">
+                </div>
+                <div class="prop-field">
+                  <label><input type="checkbox" id="set-show-hints" checked> Show hints before building</label>
                 </div>
               </fieldset>
               <fieldset>
