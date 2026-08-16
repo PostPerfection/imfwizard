@@ -34,6 +34,9 @@ impl From<KdmFormatArgument> for postkit::certificate::KdmFormat {
     }
 }
 
+/// The ceiling `create --bitrate` takes, matching the GUI's Bitrate field.
+const MAXIMUM_BITRATE_MBPS: f64 = 1000.0;
+
 /// Report a failure the way every command does, and stop.
 fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("Error: {message}");
@@ -338,6 +341,12 @@ enum Commands {
         /// broadcast, archival); sets the J2K target bitrate. See `profiles`.
         #[arg(long)]
         profile: Option<String>,
+
+        /// Target bitrate in Mbps for the J2K encode, above 0 and at most 1000.
+        /// Wins over the bitrate --profile carries. Without either the encode
+        /// runs at a 10:1 compression ratio.
+        #[arg(long)]
+        bitrate: Option<f64>,
 
         /// Frame rate numerator
         #[arg(long, default_value = "24")]
@@ -1378,6 +1387,7 @@ fn run() {
             burn: burn_arguments,
             kind,
             profile,
+            bitrate,
             fps_num,
             fps_den,
             hdr,
@@ -1440,6 +1450,13 @@ fn run() {
                 },
                 None => None,
             };
+            if let Some(mbps) = bitrate
+                && (mbps <= 0.0 || mbps > MAXIMUM_BITRATE_MBPS)
+            {
+                fail(format!(
+                    "--bitrate {mbps} is outside the range: above 0 and at most {MAXIMUM_BITRATE_MBPS} Mbps"
+                ));
+            }
             // the source colour space decides the encoder transform, so a bad
             // spelling has to fail before anything is encoded
             let colourspace = source_colourspace
@@ -1590,7 +1607,7 @@ fn run() {
                 )
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
-                let fps = fps_num / fps_den.max(1);
+                let fps = imfwizard_core::encode::whole_frames_per_second(fps_num, fps_den);
                 let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
                 imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
                     image,
@@ -1613,129 +1630,145 @@ fn run() {
                 )
             } else if let Some(ref vid) = video {
                 let video_path = PathBuf::from(vid);
-                let is_video_file = video_path.is_file()
-                    && video_path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| {
-                            matches!(
-                                e.to_lowercase().as_str(),
-                                "mp4" | "mov" | "mkv" | "avi" | "mxf" | "ts" | "m2ts" | "webm"
-                            )
-                        })
-                        .unwrap_or(false);
-
-                if is_video_file {
-                    tracing::info!("Detected video file, encoding to J2K");
-
-                    // Probe for actual frame rate
-                    let probed = imfwizard_core::probe::probe_video(&video_path);
-                    let actual_fps = probed
+                let named_audio = || {
+                    audio
                         .as_ref()
-                        .map(|v| v.fps_num / v.fps_den.max(1))
-                        .unwrap_or(fps_num);
-                    if let Some(ref info) = probed {
+                        .map(|a| vec![PathBuf::from(a)])
+                        .unwrap_or_default()
+                };
+                // the classification the GUI and the preflight already use, so
+                // one answer decides what decodes and what reaches the wrapper
+                let input_type = postkit::encode::detect_input_type(&video_path);
+                match input_type {
+                    postkit::encode::InputType::Unknown => fail(
+                        imfwizard_core::preflight::unclassified_picture_refusal(&video_path),
+                    ),
+                    postkit::encode::InputType::J2kSequence => (Some(video_path), named_audio()),
+                    postkit::encode::InputType::Video
+                    | postkit::encode::InputType::ImageSequence => {
+                        let is_image_sequence =
+                            input_type == postkit::encode::InputType::ImageSequence;
+                        // an image sequence's frames carry no rate of their own,
+                        // so the requested one is the rate it is encoded at
+                        let probed = match is_image_sequence {
+                            true => None,
+                            false => imfwizard_core::probe::probe_video(&video_path),
+                        };
+                        if let Some(ref info) = probed {
+                            tracing::info!(
+                                "Input: {}x{} @ {}/{} fps",
+                                info.width,
+                                info.height,
+                                info.fps_num,
+                                info.fps_den
+                            );
+                        }
+                        let (rate_num, rate_den) = match &probed {
+                            Some(info) => (info.fps_num, info.fps_den),
+                            None => (fps_num, fps_den),
+                        };
+                        let encode_fps =
+                            imfwizard_core::encode::whole_frames_per_second(rate_num, rate_den);
                         tracing::info!(
-                            "Input: {}x{} @ {}/{} fps",
-                            info.width,
-                            info.height,
-                            info.fps_num,
-                            info.fps_den
-                        );
-                    }
-                    let (source_width, source_height) =
-                        imfwizard_core::source_picture::source_raster(&video_path)
-                            .unwrap_or_else(|e| fail(e));
-                    let picture = imfwizard_core::source_picture::resolve_picture(
-                        &picture_options,
-                        &video_path,
-                        source_width,
-                        source_height,
-                        false,
-                    )
-                    .unwrap_or_else(|e| fail(e));
-                    tracing::info!("Picture: {}", picture.plan.describe());
-                    tracing::info!("Compressor: Grok");
-                    // A delivery preset sets the target bitrate; convert it to a J2K
-                    // compression ratio (raw = w*h*36 bits/frame), else default 10x.
-                    let compression_ratio = match (&preset, &probed) {
-                        (Some(p), Some(info)) => {
-                            let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
-                            // the bitrate target is against the raster that is
-                            // encoded, which the picture plan may have changed
-                            let raw_bits =
-                                picture.encode_width as f64 * picture.encode_height as f64 * 36.0;
-                            let target_bits = (p.bitrate_mbps * 1_000_000.0) / fps;
-                            (raw_bits / target_bits).max(1.0)
-                        }
-                        _ => 10.0,
-                    };
-                    if let Some(p) = &preset {
-                        tracing::info!(
-                            "Preset {}: {} Mbps (ratio {compression_ratio:.1})",
-                            p.name,
-                            p.bitrate_mbps
-                        );
-                    }
-                    // encode via the shared grok pipeline (grk_compress); no fallback
-                    let encoded = encode_picture(
-                        &video_path,
-                        &output,
-                        &postkit::pipeline::EncodeRunOptions {
-                            compression_ratio,
-                            fps: actual_fps,
-                            source_colour: source_colour.clone(),
-                            subtitle_burn: build_subtitle_burn(actual_fps),
-                            picture: picture.processing.clone(),
-                            ..Default::default()
-                        },
-                    );
-                    let j2k_out = match encoded {
-                        Ok(r) => {
-                            tracing::info!("Encoded {} frames", r.frames_encoded);
-                            r.j2k_dir
-                        }
-                        Err(e) => {
-                            eprintln!("Error: Encode failed: {e}");
-                            std::process::exit(1);
-                        }
-                    };
-
-                    // Auto-demux audio
-                    let audio_files = if let Some(a) = &audio {
-                        vec![PathBuf::from(a)]
-                    } else {
-                        let wav_out = output.join("audio_demux.wav");
-                        let demux = std::process::Command::new("ffmpeg")
-                            .arg("-y")
-                            .arg("-i")
-                            .arg(&video_path)
-                            .arg("-vn")
-                            .arg("-acodec")
-                            .arg("pcm_s24le")
-                            .arg("-ar")
-                            .arg("48000")
-                            .arg(&wav_out)
-                            .output();
-                        match demux {
-                            Ok(o) if o.status.success() => {
-                                tracing::info!("Demuxed audio: {}", wav_out.display());
-                                vec![wav_out]
+                            "Detected {}, encoding to J2K at {encode_fps} fps",
+                            match is_image_sequence {
+                                true => "image sequence",
+                                false => "video file",
                             }
-                            _ => vec![],
-                        }
-                    };
+                        );
 
-                    (Some(j2k_out), audio_files)
-                } else {
-                    // Assume it's a J2K directory
-                    (
-                        Some(video_path),
-                        audio
-                            .as_ref()
-                            .map(|a| vec![PathBuf::from(a)])
-                            .unwrap_or_default(),
-                    )
+                        let (source_width, source_height) =
+                            imfwizard_core::source_picture::source_raster(&video_path)
+                                .unwrap_or_else(|e| fail(e));
+                        let picture = imfwizard_core::source_picture::resolve_picture(
+                            &picture_options,
+                            &video_path,
+                            source_width,
+                            source_height,
+                            is_image_sequence,
+                        )
+                        .unwrap_or_else(|e| fail(e));
+                        tracing::info!("Picture: {}", picture.plan.describe());
+                        tracing::info!("Compressor: Grok");
+
+                        let preset_bitrate_mbps = preset.as_ref().map(|p| p.bitrate_mbps);
+                        if let (Some(mbps), Some(p)) = (bitrate, &preset)
+                            && mbps != p.bitrate_mbps
+                        {
+                            tracing::info!(
+                                "--bitrate {mbps} Mbps overrides preset {} ({} Mbps)",
+                                p.name,
+                                p.bitrate_mbps
+                            );
+                        }
+                        let compression_ratio = imfwizard_core::encode::compression_ratio_for_job(
+                            bitrate,
+                            preset_bitrate_mbps,
+                            picture.encode_width,
+                            picture.encode_height,
+                            rate_num as f64 / rate_den.max(1) as f64,
+                        );
+                        match bitrate.or(preset_bitrate_mbps) {
+                            Some(mbps) => {
+                                tracing::info!("Bitrate {mbps} Mbps (ratio {compression_ratio:.1})")
+                            }
+                            None => tracing::info!("Ratio {compression_ratio:.1}"),
+                        }
+
+                        // encode via the shared grok pipeline (grk_compress); no fallback
+                        let encoded = encode_picture(
+                            &video_path,
+                            &output,
+                            &postkit::pipeline::EncodeRunOptions {
+                                compression_ratio,
+                                fps: encode_fps,
+                                source_colour: source_colour.clone(),
+                                subtitle_burn: build_subtitle_burn(encode_fps),
+                                picture: picture.processing.clone(),
+                                ..Default::default()
+                            },
+                        );
+                        let j2k_out = match encoded {
+                            Ok(r) => {
+                                tracing::info!("Encoded {} frames", r.frames_encoded);
+                                r.j2k_dir
+                            }
+                            Err(e) => {
+                                eprintln!("Error: Encode failed: {e}");
+                                std::process::exit(1);
+                            }
+                        };
+
+                        // an image sequence carries no sound, so only a container
+                        // is worth demuxing
+                        let audio_files = match (&audio, is_image_sequence) {
+                            (Some(a), _) => vec![PathBuf::from(a)],
+                            (None, true) => vec![],
+                            (None, false) => {
+                                let wav_out = output.join("audio_demux.wav");
+                                let demux = std::process::Command::new("ffmpeg")
+                                    .arg("-y")
+                                    .arg("-i")
+                                    .arg(&video_path)
+                                    .arg("-vn")
+                                    .arg("-acodec")
+                                    .arg("pcm_s24le")
+                                    .arg("-ar")
+                                    .arg("48000")
+                                    .arg(&wav_out)
+                                    .output();
+                                match demux {
+                                    Ok(o) if o.status.success() => {
+                                        tracing::info!("Demuxed audio: {}", wav_out.display());
+                                        vec![wav_out]
+                                    }
+                                    _ => vec![],
+                                }
+                            }
+                        };
+
+                        (Some(j2k_out), audio_files)
+                    }
                 }
             } else {
                 (

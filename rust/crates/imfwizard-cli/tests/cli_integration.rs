@@ -435,6 +435,88 @@ fn a_video_source_encodes_and_packages() {
     );
 }
 
+/// `create` classifies its picture the way the GUI does, so a directory of
+/// stills encodes through postkit instead of reaching the MXF wrapper as
+/// codestreams it cannot read.
+#[test]
+fn an_image_sequence_directory_encodes_and_packages() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    if postkit::grok::find_grk_compress().is_none() {
+        eprintln!("skipping: grk_compress not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let frames = dir.path().join("frames");
+    std::fs::create_dir_all(&frames).unwrap();
+    let made = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=s=1920x1080:r=24",
+            "-frames:v",
+            "3",
+            // the tiff encoder writes 8 or 16 bits a component and App 2E takes
+            // 8, 10 or 12
+            "-pix_fmt",
+            "rgb24",
+        ])
+        .arg(frames.join("frame_%06d.tif"))
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Sequence Smoke",
+            "--video",
+            &frames.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    // the image-sequence encoder names its codestreams .j2k where the video one
+    // names them .j2c
+    let codestreams = std::fs::read_dir(output.join("j2k"))
+        .expect("j2k output directory")
+        .filter(|entry| {
+            entry.as_ref().is_ok_and(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|x| x == "j2c" || x == "j2k")
+            })
+        })
+        .count();
+    assert_eq!(codestreams, 3, "one codestream per source frame");
+
+    let package: Vec<_> = std::fs::read_dir(&output)
+        .unwrap()
+        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+        .collect();
+    assert!(package.iter().any(|n| n == "ASSETMAP.xml"), "{package:?}");
+    assert!(package.iter().any(|n| n.starts_with("CPL_")), "{package:?}");
+    assert!(
+        package.iter().any(|n| n.starts_with("VIDEO_")),
+        "{package:?}"
+    );
+}
+
 /// A burn draws display-RGB text onto decoded frames, so every route that hands
 /// the encoder X'Y'Z' or nothing to draw on has to be refused before an encode
 /// starts.
