@@ -650,6 +650,8 @@ function readSourceSettings() {
     burnEffect: document.getElementById("prop-burn-effect")?.value || null,
     burnEffectColour: document.getElementById("prop-burn-effect-colour")?.value?.trim() || null,
     burnOutlineWidth: burnPercent("prop-burn-outline-width", "Burn-in outline width"),
+    burnLineHeight: burnPercent("prop-burn-line-height", "Burn-in line height"),
+    burnMargin: burnPercent("prop-burn-margin", "Burn-in margin"),
     burnFadeUp: burnMilliseconds("prop-burn-fade-up", "Burn-in fade up"),
     burnFadeDown: burnMilliseconds("prop-burn-fade-down", "Burn-in fade down"),
     cropLeft: cropPixels("prop-crop-left", "Crop left"),

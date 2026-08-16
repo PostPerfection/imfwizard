@@ -198,6 +198,20 @@ static BURN_OUTLINE_WIDTH_HELP: std::sync::LazyLock<String> = std::sync::LazyLoc
     )
 });
 
+static BURN_LINE_HEIGHT_HELP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Line box height as a multiple of the burnt-in text height (default: {})",
+        postkit::subtitle_raster::DEFAULT_LINE_HEIGHT_RATIO
+    )
+});
+
+static BURN_MARGIN_HELP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Distance from the anchored edge as a percent of the frame height (default: {:.1})",
+        postkit::subtitle_raster::DEFAULT_MARGIN_RATIO * PERCENT_OF_A_WHOLE
+    )
+});
+
 /// Everything `create` takes about a burnt-in subtitle: the cue file, the face
 /// to draw it with, and how the text looks. Boxed where it is flattened, for the
 /// reason `PictureArguments` is. Every appearance flag is optional, so a value
@@ -232,6 +246,12 @@ struct BurnArguments {
 
     #[arg(long = "burn-outline-width", help = BURN_OUTLINE_WIDTH_HELP.as_str())]
     burn_outline_width: Option<f32>,
+
+    #[arg(long = "burn-line-height", help = BURN_LINE_HEIGHT_HELP.as_str())]
+    burn_line_height: Option<f32>,
+
+    #[arg(long = "burn-margin", help = BURN_MARGIN_HELP.as_str())]
+    burn_margin: Option<f32>,
 
     /// Horizontal stretch of the burnt-in text, where 1.0 leaves it alone.
     #[arg(long = "burn-x-scale")]
@@ -269,6 +289,8 @@ impl BurnArguments {
             }),
             effect_colour: colour("--burn-effect-colour", &self.burn_effect_colour),
             outline_width_percent: self.burn_outline_width,
+            line_height_ratio: self.burn_line_height,
+            margin_percent: self.burn_margin,
             x_scale: self.burn_x_scale,
             y_scale: self.burn_y_scale,
             fade_up_ms: self.burn_fade_up,
@@ -285,6 +307,8 @@ impl BurnArguments {
             ("--burn-effect", self.burn_effect.is_some()),
             ("--burn-effect-colour", self.burn_effect_colour.is_some()),
             ("--burn-outline-width", self.burn_outline_width.is_some()),
+            ("--burn-line-height", self.burn_line_height.is_some()),
+            ("--burn-margin", self.burn_margin.is_some()),
             ("--burn-x-scale", self.burn_x_scale.is_some()),
             ("--burn-y-scale", self.burn_y_scale.is_some()),
             ("--burn-fade-up", self.burn_fade_up.is_some()),

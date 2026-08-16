@@ -1537,6 +1537,14 @@ fn a_burn_appearance_flag_is_refused_by_name() {
             create(&["--burn-fade-up", "250"], false),
             "--burn-fade-up needs --burn-subtitle",
         ),
+        (
+            create(&["--burn-margin", "10"], false),
+            "--burn-margin needs --burn-subtitle",
+        ),
+        (
+            create(&["--burn-line-height", "0.5"], true),
+            "burn-in appearance: a line height",
+        ),
     ] {
         command
             .assert()

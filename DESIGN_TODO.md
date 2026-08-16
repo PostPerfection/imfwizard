@@ -100,11 +100,6 @@ order `create` builds its sources in.
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok
   exposes through grok-ffi before scoping. Shared with dcpwizard, one postkit fix.
-- Burn-in line height and margin. `create` reaches every field of postkit's
-  `BurnStyleOverrides`, but `BurnStyle::line_height_ratio` and `margin_ratio`
-  have no override field, so a caller cannot set line spacing or the distance
-  from the anchored edge. They land in PK subtitle_raster.rs and are tracked in
-  dcpwizard's DESIGN_TODO, one shared fix.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop

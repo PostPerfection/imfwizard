@@ -83,6 +83,10 @@ pub struct SourceSettings {
     #[serde(default)]
     pub burn_outline_width: Option<f32>,
     #[serde(default)]
+    pub burn_line_height: Option<f32>,
+    #[serde(default)]
+    pub burn_margin: Option<f32>,
+    #[serde(default)]
     pub burn_fade_up: Option<u64>,
     #[serde(default)]
     pub burn_fade_down: Option<u64>,
@@ -184,6 +188,8 @@ impl SourceSettings {
             effect,
             effect_colour: colour("Burn-in effect colour", &self.burn_effect_colour)?,
             outline_width_percent: self.burn_outline_width,
+            line_height_ratio: self.burn_line_height,
+            margin_percent: self.burn_margin,
             x_scale: None,
             y_scale: None,
             fade_up_ms: self.burn_fade_up,
