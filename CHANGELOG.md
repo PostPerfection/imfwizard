@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`to-dcp` wrote a CPL missing its identity fields** — the generated CPL carried no `AnnotationText`, the PKL's was empty, and no reel asset had a `<Hash>`, all of which Bv2.1 wants and libdcp writes. The asset hashes were already computed for the PKL, so the CPL now repeats them
+- **KDMs and signatures carried DER-order distinguished names** — the vendored postkit predated the RFC 4514 ordering fix, so a projector matching a KDM recipient saw a name it did not recognise
+
 ## [1.2.0] - 2026-08-13
 
 ### Added

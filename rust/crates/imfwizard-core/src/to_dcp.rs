@@ -213,7 +213,7 @@ fn build_dcp(
 
     let pkl_path = opts.output_dir.join(format!("PKL_{pkl_uuid}.xml"));
     write_pkl(
-        &pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &assets,
+        &pkl_path, &pkl_uuid, &cpl_uuid, &cpl_hash, cpl_size, &title, &assets,
     )?;
 
     write_assetmap(
@@ -494,12 +494,14 @@ fn write_cpl(
                 reel.picture_duration = a.duration;
                 reel.picture_width = width;
                 reel.picture_height = height;
+                reel.picture_hash = Some(a.hash_b64.clone());
             }
             AssetKind::Sound => {
                 reel.sound_id = Some(a.uuid.clone());
                 reel.sound_edit_rate_num = a.fps_num;
                 reel.sound_edit_rate_den = a.fps_den;
                 reel.sound_duration = a.duration;
+                reel.sound_hash = Some(a.hash_b64.clone());
             }
         }
     }
@@ -511,17 +513,21 @@ fn write_cpl(
         issuer: "IMF Wizard".to_string(),
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
+        // Bv2.1 8.1: present, and equal to the content title
+        annotation_text: Some(title.to_string()),
         reels: vec![reel],
     };
     std::fs::write(path, cpl.to_xml()).map_err(|e| format!("writing CPL {}: {e}", path.display()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_pkl(
     path: &Path,
     pkl_uuid: &str,
     cpl_uuid: &str,
     cpl_hash: &str,
     cpl_size: u64,
+    title: &str,
     assets: &[DcpAsset],
 ) -> Result<(), String> {
     let mut pkl_assets = vec![PklAsset {
@@ -545,7 +551,8 @@ fn write_pkl(
         creator: "IMF Wizard".to_string(),
         issue_date: crate::issue_date(),
         assets: pkl_assets,
-        annotation: None,
+        // Bv2.1 8.1: the PKL repeats the CPL's content title
+        annotation: Some(title.to_string()),
     };
     std::fs::write(path, pkl.to_xml()).map_err(|e| format!("writing PKL {}: {e}", path.display()))
 }
@@ -679,6 +686,7 @@ mod tests {
             cpl_uuid,
             "kO0m3F3qX3qg3n3qg3n3qg3n3q0=",
             100,
+            "Test Title",
             &assets,
         )
         .unwrap();
