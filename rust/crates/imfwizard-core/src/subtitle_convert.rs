@@ -74,12 +74,10 @@ impl TextAppearance {
     /// Refuse a size the TTML could not carry. The range is the rasteriser's,
     /// which measures the same percent of the frame height.
     pub fn check(&self) -> Result<(), String> {
-        postkit::subtitle_raster::BurnStyleOverrides {
-            font_size_percent: self.font_size_percent,
-            ..Default::default()
+        match self.font_size_percent {
+            Some(percent) => postkit::subtitle_raster::check_font_size_percent(percent),
+            None => Ok(()),
         }
-        .apply(postkit::subtitle_raster::BurnStyle::default())
-        .map(|_| ())
     }
 
     /// The `tts:` attributes for the default style, or None when the caller
