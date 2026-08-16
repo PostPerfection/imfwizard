@@ -48,11 +48,26 @@ impl CreatePlan {
     }
 }
 
+/// What a picture has to be for the encode to read it. A held still is not in
+/// this set: it is decoded on its own, so the check skips one.
+pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
+    format!(
+        "{} is not a picture the encoder can read: it takes a video container \
+         (mp4, mov, mkv, avi, mxf, ts, m2ts, webm), a directory of images \
+         (tif, tiff, dpx, exr, bmp), a directory of J2K codestreams (j2c, j2k), \
+         or a single still image held for a length",
+        picture.display()
+    )
+}
+
 /// Run every plan-time refusal, cheapest and most specific first so a job with
 /// two faults names the one a reader can act on.
 pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     plan.picture_options.check()?;
     if let Some(picture) = &plan.picture {
+        if plan.still_frames.is_none() && detect_input_type(picture) == InputType::Unknown {
+            return Err(unclassified_picture_refusal(picture));
+        }
         crate::source_colourspace::reject_on_precompressed_picture(picture, &plan.source_colour)?;
         crate::source_picture::reject_on_precompressed_picture(picture, &plan.picture_options)?;
     }
@@ -157,6 +172,26 @@ mod tests {
 
         assert!(error.contains("2048x872"), "{error}");
         assert!(!output.exists(), "the check must write nothing");
+    }
+
+    /// A picture the encoder cannot classify has to be named as such, not left
+    /// to a size probe that fails for a different reason.
+    #[test]
+    fn a_picture_that_is_none_of_the_shapes_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let loose = dir.path().join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        std::fs::write(loose.join("notes.txt"), "not a frame").unwrap();
+
+        let plan = CreatePlan {
+            picture: Some(loose),
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        let error = check_before_encode(&plan).unwrap_err();
+
+        assert!(error.contains("tif, tiff, dpx, exr, bmp"), "{error}");
     }
 
     #[test]
