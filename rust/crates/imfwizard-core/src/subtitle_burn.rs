@@ -107,8 +107,6 @@ pub struct BurnTarget<'a> {
     pub frames_already_xyz: bool,
     /// The picture is a J2K directory, so nothing decodes.
     pub input_is_codestreams: bool,
-    /// The picture is one image held for a duration.
-    pub input_is_held_still: bool,
 }
 
 /// Refuse a `--burn-subtitle` the encode cannot honour, before anything is
@@ -130,13 +128,6 @@ pub fn check_burn_supported(burn_path: &Path, target: &BurnTarget) -> Result<(),
     if target.input_is_codestreams {
         return Err(
             "--burn-subtitle needs frames to draw on, and a J2K directory is already compressed"
-                .into(),
-        );
-    }
-    if target.input_is_held_still {
-        return Err(
-            "--burn-subtitle cannot go on a --still-length hold: the image is encoded once and \
-             the codestream repeated, so every frame would carry the cues of the first one"
                 .into(),
         );
     }

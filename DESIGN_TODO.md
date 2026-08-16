@@ -78,11 +78,11 @@ repos plus postkit, not an imfwizard-only fix.
   Trimming five minutes out of a two-hour source still encodes the two hours.
   A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
   postkit.
-- A still input is whatever `postkit::encode::detect_image_format` reads: dpx,
-  tif/tiff, exr, png, bmp. There is no jpeg arm there, so a .jpg still is refused
-  even though the README's encoder bullet claims JPEG. Same gap for jpeg image
-  sequences into `encode`/`create`. easyDCP advertises JPEG and BMP input (surveyed
-  2026-08-16, dcpwizard DESIGN_TODO batch E has the full survey).
+- A jpeg image sequence into `encode`/`create` is refused: those frames go to
+  grok's own loader through `postkit::encode::detect_image_format`, which has no
+  jpeg arm, even though the README's encoder bullet claims JPEG. A lone jpeg still
+  is fine, since a held still is decoded by ffmpeg. easyDCP advertises JPEG and BMP
+  input (surveyed 2026-08-16, dcpwizard DESIGN_TODO batch E has the full survey).
 - GPU J2K encoding. easyDCP and DCP-o-matic both offer GPU/CUDA acceleration;
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok
@@ -95,12 +95,14 @@ repos plus postkit, not an imfwizard-only fix.
   in the struct but no flag reaches them, and outline, shadow, effect colour and
   outline width are not in the rasteriser at all. They land in PK
   subtitle_raster.rs and are tracked in dcpwizard's DESIGN_TODO, one shared fix.
-- A `--still-length` hold refuses a burn. The image is encoded once and the
-  codestream repeated, so every frame would carry the cues of the first one.
-  dcpwizard encodes one frame per run of frames sharing a cue set, which its still
-  builder can do because it drives grok directly. imfwizard's goes through
-  `postkit::pipeline`, which has no way to say which composition frame a one-image
-  sequence stands for.
+- `--hdr` only contradicts a source colour space when one was spelled out.
+  `create` refuses `--hdr` together with a `--source-colourspace` the encoder
+  would transform, but the check reads the flag rather than the resolved colour,
+  so `--hdr pq-bt2020` on its own falls through to the rec709 default and the
+  encoder runs its X'Y'Z' transform over essence the CPL has just labelled
+  untransformed. Reading the resolved `SourceColour` instead of `colourspace`
+  fixes it, and would make the `--burn-subtitle` refusal one condition rather
+  than two.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop

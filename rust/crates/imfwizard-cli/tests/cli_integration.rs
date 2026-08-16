@@ -431,8 +431,6 @@ fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
     std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:02,000\nhello\n\n").unwrap();
     let clip = dir.path().join("clip.mov");
     std::fs::write(&clip, b"not really a movie").unwrap();
-    let still = dir.path().join("slate.png");
-    std::fs::write(&still, b"not really a png").unwrap();
     let codestreams = dir.path().join("j2k");
     std::fs::create_dir_all(&codestreams).unwrap();
     std::fs::write(codestreams.join("frame_00000000.j2c"), b"codestream").unwrap();
@@ -461,10 +459,6 @@ fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
         ),
         (create(&clip, &["--hdr", "pq-bt2020"]), "X'Y'Z' already"),
         (create(&codestreams, &[]), "already compressed"),
-        (
-            create(&still, &["--still-length", "48f"]),
-            "--still-length hold",
-        ),
         (
             create(&clip, &["--subtitle", &srt.to_string_lossy()]),
             "pick one",
@@ -525,6 +519,100 @@ fn a_burnt_subtitle_changes_the_encoded_picture() {
         first_codestream("burnt", true),
         "the burn never reached the encoder"
     );
+}
+
+/// A held still is the input shape with no decoder of its own, so this is the
+/// one that proves the burn is not tied to the video path. The hold costs one
+/// encode per run of frames sharing a cue set, not one per frame.
+#[test]
+fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let card = dir.path().join("card.png");
+    let made = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=gray:s=1920x1080",
+            "-frames:v",
+            "1",
+        ])
+        .arg(&card)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(
+        &srt,
+        "1\n00:00:00,000 --> 00:00:01,000\nfirst line\n\n\
+         2\n00:00:02,000 --> 00:00:03,000\nsecond line\n\n",
+    )
+    .unwrap();
+    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(&srt, None, 24).is_err() {
+        eprintln!("skipping: no font available to burn with");
+        return;
+    }
+
+    let output = dir.path().join("imp");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Burnt Still",
+            "--video",
+            &card.to_string_lossy(),
+            "--still-length",
+            "3s",
+            "--burn-subtitle",
+            &srt.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    // 3 seconds of hold over cues at 0-1s and 2-3s: the picture changes at
+    // frames 24, 48 and 72, so four distinct frames are encoded.
+    let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
+    let frame = |index: u64| std::fs::read(held.join(format!("frame_{index:08}.j2c"))).unwrap();
+    assert_eq!(
+        (0..72u64)
+            .filter(|i| held.join(format!("frame_{i:08}.j2c")).exists())
+            .count(),
+        72,
+        "every frame of the hold needs a file"
+    );
+    assert_eq!(frame(0), frame(12), "frames under one cue must be the same");
+    assert_ne!(
+        frame(0),
+        frame(24),
+        "the frame where the first cue ends must be a different picture"
+    );
+    assert_ne!(
+        frame(24),
+        frame(48),
+        "the frame where the second cue starts must be a different picture"
+    );
+
+    let package: Vec<_> = std::fs::read_dir(&output)
+        .unwrap()
+        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+        .collect();
+    assert!(package.iter().any(|n| n == "ASSETMAP.xml"), "{package:?}");
+    assert!(package.iter().any(|n| n.starts_with("CPL_")), "{package:?}");
 }
 
 /// The wrapper refuses an illegal raster, but only once the encode has already

@@ -234,7 +234,6 @@ pub async fn submit_job(
                     frames_already_xyz: !source_colour.applies_xyz_transform(),
                     input_is_codestreams: postkit::encode::detect_input_type(&picture)
                         == postkit::encode::InputType::J2kSequence,
-                    input_is_held_still: still_frames.is_some(),
                 },
             )?;
         }
@@ -565,6 +564,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)?;
         }
         let compression_ratio = probed
+            .as_ref()
             .map(|info| {
                 let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
                 let raw_bits = info.width as f64 * info.height as f64 * 36.0;
@@ -577,56 +577,65 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let enc_dir = output.join(format!("enc_{idx}"));
         let app_ref = app.clone();
         let log_ref = log_file.clone();
-        // a still is staged alone so the image-sequence encoder sees one frame
-        let still_scratch = match job.still_frames {
-            Some(_) => Some(imfwizard_core::still::prepare_still_source(
-                &video_path,
-                &enc_dir,
-            )?),
-            None => None,
-        };
-        let (encode_input, encode_output) = match &still_scratch {
-            Some(scratch) => (&scratch.source_dir, &scratch.encode_dir),
-            None => (&video_path, &enc_dir),
-        };
-        let encode_result = postkit::pipeline::run_encode_with_options(
-            encode_input,
-            encode_output,
-            &postkit::pipeline::EncodeRunOptions {
-                compression_ratio,
-                fps: job.fps_num,
-                source_colour: job.source_colour.clone(),
-                subtitle_burn: subtitle_burn.clone(),
-                ..Default::default()
-            },
-            &cancel,
-            &pause,
-            |p| {
-                // scale each composition's 0..100 into its slice of the whole job
-                let scaled = (idx as f64 + p.percent / 100.0) / n as f64 * 100.0;
-                emit_progress(
-                    &app_ref,
-                    job_id,
-                    &p.stage,
-                    &p.message,
-                    p.frame,
-                    p.total_frames,
-                    p.fps,
-                    p.elapsed_secs,
-                    scaled,
-                );
-            },
-            |msg| log_to(&log_ref, msg),
-        )?;
-        total_elapsed += encode_result.elapsed_secs;
-
+        // a still never reaches the pipeline: it is one encode per run of frames
+        // sharing a cue set, linked for the rest of the hold
         let picture_dir = match job.still_frames {
-            Some(hold_for) => imfwizard_core::still::hold_frames(
-                &encode_result.j2k_dir,
-                hold_for,
-                &enc_dir.join(imfwizard_core::still::HELD_PICTURE_DIR),
-            )?,
-            None => encode_result.j2k_dir.clone(),
+            Some(hold_for) => {
+                let info = probed
+                    .ok_or_else(|| format!("cannot read the size of {}", video_path.display()))?;
+                let held = enc_dir.join(imfwizard_core::still::HELD_PICTURE_DIR);
+                imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
+                    image: &video_path,
+                    frames: hold_for,
+                    fps: job.fps_num,
+                    width: info.width,
+                    height: info.height,
+                    source_colour: &job.source_colour,
+                    burn: subtitle_burn.clone(),
+                    out_dir: &held,
+                })?;
+                log_to(
+                    &log_file,
+                    &format!(
+                        "[ENCODE] Still held for {hold_for} frame(s) at {}x{}",
+                        info.width, info.height
+                    ),
+                );
+                held
+            }
+            None => {
+                let encode_result = postkit::pipeline::run_encode_with_options(
+                    &video_path,
+                    &enc_dir,
+                    &postkit::pipeline::EncodeRunOptions {
+                        compression_ratio,
+                        fps: job.fps_num,
+                        source_colour: job.source_colour.clone(),
+                        subtitle_burn: subtitle_burn.clone(),
+                        ..Default::default()
+                    },
+                    &cancel,
+                    &pause,
+                    |p| {
+                        // scale each composition's 0..100 into its slice of the whole job
+                        let scaled = (idx as f64 + p.percent / 100.0) / n as f64 * 100.0;
+                        emit_progress(
+                            &app_ref,
+                            job_id,
+                            &p.stage,
+                            &p.message,
+                            p.frame,
+                            p.total_frames,
+                            p.fps,
+                            p.elapsed_secs,
+                            scaled,
+                        );
+                    },
+                    |msg| log_to(&log_ref, msg),
+                )?;
+                total_elapsed += encode_result.elapsed_secs;
+                encode_result.j2k_dir
+            }
         };
 
         let source = imfwizard_core::source_edits::apply_source_edits(

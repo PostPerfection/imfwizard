@@ -1267,7 +1267,6 @@ fn run() {
                         frames_already_xyz: !source_colour.applies_xyz_transform() || hdr.is_some(),
                         input_is_codestreams: postkit::encode::detect_input_type(picture)
                             == postkit::encode::InputType::J2kSequence,
-                        input_is_held_still: still_input.is_some(),
                     },
                 )
                 .unwrap_or_else(|e| fail(e));
@@ -1295,23 +1294,26 @@ fn run() {
                 (&still_input, still_frames)
             {
                 tracing::info!("Holding {} for {hold_for} frames", image.display());
-                let scratch = imfwizard_core::still::prepare_still_source(image, &output)
-                    .unwrap_or_else(|e| fail(e));
-                let encoded = encode_picture(
-                    &scratch.source_dir,
-                    &scratch.encode_dir,
-                    &postkit::pipeline::EncodeRunOptions {
-                        fps: fps_num / fps_den.max(1),
-                        source_colour: source_colour.clone(),
-                        ..Default::default()
-                    },
-                )
-                .unwrap_or_else(|e| fail(format!("Encode failed: {e}")));
-                let held = imfwizard_core::still::hold_frames(
-                    &encoded.j2k_dir,
-                    hold_for,
-                    &output.join(imfwizard_core::still::HELD_PICTURE_DIR),
-                )
+                let info = imfwizard_core::probe::probe_video(image).unwrap_or_else(|| {
+                    fail(format!("cannot read the size of {}", image.display()))
+                });
+                if let Err(error) =
+                    imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)
+                {
+                    fail(error);
+                }
+                let fps = fps_num / fps_den.max(1);
+                let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
+                imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
+                    image,
+                    frames: hold_for,
+                    fps,
+                    width: info.width,
+                    height: info.height,
+                    source_colour: &source_colour,
+                    burn: build_subtitle_burn(fps),
+                    out_dir: &held,
+                })
                 .unwrap_or_else(|e| fail(e));
                 (
                     Some(held),

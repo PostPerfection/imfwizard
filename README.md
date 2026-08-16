@@ -28,10 +28,10 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok (`grk_compress`)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
-- **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source, a J2K directory or a held still is refused
+- **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source or a J2K directory is refused
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
-- **Still image with duration**, `create --still-length` holds a single image (dpx, tif, exr, png, bmp) for that long, encoding it once and repeating the codestream
+- **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
 ### HDR & Advanced
 - **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties

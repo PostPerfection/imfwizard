@@ -25,7 +25,6 @@ fn video_source(timed_text: &[PathBuf]) -> BurnTarget<'_> {
         timed_text,
         frames_already_xyz: false,
         input_is_codestreams: false,
-        input_is_held_still: false,
     }
 }
 
@@ -62,17 +61,6 @@ fn a_burn_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
                 },
             ),
             "already compressed",
-        ),
-        (
-            "held still",
-            check_burn_supported(
-                &srt,
-                &BurnTarget {
-                    input_is_held_still: true,
-                    ..video_source(&[])
-                },
-            ),
-            "--still-length hold",
         ),
         (
             "frames already X'Y'Z'",
