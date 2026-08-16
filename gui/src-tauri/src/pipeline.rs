@@ -525,6 +525,42 @@ pub async fn detect_source_crop(
     })
 }
 
+/// Where the preview's SRT copies of the packaged timed text are written, inside
+/// the app's cache folder.
+const PREVIEW_SUBTITLE_DIRECTORY: &str = "preview-subtitles";
+
+/// A subtitle file the preview player can render, converting the composition's
+/// timed text to SRT when mpv cannot read it as it stands.
+#[tauri::command]
+pub async fn subtitle_file_for_preview(
+    app: AppHandle,
+    subtitle_path: String,
+    framerate: String,
+) -> Result<String, String> {
+    let work_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("no cache folder to write the preview subtitles into: {e}"))?
+        .join(PREVIEW_SUBTITLE_DIRECTORY);
+    let playable = imfwizard_core::subtitle_preview::playable_subtitle_file(
+        &PathBuf::from(&subtitle_path),
+        parse_framerate(&framerate)?,
+        &work_dir,
+    )?;
+    Ok(playable.to_string_lossy().into_owned())
+}
+
+/// The Frame Rate menu's `num/den` spelling as frames per second.
+fn parse_framerate(framerate: &str) -> Result<f64, String> {
+    let parsed = || {
+        let (numerator, denominator) = framerate.split_once('/')?;
+        let numerator: f64 = numerator.parse().ok()?;
+        let denominator: f64 = denominator.parse().ok()?;
+        (denominator > 0.0).then(|| numerator / denominator)
+    };
+    parsed().ok_or_else(|| format!("{framerate} is not a frame rate"))
+}
+
 /// The channel count and lane names an audio mapping matrix is laid out from.
 #[derive(Serialize)]
 pub struct AudioMapShape {

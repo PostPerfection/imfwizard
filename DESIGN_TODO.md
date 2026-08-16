@@ -129,11 +129,15 @@ order `create` builds its sources in.
   them would need the plan to carry which front end built it.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
   items in dcpwizard's DESIGN_TODO): a codestream forensics section in the QC
-  report (decomp levels, precincts, tile-parts, POC, MCT, worst frame vs cap),
-  and subtitle/CC render toggles in the preview. The playback overlays (safe
+  report (decomp levels, precincts, tile-parts, POC, MCT, worst frame vs cap).
+  `report` asks dcpdoctor for it with `scan_every_frame`, which the DCP verify
+  path reads and the IMF one does not, so an IMP's report carries the measured
+  picture bitrate `check_picture_details` gives and no forensics line until
+  dcpdoctor's IMF path runs the codestream scan too. The playback overlays (safe
   area, aspect mask, centre cross, thirds grid), the decode resolution control
-  (full/half/quarter through the J2K decoder's `lowres`) and the player HUD
-  (frame, fps, buffer depth, dropped frames) landed in guikit's preview header,
+  (full/half/quarter through the J2K decoder's `lowres`), the player HUD
+  (frame, fps, buffer depth, dropped frames), the crop overlay and the
+  subtitle/CC render toggles landed in guikit's preview header,
   shared with dcpwizard, verified with the mpv CLI and not yet clicked through
   in the running window. The CLI did
   have dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>`
@@ -143,10 +147,10 @@ order `create` builds its sources in.
   encode itself: postkit's `PipelineProgress` carries a stage name, a frame
   count and an elapsed clock, and nothing that separates the three, so it would
   take a wider progress payload from postkit first.
-  The survey's crop indicator is
-  served for now by the `PicturePlan::describe()` line the CLI and the GUI both
-  log, and by the plan the GUI's Auto-crop button shows. Drawing the crop over
-  the preview picture is still open.
+  Preview subtitles stop at the source picture: the Sub button carries the
+  composition's timed text written out as SRT, and after a build nothing unwraps
+  the packaged AS-02 timed text track back to cues, so a built IMP plays with
+  no subtitles.
 
 ## Open: DCP-o-matic hints not ported (2026-08-16)
 

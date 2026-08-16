@@ -39,6 +39,7 @@ pub mod burnin;
 pub mod scc;
 pub mod subtitle_burn;
 pub mod subtitle_convert;
+pub mod subtitle_preview;
 
 // Infrastructure
 pub mod executor;

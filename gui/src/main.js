@@ -4,7 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, isPreviewVisible } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
 
@@ -521,11 +521,84 @@ document.getElementById("btn-open-project")?.addEventListener("click", async () 
 });
 
 // === Preview ===
+const CROP_SIDES = ["left", "right", "top", "bottom"];
+
+// mpv refuses a subtitle track until the clip it goes on has loaded, and
+// preview_load only asks for the load, so a duration is the signal it landed.
+const PREVIEW_LOAD_POLL_MILLISECONDS = 100;
+const PREVIEW_LOAD_POLL_ATTEMPTS = 30;
+
+// A preview opened while an earlier one's subtitle is still converting must not
+// be given that track.
+let previewGeneration = 0;
+let previewShowsJobPicture = false;
+
 document.getElementById("btn-preview")?.addEventListener("click", () => {
   const seg = project.segments[0];
-  if (seg?.picture) { previewFile(seg.picture.path); }
+  if (seg?.picture) { previewProjectFile(seg.picture.path); }
   else { tauriMessage("Import a video asset first"); }
 });
+
+// The preview shows what the build will do to the picture, so a file a
+// composition takes as its picture carries the crop and that segment's timed
+// text, and any other file plays plain.
+function previewProjectFile(path) {
+  previewGeneration += 1;
+  const generation = previewGeneration;
+  previewFile(path);
+  const segment = project.segments.find(s => s.picture?.path === path);
+  previewShowsJobPicture = Boolean(segment);
+  setPreviewCrop(segment ? currentCrop() : null);
+  if (segment?.subtitle?.path) showPreviewSubtitle(segment.subtitle.path, generation);
+}
+
+// The built IMP carries the crop in its pictures already, and nothing here
+// unwraps its timed text track back to cues.
+function previewBuiltPackage(outputDir) {
+  previewGeneration += 1;
+  previewShowsJobPicture = false;
+  previewDcp(outputDir);
+  setPreviewCrop(null);
+}
+
+function currentCrop() {
+  const crop = {};
+  for (const side of CROP_SIDES) {
+    crop[side] = parseInt(document.getElementById(`prop-crop-${side}`)?.value) || 0;
+  }
+  return CROP_SIDES.some(side => crop[side] > 0) ? crop : null;
+}
+
+for (const side of CROP_SIDES) {
+  document.getElementById(`prop-crop-${side}`)?.addEventListener("input", () => {
+    if (previewShowsJobPicture && isPreviewVisible()) setPreviewCrop(currentCrop());
+  });
+}
+
+async function showPreviewSubtitle(subtitlePath, generation) {
+  let playable;
+  try {
+    playable = await invoke("subtitle_file_for_preview", {
+      subtitlePath,
+      framerate: document.getElementById("prop-framerate")?.value || "24/1",
+    });
+  } catch (e) {
+    console.error("[preview] subtitles not shown:", e);
+    setStatus(`Preview subtitles: ${e}`);
+    return;
+  }
+  const loaded = await previewClipLoaded();
+  if (loaded && generation === previewGeneration) setPreviewSubtitleFile(playable);
+}
+
+async function previewClipLoaded() {
+  for (let attempt = 0; attempt < PREVIEW_LOAD_POLL_ATTEMPTS; attempt++) {
+    const duration = await invoke("preview_get_duration").catch(() => 0);
+    if (duration > 0) return true;
+    await new Promise(resolve => setTimeout(resolve, PREVIEW_LOAD_POLL_MILLISECONDS));
+  }
+  return false;
+}
 
 // === Supplement ===
 document.getElementById("btn-supplement")?.addEventListener("click", () => {
@@ -551,10 +624,11 @@ document.getElementById("prop-auto-crop")?.addEventListener("click", async () =>
       videoPath: picture.path,
       threshold: Number.isFinite(threshold) ? threshold : null,
     });
-    for (const side of ["left", "right", "top", "bottom"]) {
+    for (const side of CROP_SIDES) {
       const field = document.getElementById(`prop-crop-${side}`);
       if (field) field.value = crop[side];
     }
+    if (previewShowsJobPicture && isPreviewVisible()) setPreviewCrop(currentCrop());
     plan.textContent = crop.description;
   } catch (e) {
     plan.textContent = "";
@@ -851,7 +925,7 @@ function hidePostBuildActions() {
 
 document.getElementById("post-build-play")?.addEventListener("click", () => {
   const output = finishedOutputDir();
-  if (output) previewDcp(output);
+  if (output) previewBuiltPackage(output);
 });
 
 document.getElementById("post-build-inspect")?.addEventListener("click", () => {
@@ -1409,7 +1483,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
     const asset = project.assets.find(a => a.id === ctxAssetId);
     if (!asset) return;
     if (action === "preview") {
-      previewFile(asset.path);
+      previewProjectFile(asset.path);
     } else if (action === "remove") {
       removeAsset(ctxAssetId);
     } else if (action === "reveal") {
