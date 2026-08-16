@@ -19,6 +19,12 @@ is nothing imf-specific beyond bumping the pin.
 
 ## Deliberately skipped / standing limitations
 
+- SDI monitoring output. The old `sdi-preview` command set an mpv property
+  (`vo-decklink-device`) that mpv does not have, so it played on screen while
+  claiming DeckLink output, and it was removed. A real path is ffmpeg built with
+  `--enable-decklink` writing `-f decklink`, or GStreamer's `decklinkvideosink`,
+  both against the Blackmagic desktop video SDK and driver, so it needs a machine
+  with the card to build and prove.
 - postkit compiled twice, fixed 2026-08-12. `postkit` was a path dep on
   `extern/postkit` while `dcpdoctor-core` came from git carrying its own path dep
   on the postkit inside that checkout, so cargo resolved two copies. dcpdoctor

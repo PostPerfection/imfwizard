@@ -1147,18 +1147,6 @@ enum Commands {
         json: bool,
     },
 
-    /// Preview via SDI output (Decklink/AJA)
-    #[command(name = "sdi-preview")]
-    SdiPreview {
-        /// Input IMP directory or MXF file
-        #[arg(short, long)]
-        input: String,
-
-        /// SDI device index (default 0)
-        #[arg(short, long, default_value = "0")]
-        device: u32,
-    },
-
     /// ACES colour pipeline conversion (IDT → RRT → ODT via ctlrender)
     Aces {
         /// Input image/video
@@ -3252,24 +3240,6 @@ fn run() {
             } else {
                 eprintln!("Atmos import failed: {}", result.error);
                 std::process::exit(1);
-            }
-        }
-
-        Commands::SdiPreview { input, device } => {
-            let player = postkit::mpv::MpvPlayer::new("imfwizard");
-            if let Err(e) = player.start_mpv() {
-                eprintln!("Error starting mpv: {e}");
-                std::process::exit(1);
-            }
-            // Configure Decklink SDI output
-            let _ = player.send_command(&format!("set vo-decklink-device {device}"));
-            if let Err(e) = player.load_package_dir(&input) {
-                eprintln!("Error loading: {e}");
-                std::process::exit(1);
-            }
-            println!("SDI preview on device {device}: {input}");
-            while player.is_alive() {
-                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
 

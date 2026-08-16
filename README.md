@@ -77,7 +77,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Integration & Extensibility
 - **REST API server**, HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
 - **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro 7 XML timelines
-- **SDI preview (Blackmagic DeckLink)**, play J2K frames via mpv DeckLink output
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
@@ -657,13 +656,6 @@ imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 
 ```bash
 # Retime a video file to 25 fps via ffmpeg
 imfwizard retime -i input.mov -o output_25.mov -f 25
-```
-
-### SDI output (Blackmagic DeckLink)
-
-```bash
-# Play an IMP or MXF via mpv DeckLink output on device 0
-imfwizard sdi-preview -i /path/to/imp/ -d 0
 ```
 
 ## Architecture

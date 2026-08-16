@@ -95,12 +95,6 @@ const TOOL_DEFS: &[ToolDef] = &[
         version_args: &["--version"],
     },
     ToolDef {
-        name: "gst-launch-1.0",
-        purpose: "GStreamer pipeline runner (DeckLink SDI output)",
-        required: false,
-        version_args: &["--version"],
-    },
-    ToolDef {
         name: "ascp",
         purpose: "Aspera FASP high-speed transfer",
         required: false,
@@ -266,9 +260,6 @@ pub fn has_wkhtmltopdf() -> bool {
 }
 pub fn has_weasyprint() -> bool {
     tool_available("weasyprint")
-}
-pub fn has_gst_decklink() -> bool {
-    tool_available("gst-launch-1.0")
 }
 pub fn has_ascp() -> bool {
     tool_available("ascp")

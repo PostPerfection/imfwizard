@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Removed
+- **`sdi-preview`**: it set an mpv property mpv does not have and played on screen while claiming DeckLink output. A real SDI path needs ffmpeg or GStreamer built against the Blackmagic SDK, recorded in DESIGN_TODO.
+
 ### Added
 - **Picture bitrate on `create`**: `--bitrate <Mbps>` names the J2K target directly, above 0 and at most 1000, the range the GUI's Bitrate field takes. It wins over the bitrate `--profile` carries and both are logged when they differ. Without either, the encode stays at the 10:1 ratio it has always used. The formula that turns a bitrate into a compression ratio now lives once in `imfwizard-core`'s `compression_ratio_for_bitrate` (raw frame = width x height x 36 bits, 12-bit RGB) and both front ends call it, where the CLI and the GUI each carried their own copy. The GUI keeps its 250 Mbps default.
 - **Image sequences reach `create`**: the CLI classifies its `--video` with the same `detect_input_type` the GUI and the preflight use, so a directory of DPX, TIFF, EXR or BMP frames encodes through postkit instead of being handed to the MXF wrapper as codestreams it cannot read. `--fps-num`/`--fps-den` is the rate, since the frames carry none. A picture that is none of the shapes is refused by name from the preflight, listing what is taken, rather than failing later as a size probe that could not read the folder.
