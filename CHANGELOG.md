@@ -12,6 +12,8 @@
 - **`--video` pointing at one image file now means a still**: it used to encode every image sitting beside it in that folder, which nothing documented. It now needs `--still-length` and encodes only that image. Pointing at the folder still encodes the sequence, unchanged.
 
 ### Fixed
+- **Video encode was unreachable** — postkit routes video input to its in-process grok encoder, which is behind the `grok-ffi` feature, and imfwizard never enabled it. Every `create --video <movie>` failed on the first frame with "grok-ffi feature not enabled", in the CLI and the GUI alike. The feature is now on, so a video source encodes and packages. postkit carries the end-to-end test that proves the video arm works, and the CLI has a smoke test that runs `create` on a real clip
+- **An illegal picture raster burned a whole encode before failing** — App 2E allows four rasters and the wrapper checks them, but only at wrap time, so a 2048x872 source encoded every frame before the packaging step refused it. `create` now checks the probed raster before the encode in both the CLI and the GUI, fails in a second, and names `target-convert` as the way to reach a legal raster
 - **`to-dcp` wrote a CPL missing its identity fields** — the generated CPL carried no `AnnotationText`, the PKL's was empty, and no reel asset had a `<Hash>`, all of which Bv2.1 wants and libdcp writes. The asset hashes were already computed for the PKL, so the CPL now repeats them
 - **KDMs and signatures carried DER-order distinguished names** — the vendored postkit predated the RFC 4514 ordering fix, so a projector matching a KDM recipient saw a name it did not recognise
 

@@ -193,13 +193,30 @@ fn precheck_j2k(input_dir: &std::path::Path) -> Result<(), String> {
     validate_app2e_picture(header.width, header.height, header.bit_depth)
 }
 
-pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<(), String> {
-    let valid_resolutions = [(1920, 1080), (2048, 1080), (3840, 2160), (4096, 2160)];
-    if !valid_resolutions.contains(&(width, height)) {
-        return Err(format!(
-            "App 2E requires 1920x1080, 2048x1080, 3840x2160, or 4096x2160 picture essence, got {width}x{height}"
-        ));
+/// The picture rasters App 2E allows.
+const APP2E_RASTERS: [(u32, u32); 4] = [(1920, 1080), (2048, 1080), (3840, 2160), (4096, 2160)];
+
+/// Check a picture raster against App 2E. Split out of [`validate_app2e_picture`]
+/// so `create` can run it on the probed source before spending a whole encode on
+/// essence the wrapper will refuse.
+pub fn validate_app2e_raster(width: u32, height: u32) -> Result<(), String> {
+    if APP2E_RASTERS.contains(&(width, height)) {
+        return Ok(());
     }
+    let allowed = APP2E_RASTERS
+        .iter()
+        .map(|(w, h)| format!("{w}x{h}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "App 2E requires one of {allowed} picture essence, got {width}x{height}. \
+         Run `imfwizard target-convert` on the source to scale, crop or letterbox it \
+         to a legal raster"
+    ))
+}
+
+pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<(), String> {
+    validate_app2e_raster(width, height)?;
     if !matches!(bit_depth, 8 | 10 | 12) {
         return Err(format!(
             "App 2E requires 8, 10, or 12-bit picture essence, got {bit_depth}-bit"
@@ -217,6 +234,16 @@ mod tests {
         assert!(validate_app2e_picture(1920, 1080, 12).is_ok());
         assert!(validate_app2e_picture(2048, 872, 12).is_err());
         assert!(validate_app2e_picture(2048, 1080, 16).is_err());
+    }
+
+    /// `create` runs this on the probed source before the encode, so the message
+    /// has to name the command that fixes the source.
+    #[test]
+    fn an_illegal_raster_names_the_command_that_fixes_it() {
+        let error = validate_app2e_raster(2048, 872).unwrap_err();
+        assert!(error.contains("2048x872"), "{error}");
+        assert!(error.contains("target-convert"), "{error}");
+        assert!(validate_app2e_raster(4096, 2160).is_ok());
     }
 
     #[test]

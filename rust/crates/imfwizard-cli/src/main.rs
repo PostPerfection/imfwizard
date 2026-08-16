@@ -1302,13 +1302,12 @@ fn run() {
                             info.fps_num,
                             info.fps_den
                         );
-                        if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_picture(
-                            info.width,
-                            info.height,
-                            12,
-                        ) {
-                            eprintln!("Error: {error}");
-                            std::process::exit(1);
+                        // the wrapper refuses an illegal raster too, but only after
+                        // the encode has already run
+                        if let Err(error) =
+                            imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)
+                        {
+                            fail(error);
                         }
                     }
 

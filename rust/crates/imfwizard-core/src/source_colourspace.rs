@@ -1,11 +1,11 @@
 //! The colour space the picture source carries, mapped onto the encode path.
 //!
-//! postkit decides the encoder transform from `encode::SourceColour`, which
-//! offers three shapes: run the built-in Rec.709 to DCI X'Y'Z' transform, run a
-//! 3D LUT during the ffmpeg decode instead, or leave the frames alone. Rec.709
-//! and X'Y'Z' land on the first and the last. The five wide-gamut and log spaces
-//! need a transform postkit does not carry, and are refused rather than encoded
-//! through the Rec.709 matrix, which would be silently wrong colour.
+//! postkit decides the encoder transform from `encode::SourceColour`. Rec.709
+//! takes the built-in Rec.709 to DCI X'Y'Z' transform and X'Y'Z' leaves the
+//! frames alone. postkit also carries `DisplayRgbIn`, a per-space transform that
+//! would cover the five wide-gamut and log spaces, but nothing here builds one
+//! yet, so those spaces are refused rather than encoded through the Rec.709
+//! matrix, which would be silently wrong colour.
 
 use postkit::colour::ColourSpace;
 use postkit::encode::SourceColour;
@@ -38,8 +38,12 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
         // already X'Y'Z', so nothing may transform it again. postkit spells this
         // AlreadyPq for its HDR origin; skipping the transform is its only effect
         ColourSpace::Xyz => Ok(SourceColour::AlreadyPq),
-        _ => Err(format!(
-            "no {space:?} to X'Y'Z' transform is available: postkit models only Rec.709, \
+        ColourSpace::P3
+        | ColourSpace::Rec2020
+        | ColourSpace::Aces
+        | ColourSpace::AcesCg
+        | ColourSpace::LogC => Err(format!(
+            "no {space:?} to X'Y'Z' transform is available here: only Rec.709 is wired up, \
              and converting {space:?} through the Rec.709 matrix would be wrong colour. \
              Convert the source to Rec.709 or X'Y'Z' first"
         )),
@@ -62,7 +66,18 @@ pub fn reject_on_precompressed_picture(
 ) -> Result<(), String> {
     let precompressed =
         postkit::encode::detect_input_type(picture) == postkit::encode::InputType::J2kSequence;
-    if precompressed && *colour != SourceColour::DisplayRgb {
+    if !precompressed {
+        return Ok(());
+    }
+    // exhaustive on purpose: a new postkit SourceColour has to be classified here
+    // rather than silently counting as "asks the encoder for nothing"
+    let asks_the_encoder_for_something = match colour {
+        SourceColour::DisplayRgb => false,
+        // nothing here builds one, so this arm only fires if postkit's per-space
+        // transform ever reaches imfwizard, and it is unsupported when it does
+        SourceColour::DisplayRgbIn(_) | SourceColour::DciLut(_) | SourceColour::AlreadyPq => true,
+    };
+    if asks_the_encoder_for_something {
         return Err(format!(
             "{} is already J2K, so there is no encode for a source colour space to change",
             picture.display()

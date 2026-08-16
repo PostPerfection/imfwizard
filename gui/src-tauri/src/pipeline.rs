@@ -503,7 +503,13 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
         // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
         // input; image/J2K sequences fall back to the encoder default.
-        let compression_ratio = imfwizard_core::probe::probe_video(&video_path)
+        let probed = imfwizard_core::probe::probe_video(&video_path);
+        if let Some(info) = &probed {
+            // the wrapper refuses an illegal raster too, but only after the encode
+            // has already run
+            imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)?;
+        }
+        let compression_ratio = probed
             .map(|info| {
                 let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
                 let raw_bits = info.width as f64 * info.height as f64 * 36.0;

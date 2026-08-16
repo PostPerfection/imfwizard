@@ -326,6 +326,136 @@ fn subtitle_convert_help() {
         .success();
 }
 
+fn have_ffmpeg() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// A one second colour-bars clip with a sine tone, at the raster asked for.
+fn synthesize_clip(path: &Path, width: u32, height: u32) {
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("testsrc=s={width}x{height}:d=1:r=24"),
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:duration=1",
+            "-frames:v",
+            "24",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "pcm_s24le",
+            "-ar",
+            "48000",
+        ])
+        .arg(path)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The headline feature: a video source has to come out the far end as a package.
+/// This is the only test that runs a real J2K encode, and it is the one that
+/// would have caught `create` shipping without the postkit `grok-ffi` feature,
+/// which made every video encode fail on the first frame.
+#[test]
+fn a_video_source_encodes_and_packages() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Encode Smoke",
+            "--video",
+            &clip.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    let codestreams = std::fs::read_dir(output.join("j2k"))
+        .expect("j2k output directory")
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "j2c"))
+        })
+        .count();
+    assert_eq!(codestreams, 24, "one codestream per source frame");
+
+    let package: Vec<_> = std::fs::read_dir(&output)
+        .unwrap()
+        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+        .collect();
+    assert!(package.iter().any(|n| n == "ASSETMAP.xml"), "{package:?}");
+    assert!(package.iter().any(|n| n.starts_with("CPL_")), "{package:?}");
+    assert!(
+        package.iter().any(|n| n.starts_with("VIDEO_")),
+        "{package:?}"
+    );
+}
+
+/// The wrapper refuses an illegal raster, but only once the encode has already
+/// run. `create` has to refuse the same source up front, before it spends a pass
+/// on essence nothing can wrap.
+#[test]
+fn an_illegal_raster_is_refused_before_any_encode() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    // the raster off a Sintel master, which App 2E has no place for
+    synthesize_clip(&clip, 2048, 872);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Illegal Raster",
+            "--video",
+            &clip.to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("2048x872").and(predicate::str::contains("target-convert")),
+        );
+
+    assert!(
+        !output.join("j2k").exists(),
+        "nothing should be encoded before the raster is checked"
+    );
+}
+
 // write a mono 16-bit 48k WAV of a 1 kHz sine at the given peak amplitude (0..1)
 fn write_sine_wav(path: &std::path::Path, amplitude: f64) {
     let sample_rate = 48_000u32;

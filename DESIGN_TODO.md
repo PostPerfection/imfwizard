@@ -373,12 +373,17 @@ with no clean cross-repo home. Edit one side, mirror the other:
   dcpwizard, dcpdoctor differing by binary/artifact names + per-app build deps
   (this repo adds xerces-c/libxml2 + vcpkg steps). Separate repos, no shared
   reusable-workflow without a central repo. Keep aligned by hand.
-- Grok CI 2026-07-21: imfwizard does not link grok-ffi, it runs grk_compress at
-  encode time. ci.yml `rust` gained the shared cached "Setup grok" step (build
-  grok v20.3.6 from source, put grk_compress on PATH) on Linux + macOS so the
-  encode path is exercisable; windows is unchanged (no grk_compress, smoke skips
-  it). release.yml/gui-release.yml only compile the binary (no encode run), so
-  they were left unchanged.
+- Grok 2026-08-16: imfwizard links grok-ffi, mirroring dcpwizard (one workspace
+  dependency line; the gui workspace picks it up through imfwizard-core's
+  workspace-inherited postkit dep, feature-unified). libgrokj2k is therefore a
+  build requirement everywhere, so every job that compiles the workspace carries
+  the cached "Setup grok" step: ci.yml `rust` (all three platforms) and `gui`,
+  release.yml `build` + `deb`, gui-release.yml. Windows uses the separate msvc
+  build of the same tag. The cli zip ships grokj2k.dll beside the exe and
+  tauri.windows.conf.json bundles it into the installer; a local windows tauri
+  build fails at bundle time unless the dll is staged at gui/src-tauri/grokj2k.dll.
+  Unproven until the next tag run: if grok's msvc install drops more dlls that
+  grokj2k.dll depends on, copy bin/*.dll in both places instead.
 - tests/cli_flags_test.sh — NOT the same harness as dcpwizard's (this one parses
   main.js for sidecar calls; dcpwizard runs the binary and checks clap parse errors).
   Different CLIs, leave separate.

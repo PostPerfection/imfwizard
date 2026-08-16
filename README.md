@@ -50,7 +50,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
 
 ### Color & Audio Processing
-- **Source colour space**, `create --source-colourspace rec709|xyz` picks whether the encoder runs its X'Y'Z' transform (rec709, the default) or leaves frames that already carry it alone (xyz). p3, rec2020, aces, acescg and logc are accepted spellings but refused, since no transform for them exists yet
+- **Source colour space**, `create --source-colourspace rec709|xyz` picks whether the encoder runs its X'Y'Z' transform (rec709, the default) or leaves frames that already carry it alone (xyz). p3, rec2020, aces, acescg and logc are accepted spellings but refused, since nothing here builds the transform they would need
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
 - **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
@@ -129,9 +129,21 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 | **macOS** (Apple Silicon) | `imfwizard-macos-aarch64.tar.gz` | `.dmg` |
 | **Windows** (x86_64) | `imfwizard-windows-x86_64.zip` | `.msi` |
 
-The CLI binary is fully self-contained (all dependencies statically linked). Extract and run.
+The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. The Windows zip ships `grokj2k.dll` beside the exe; on Linux and macOS the library comes from the Grok install. Extract and run.
 
 ### Install from source
+
+Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
+
+```bash
+git clone --recurse-submodules --branch v20.3.10 https://github.com/GrokImageCompression/grok.git
+cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/bin/grok"
+cmake --build grok/build --parallel
+cmake --install grok/build
+
+export PKG_CONFIG_PATH="$HOME/bin/grok/lib64/pkgconfig:$HOME/bin/grok/lib/pkgconfig:$PKG_CONFIG_PATH"
+export LD_LIBRARY_PATH="$HOME/bin/grok/lib64:$HOME/bin/grok/lib:$LD_LIBRARY_PATH"
+```
 
 #### Linux (Ubuntu/Debian)
 
@@ -175,7 +187,7 @@ cargo build --release
 | Dependency | Purpose | Install |
 |-----------|---------|---------|
 | `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
-| `grk_compress` | JPEG 2000 encoding (Grok codec) | [grok.rocks](https://grok.rocks/) |
+| `grk_compress` | JPEG 2000 encoding of image sequences (video goes through the linked Grok library instead) | [grok.rocks](https://grok.rocks/) |
 | `mpv` | GUI preview player | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |

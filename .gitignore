@@ -17,6 +17,8 @@ gui/src-tauri/target/
 gui/src-tauri/gen/
 gui/src-tauri/Cargo.lock
 gui/src-tauri/imfwizard-*
+# staged beside the exes for a local windows tauri bundle, see tauri.windows.conf.json
+gui/src-tauri/grokj2k.dll
 
 # Test DCP downloads (large files)
 tests/dcps/isdcf/*.zip
