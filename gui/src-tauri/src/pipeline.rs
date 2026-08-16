@@ -46,6 +46,24 @@ pub struct CompositionInput {
     pub subtitles: Vec<String>,
 }
 
+/// How the Properties panel says to treat the source: where the sound sits
+/// against the picture, what colour the picture is in, and what to cut or hold.
+/// Durations are spelled as the CLI spells them, "48f" or "2s".
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSettings {
+    #[serde(default)]
+    pub audio_delay_ms: i64,
+    #[serde(default)]
+    pub source_colourspace: Option<String>,
+    #[serde(default)]
+    pub trim_start: Option<String>,
+    #[serde(default)]
+    pub trim_end: Option<String>,
+    #[serde(default)]
+    pub still_length: Option<String>,
+}
+
 #[derive(Clone)]
 struct JobConfig {
     id: u64,
@@ -55,6 +73,10 @@ struct JobConfig {
     fps_num: u32,
     fps_den: u32,
     bandwidth: u32,
+    edits: imfwizard_core::source_edits::SourceEdits,
+    source_colour: postkit::encode::SourceColour,
+    /// Frames to hold a still input for; None when the input is not a still.
+    still_frames: Option<u64>,
 }
 
 // ─── Queue state (managed by Tauri) ────────────────────────────────────────
@@ -120,6 +142,7 @@ pub async fn submit_job(
     content_kind: Option<String>,
     bandwidth: Option<u32>,
     compositions: Option<Vec<CompositionInput>>,
+    source_settings: Option<SourceSettings>,
 ) -> Result<u64, String> {
     let queue = app.state::<JobQueue>();
     let id = queue.next_id.fetch_add(1, Ordering::Relaxed);
@@ -153,6 +176,56 @@ pub async fn submit_job(
         }
     };
 
+    // the colour space and the durations decide the encode, so a bad spelling
+    // has to fail here rather than partway through it
+    let settings = source_settings.unwrap_or_default();
+    let source_colour = imfwizard_core::source_colourspace::to_source_colour(
+        match settings.source_colourspace.as_deref() {
+            Some(spelling) => imfwizard_core::source_colourspace::parse(spelling)?,
+            None => postkit::colour::ColourSpace::Rec709,
+        },
+    )?;
+    let frames_from_spec = |spec: &Option<String>| match spec.as_deref() {
+        Some(spec) => imfwizard_core::duration_spec::parse_duration_frames(spec, fps_num, fps_den),
+        None => Ok(0),
+    };
+    let edits = imfwizard_core::source_edits::SourceEdits {
+        audio_delay_ms: settings.audio_delay_ms,
+        trim_start_frames: frames_from_spec(&settings.trim_start)?,
+        trim_end_frames: frames_from_spec(&settings.trim_end)?,
+    };
+    let still_frames = match settings.still_length.as_deref() {
+        Some(spec) => Some(imfwizard_core::duration_spec::parse_duration_frames(
+            spec, fps_num, fps_den,
+        )?),
+        None => None,
+    };
+    for composition in &compositions {
+        let picture = PathBuf::from(&composition.video_path);
+        imfwizard_core::source_colourspace::reject_on_precompressed_picture(
+            &picture,
+            &source_colour,
+        )?;
+        match (
+            imfwizard_core::still::is_still_image(&picture),
+            still_frames,
+        ) {
+            (false, Some(_)) => {
+                return Err(format!(
+                    "{} is a video or a frame directory, so a still length has nothing to hold",
+                    composition.video_path
+                ));
+            }
+            (true, None) => {
+                return Err(format!(
+                    "{} is a single image; set a still length to say how long to hold it",
+                    composition.video_path
+                ));
+            }
+            _ => {}
+        }
+    }
+
     // packages are folders named by title, so a reused title lands in the old
     // package. refuse now, not after the encode.
     let output_path = PathBuf::from(&output_dir);
@@ -175,6 +248,9 @@ pub async fn submit_job(
         fps_num,
         fps_den,
         bandwidth: bandwidth.unwrap_or(250),
+        edits,
+        source_colour,
+        still_frames,
     };
 
     {
@@ -440,11 +516,27 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let enc_dir = output.join(format!("enc_{idx}"));
         let app_ref = app.clone();
         let log_ref = log_file.clone();
-        let encode_result = postkit::pipeline::run_encode_with_ratio(
-            &video_path,
-            &enc_dir,
-            compression_ratio,
-            job.fps_num,
+        // a still is staged alone so the image-sequence encoder sees one frame
+        let still_scratch = match job.still_frames {
+            Some(_) => Some(imfwizard_core::still::prepare_still_source(
+                &video_path,
+                &enc_dir,
+            )?),
+            None => None,
+        };
+        let (encode_input, encode_output) = match &still_scratch {
+            Some(scratch) => (&scratch.source_dir, &scratch.encode_dir),
+            None => (&video_path, &enc_dir),
+        };
+        let encode_result = postkit::pipeline::run_encode_with_options(
+            encode_input,
+            encode_output,
+            &postkit::pipeline::EncodeRunOptions {
+                compression_ratio,
+                fps: job.fps_num,
+                source_colour: job.source_colour.clone(),
+                ..Default::default()
+            },
             &cancel,
             &pause,
             |p| {
@@ -466,11 +558,32 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         )?;
         total_elapsed += encode_result.elapsed_secs;
 
-        let audio_files = ci
-            .audio_path
-            .iter()
-            .map(|p| imfwizard_core::imp::AudioTrack {
-                path: PathBuf::from(p),
+        let picture_dir = match job.still_frames {
+            Some(hold_for) => imfwizard_core::still::hold_frames(
+                &encode_result.j2k_dir,
+                hold_for,
+                &enc_dir.join(imfwizard_core::still::HELD_PICTURE_DIR),
+            )?,
+            None => encode_result.j2k_dir.clone(),
+        };
+
+        let source = imfwizard_core::source_edits::apply_source_edits(
+            &job.edits,
+            &imfwizard_core::source_edits::CompositionSource {
+                j2k_dir: Some(picture_dir),
+                audio_files: ci.audio_path.iter().map(PathBuf::from).collect(),
+                timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
+            },
+            &enc_dir,
+            job.fps_num,
+            job.fps_den,
+        )?;
+
+        let audio_files = source
+            .audio_files
+            .into_iter()
+            .map(|path| imfwizard_core::imp::AudioTrack {
+                path,
                 language: ci.audio_lang.clone(),
                 role: None,
             })
@@ -482,9 +595,9 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             } else {
                 ci.content_kind.clone()
             },
-            j2k_dir: Some(encode_result.j2k_dir.clone()),
+            j2k_dir: source.j2k_dir,
             audio_files,
-            timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
+            timed_text_files: source.timed_text_files,
             hdr: None,
         });
     }

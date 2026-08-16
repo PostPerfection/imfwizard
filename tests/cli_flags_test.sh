@@ -77,6 +77,39 @@ for subcmd in $JS_SUBCMDS; do
   echo ""
 done
 
+# Properties panel controls that stand for a `create` flag. The GUI build path
+# calls the library rather than the sidecar, so the loop above never sees these.
+# Checking the pair by name catches a flag renamed on one side only, and a
+# control left as markup with nothing reading it.
+HTML_FILE="gui/index.html"
+CREATE_CONTROLS=(
+  "prop-audio-delay=--audio-delay"
+  "prop-source-colourspace=--source-colourspace"
+  "prop-trim-start=--trim-start"
+  "prop-trim-end=--trim-end"
+  "prop-still-length=--still-length"
+  "prop-content-kind=--kind"
+)
+
+echo "Checking Properties panel controls against 'create' flags"
+for pair in "${CREATE_CONTROLS[@]}"; do
+  control="${pair%%=*}"
+  flag="${pair#*=}"
+
+  if ! grep -qF "id=\"$control\"" "$HTML_FILE"; then
+    echo "  FAIL: no '$control' control in $HTML_FILE for '$flag'"
+    FAILURES=$((FAILURES + 1))
+    continue
+  fi
+  if ! grep -qF "$control" "$JS_FILE"; then
+    echo "  FAIL: '$control' is markup nothing in $JS_FILE reads"
+    FAILURES=$((FAILURES + 1))
+    continue
+  fi
+  check_flag "create" "$flag" || true
+done
+echo ""
+
 echo "=== Summary ==="
 if [[ $FAILURES -eq 0 ]]; then
   echo "All CLI flags verified successfully."

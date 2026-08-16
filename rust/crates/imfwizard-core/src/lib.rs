@@ -9,8 +9,11 @@ pub mod pkl;
 pub mod timeline;
 
 // Encoding/transcoding
+pub mod duration_spec;
 pub mod encode;
 pub mod probe;
+pub mod source_edits;
+pub mod still;
 pub mod transcode;
 
 // HDR/Color
@@ -18,6 +21,7 @@ pub mod aces;
 pub mod dolby_vision;
 pub mod hdr;
 pub mod hdr_wcg;
+pub mod source_colourspace;
 
 // Audio
 pub mod atmos;

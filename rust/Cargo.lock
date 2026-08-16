@@ -1010,6 +1010,7 @@ dependencies = [
  "asdcplib",
  "base64",
  "dcpdoctor-core",
+ "hound",
  "postkit",
  "quick-xml 0.37.5",
  "regex-lite",

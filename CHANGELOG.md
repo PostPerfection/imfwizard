@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- **Audio delay**: `create --audio-delay <MILLISECONDS>` shifts the sound against the picture, positive later and negative earlier, spelled as in dcpwizard. The running time never changes: a positive delay prepends silence and truncates the same amount off the tail, a negative one drops the head and pads the tail. A delay at least as long as the programme is refused, naming both durations. The Properties panel carries a Delay (ms) field.
+- **Source colour space**: `create --source-colourspace <rec709|p3|xyz|rec2020|aces|acescg|logc>`, defaulting to rec709. The value set is postkit's `ColourSpace`. `rec709` reaches the encoder as the `SourceColour::DisplayRgb` the pipeline already used, so today's output is unchanged; `xyz` says the source is already X'Y'Z' and skips every colour transform. The other five have no postkit transform to X'Y'Z' and are refused rather than run through the Rec.709 matrix, which would be silently wrong colour. `--hdr` together with a source the encoder would transform is refused, since the HDR label claims essence nothing rewrote. The dead `prop-colour` select in the GUI is replaced by a real Source Color Space control.
+- **Trim**: `create --trim-start <DURATION>` and `--trim-end <DURATION>`, as frames (`48f`) or seconds (`2s`). Picture, sound and timed text move together: cues shift by the head trim, a cue wholly outside the kept range is dropped and one straddling an edge is clamped. Both TTML time shapes are read, clock times (`00:00:01.500`, `00:00:01:12`) and offset times (`0.8s`, `900ms`, `24f`), and each cue is written back in the metric it arrived in. A time that cannot be read, or timing on anything but a `<p>`, stops the trim rather than being moved wrongly. A trim that leaves nothing is refused, naming the source length. The Properties panel carries a Trim fieldset.
+- **Still image with duration**: `create --still-length <DURATION>` holds a single image file (dpx, tif, exr, png or bmp) for that long. The image is encoded once and the codestream repeated, so an hour-long slate costs one encode. `--still-length` without a still input and a still input without `--still-length` are both refused. The Properties panel carries a Still Length field.
+
+### Changed
+- **`--video` pointing at one image file now means a still**: it used to encode every image sitting beside it in that folder, which nothing documented. It now needs `--still-length` and encodes only that image. Pointing at the folder still encodes the sequence, unchanged.
+
 ### Fixed
 - **`to-dcp` wrote a CPL missing its identity fields** — the generated CPL carried no `AnnotationText`, the PKL's was empty, and no reel asset had a `<Hash>`, all of which Bv2.1 wants and libdcp writes. The asset hashes were already computed for the PKL, so the CPL now repeats them
 - **KDMs and signatures carried DER-order distinguished names** — the vendored postkit predated the RFC 4514 ordering fix, so a projector matching a KDM recipient saw a name it did not recognise

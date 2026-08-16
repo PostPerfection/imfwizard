@@ -23,4 +23,5 @@ uuid.workspace = true
 x509-parser = "0.16"
 
 [dev-dependencies]
+hound = "3.5.1"
 tempfile = "3"

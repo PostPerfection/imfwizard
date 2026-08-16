@@ -32,6 +32,49 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 - HDR/WCG (ST 2067-21): `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs on the picture MXF descriptor (asdcplib `open_write_hdr`) and emits the matching CPL RGBADescriptor EssenceDescriptor + SourceEncoding; `--mastering-display <x265 string>` adds the ST 2086 block; `--max-cll`/`--max-fall` (u16 nits, refused without `--hdr`) land in the CPL ExtensionProperties beside ApplicationIdentification as app2e `xs:unsignedShort` elements, byte-identical output when absent. ST 2067-21 carries the light levels in the CPL, not the MXF descriptor, SMPTE defined no descriptor membership for them (the registered ULs belong to an ST 2108-2 serial-interface pack), so asdcplib rightly has no property. Photon schema-validates the pair and never compares them to the essence. The XSD tests import app2e-2016.xsd, since ExtensionProperties is `xs:any` lax and xmllint would otherwise skip the elements.
 - Accessibility audio (`create --audio-role ad|hi`): emits an MCA EssenceDescriptor (WAVEPCMDescriptor + SoundfieldGroup + chVIN/chHI AudioChannelLabel + RFC5646SpokenLanguage) linked to the audio resource via SourceEncoding. Audio language is also expressed at the composition level (LocaleList). SL stays a video overlay with no MCA audio descriptor (see DESIGN_TODO).
 - SCC conversion handles pop-on captions only; roll-up, paint-on, and text-mode fail loud.
+- Source colour space (`create --source-colourspace`): postkit decides the encoder
+  transform from `encode::SourceColour`, which offers three shapes, so only two of
+  the seven `ColourSpace` values map. `rec709` is `SourceColour::DisplayRgb`, the
+  variant `EncodeRunOptions::default()` already used, which is what keeps the
+  default output unchanged. `xyz` is `SourceColour::AlreadyPq`; that name is about
+  where postkit met the case (HDR essence), and skipping the transform is its only
+  effect, which is exactly what an already-X'Y'Z' source needs. The other five have
+  no postkit transform to X'Y'Z' at all: `convert_colour` refuses them without a 3D
+  LUT and `rgb_to_xyz_inplace` is Rec.709-only, so they are refused rather than run
+  through the Rec.709 matrix (see DESIGN_TODO). `--hdr` plus a source colour space
+  the encoder would transform is refused, because postkit's own rule is that
+  essence a caller labels PQ can never hold frames the encoder rewrote; `--hdr`
+  with `xyz` composes and `--hdr` alone is unchanged. `xyz` reaches only the video
+  input: postkit's image-sequence encoder always applies the transform and refuses
+  any other source colour, so an image sequence or a still stays rec709-only, and
+  a J2K directory reaches the wrapper with no encode at all, so anything other
+  than rec709 is refused there rather than dropped in silence. The GUI select
+  offers only the two values that work; the CLI takes all seven spellings so the
+  five without a transform fail with an explanation, not an unknown-value error.
+- Timed text trim (`source_edits.rs`) reads both TTML time shapes, clock times
+  (`00:00:01.500`, `00:00:01:12`) and offset times (`0.8s`, `900ms`, `24f`), and
+  writes each cue back in the metric it arrived in. A time it cannot read, ticks
+  included, stops the trim rather than resolving to zero, which would silently
+  drop the cue. The frame field is rendered from a whole-frame count, since
+  computing it as a fraction of a second lets rounding name frame 24 at 24 fps.
+  Only `<p>` may carry timing: TTML times a timed element's children relative to
+  it, so timing on a `<div>` or `<span>` is refused rather than shifted, which
+  would move its cues twice.
+- Every staging directory (`j2k_trimmed`, `j2k_still`, the still's own source and
+  encode dirs) is emptied before it is written. The MXF wrapper takes the whole
+  directory listing, so building into the same output folder again with a shorter
+  trim or still length would otherwise package the longer first run.
+- Source edits ordering (`source_edits.rs`): the audio delay lands before the trim.
+  The delay says how sound lines up with picture; the trim then cuts a range out of
+  the aligned programme. The other order would cut a range that had not been
+  aligned yet, so the same flags would give a different result.
+- Trim runs after the encode, not before it: `postkit::pipeline` has no hook for a
+  frame range, so the trimmed picture is a directory of hard links to the kept
+  codestreams. That costs no disk but does encode frames it then discards.
+- A still (`create --still-length`) is staged alone in a directory so the
+  image-sequence encoder sees one frame rather than everything beside it, encoded
+  once, then hard-linked once per held frame. Both paths write `frame_%08d.j2c`,
+  since the MXF wrapper takes the sorted directory listing as playing order.
 
 ## Layout note
 

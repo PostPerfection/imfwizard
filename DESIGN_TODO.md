@@ -43,6 +43,51 @@ is nothing imf-specific beyond bumping the pin.
   host yet, so the preview is unavailable there rather than opening a separate
   mpv window.
 
+## Open: five source colour spaces have no transform (2026-08-16)
+
+`create --source-colourspace` takes all seven of postkit's `ColourSpace` values,
+but only `rec709` and `xyz` are wired. `p3`, `rec2020`, `aces`, `acescg` and
+`logc` are refused, because nothing in postkit converts them to X'Y'Z':
+`colour::convert_colour` is the ffmpeg `colorspace` filter, which cannot express
+X'Y'Z' as a target and refuses ACES/ACEScg/LogC as a source without a 3D LUT, and
+`colour::rgb_to_xyz_inplace` hardcodes the Rec.709 matrix. Running a P3 or Rec.2020
+source through the Rec.709 path would be silently wrong colour, and pre-converting
+to Rec.709 first would clip the wider gamut, so both were rejected in favour of a
+loud refusal.
+
+Closing it needs a postkit change, one of:
+- a `SourceColour` variant carrying the ffmpeg filter chain, so `p3` and `rec2020`
+  can go through `colorspace=` during the stream decode (does not reach the three
+  log/ACES spaces, which the filter cannot model either);
+- real per-space matrices beside `rgb_to_xyz_inplace`, matching what it already
+  does for Rec.709;
+- or a `--source-lut` flag in both wizards feeding the existing
+  `SourceColour::DciLut`, which is postkit's designed route for exactly this.
+
+dcpwizard needs the same decision, so this is a coordinated change across both
+repos plus postkit, not an imfwizard-only fix.
+
+## Open: smaller gaps in the source edits (2026-08-16)
+
+- Trim happens after the encode, since `postkit::pipeline` takes no frame range.
+  Trimming five minutes out of a two-hour source still encodes the two hours.
+  A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
+  postkit.
+- A still input is whatever `postkit::encode::detect_image_format` reads: dpx,
+  tif/tiff, exr, png, bmp. There is no jpeg arm there, so a .jpg still is refused
+  even though the README's encoder bullet claims JPEG.
+- The GUI applies one trim, delay and colour space to every composition in a
+  build, because they live in the shared Properties panel. Per-composition values
+  would need them on the CPL tab instead. The batch delivery panel deliberately
+  sends none of them: it picks its own source in `del-video`, so the Build tab's
+  trim and still length describe a different file.
+- A trim refuses timed text that carries timing on anything but a `<p>`, because
+  TTML times a timed element's children relative to it and resolving that tree is
+  more than a trim needs. Authored IMSC that times a `<div>` or animates with
+  `<set>` has to be flattened first.
+- The GUI's Source Color Space select lists only rec709 and xyz, the two that
+  work. It grows when the transforms above land.
+
 # Done
 
 ## Fixed 2026-08-12 (postkit c6406d1: one asset id, and a clean Photon run)

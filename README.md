@@ -29,6 +29,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Subtitle burn-in**, render SRT/TTML into video frames via ffmpeg
+- **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
+- **Still image with duration**, `create --still-length` holds a single image (dpx, tif, exr, png, bmp) for that long, encoding it once and repeating the codestream
 
 ### HDR & Advanced
 - **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
@@ -48,6 +50,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
 
 ### Color & Audio Processing
+- **Source colour space**, `create --source-colourspace rec709|xyz` picks whether the encoder runs its X'Y'Z' transform (rec709, the default) or leaves frames that already carry it alone (xyz). p3, rec2020, aces, acescg and logc are accepted spellings but refused, since no transform for them exists yet
+- **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
 - **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
 - **Audio description mixing**, combine AD narration with main mix using ducking

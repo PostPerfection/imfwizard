@@ -34,9 +34,49 @@ impl From<KdmFormatArgument> for postkit::certificate::KdmFormat {
     }
 }
 
+/// Report a failure the way every command does, and stop.
+fn fail(message: impl std::fmt::Display) -> ! {
+    eprintln!("Error: {message}");
+    std::process::exit(1);
+}
+
+/// Encode picture through the shared grok pipeline (grk_compress), printing
+/// per-frame progress. Ctrl-C cancels the run.
+fn encode_picture(
+    input: &std::path::Path,
+    output_dir: &std::path::Path,
+    options: &postkit::pipeline::EncodeRunOptions,
+) -> Result<postkit::pipeline::EncodeResult, String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let pause = Arc::new(AtomicBool::new(false));
+    let on_interrupt = cancel.clone();
+    let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
+
+    let result = postkit::pipeline::run_encode_with_options(
+        input,
+        output_dir,
+        options,
+        &cancel,
+        &pause,
+        |p: &postkit::pipeline::PipelineProgress| {
+            eprint!(
+                "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+                p.frame, p.total_frames, p.percent, p.fps
+            );
+        },
+        |msg: &str| tracing::info!("{msg}"),
+    );
+    eprintln!();
+    result
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create a new IMP (Interoperable Master Package)
+    #[command(allow_negative_numbers = true)]
     Create {
         /// Output directory for the IMP
         #[arg(short, long)]
@@ -104,6 +144,33 @@ enum Commands {
         /// --max-cll. Requires --hdr.
         #[arg(long = "max-fall")]
         max_fall: Option<u16>,
+
+        /// Shift the sound against the picture in milliseconds; positive is
+        /// later. The running time never changes: the shift is padded at one end
+        /// and truncated at the other.
+        #[arg(long = "audio-delay")]
+        audio_delay: Option<i64>,
+
+        /// Colour space the picture source carries: rec709 (default), p3, xyz,
+        /// rec2020, aces, acescg or logc. rec709 runs the encoder's X'Y'Z'
+        /// transform, xyz leaves the frames alone.
+        #[arg(long = "source-colourspace")]
+        source_colourspace: Option<String>,
+
+        /// Remove this much from the head of the source, as frames (48f) or
+        /// seconds (2s). Picture, sound and timed text all move together.
+        #[arg(long = "trim-start")]
+        trim_start: Option<String>,
+
+        /// Remove this much from the tail of the source, spelled as --trim-start.
+        #[arg(long = "trim-end")]
+        trim_end: Option<String>,
+
+        /// Hold a single image for this long, as frames (48f) or seconds (2s).
+        /// Requires --video to name one image file rather than a video or a
+        /// directory of frames.
+        #[arg(long = "still-length")]
+        still_length: Option<String>,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1068,6 +1135,11 @@ fn run() {
             mastering_display,
             max_cll,
             max_fall,
+            audio_delay,
+            source_colourspace,
+            trim_start,
+            trim_end,
+            still_length,
         } => {
             // the HDR detail flags only make sense with an HDR preset
             for (name, given) in [
@@ -1116,10 +1188,90 @@ fn run() {
                 },
                 None => None,
             };
+            // the source colour space decides the encoder transform, so a bad
+            // spelling has to fail before anything is encoded
+            let colourspace = source_colourspace
+                .as_deref()
+                .map(|s| imfwizard_core::source_colourspace::parse(s).unwrap_or_else(|e| fail(e)));
+            if let Some(space) = colourspace
+                && hdr.is_some()
+                && imfwizard_core::source_colourspace::applies_encoder_transform(space)
+            {
+                fail(format!(
+                    "--hdr labels the picture as essence nothing transformed, but \
+                     --source-colourspace {} makes the encoder run its own X'Y'Z' transform. \
+                     Use xyz for a source that is already X'Y'Z'",
+                    source_colourspace.as_deref().unwrap_or_default()
+                ));
+            }
+            let source_colour = imfwizard_core::source_colourspace::to_source_colour(
+                colourspace.unwrap_or(postkit::colour::ColourSpace::Rec709),
+            )
+            .unwrap_or_else(|e| fail(e));
+
+            // durations are in edit-rate frames, so they parse against the
+            // declared frame rate and fail before the encode
+            let frames_from_spec = |spec: &Option<String>| -> Option<u64> {
+                spec.as_deref().map(|spec| {
+                    imfwizard_core::duration_spec::parse_duration_frames(spec, fps_num, fps_den)
+                        .unwrap_or_else(|e| fail(e))
+                })
+            };
+            let edits = imfwizard_core::source_edits::SourceEdits {
+                audio_delay_ms: audio_delay.unwrap_or(0),
+                trim_start_frames: frames_from_spec(&trim_start).unwrap_or(0),
+                trim_end_frames: frames_from_spec(&trim_end).unwrap_or(0),
+            };
+            let still_frames = frames_from_spec(&still_length);
+
+            let still_input = video
+                .as_deref()
+                .map(PathBuf::from)
+                .filter(|p| imfwizard_core::still::is_still_image(p));
+            match (&still_input, still_frames) {
+                (None, Some(_)) => fail(
+                    "--still-length needs --video to name a single image file (dpx, tif, exr, png or bmp)",
+                ),
+                (Some(image), None) => fail(format!(
+                    "--video {} is a single image; --still-length says how long to hold it",
+                    image.display()
+                )),
+                _ => {}
+            }
+
             let _ = std::fs::create_dir_all(&output);
 
             // If video is a file, run encode pipeline
-            let (j2k_dir, audio_files) = if let Some(ref vid) = video {
+            let (j2k_dir, audio_files) = if let (Some(image), Some(hold_for)) =
+                (&still_input, still_frames)
+            {
+                tracing::info!("Holding {} for {hold_for} frames", image.display());
+                let scratch = imfwizard_core::still::prepare_still_source(image, &output)
+                    .unwrap_or_else(|e| fail(e));
+                let encoded = encode_picture(
+                    &scratch.source_dir,
+                    &scratch.encode_dir,
+                    &postkit::pipeline::EncodeRunOptions {
+                        fps: fps_num / fps_den.max(1),
+                        source_colour: source_colour.clone(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|e| fail(format!("Encode failed: {e}")));
+                let held = imfwizard_core::still::hold_frames(
+                    &encoded.j2k_dir,
+                    hold_for,
+                    &output.join(imfwizard_core::still::HELD_PICTURE_DIR),
+                )
+                .unwrap_or_else(|e| fail(e));
+                (
+                    Some(held),
+                    audio
+                        .as_ref()
+                        .map(|a| vec![PathBuf::from(a)])
+                        .unwrap_or_default(),
+                )
+            } else if let Some(ref vid) = video {
                 let video_path = PathBuf::from(vid);
                 let is_video_file = video_path.is_file()
                     && video_path
@@ -1134,9 +1286,6 @@ fn run() {
                         .unwrap_or(false);
 
                 if is_video_file {
-                    use std::sync::Arc;
-                    use std::sync::atomic::AtomicBool;
-
                     tracing::info!("Detected video file, encoding to J2K");
 
                     // Probe for actual frame rate
@@ -1163,13 +1312,6 @@ fn run() {
                         }
                     }
 
-                    let cancel = Arc::new(AtomicBool::new(false));
-                    let pause = Arc::new(AtomicBool::new(false));
-                    let cancel_clone = cancel.clone();
-                    let _ = ctrlc::set_handler(move || {
-                        cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-                    });
-
                     tracing::info!("Compressor: Grok");
                     // A delivery preset sets the target bitrate; convert it to a J2K
                     // compression ratio (raw = w*h*36 bits/frame), else default 10x.
@@ -1190,22 +1332,16 @@ fn run() {
                         );
                     }
                     // encode via the shared grok pipeline (grk_compress); no fallback
-                    let encoded = postkit::pipeline::run_encode_with_ratio(
+                    let encoded = encode_picture(
                         &video_path,
                         &output,
-                        compression_ratio,
-                        actual_fps,
-                        &cancel,
-                        &pause,
-                        |p: &postkit::pipeline::PipelineProgress| {
-                            eprint!(
-                                "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
-                                p.frame, p.total_frames, p.percent, p.fps
-                            );
+                        &postkit::pipeline::EncodeRunOptions {
+                            compression_ratio,
+                            fps: actual_fps,
+                            source_colour: source_colour.clone(),
+                            ..Default::default()
                         },
-                        |msg: &str| tracing::info!("{msg}"),
                     );
-                    eprintln!();
                     let j2k_out = match encoded {
                         Ok(r) => {
                             tracing::info!("Encoded {} frames", r.frames_encoded);
@@ -1218,7 +1354,7 @@ fn run() {
                     };
 
                     // Auto-demux audio
-                    let audio_files = if let Some(a) = audio {
+                    let audio_files = if let Some(a) = &audio {
                         vec![PathBuf::from(a)]
                     } else {
                         let wav_out = output.join("audio_demux.wav");
@@ -1245,19 +1381,44 @@ fn run() {
                     (Some(j2k_out), audio_files)
                 } else {
                     // Assume it's a J2K directory
+                    imfwizard_core::source_colourspace::reject_on_precompressed_picture(
+                        &video_path,
+                        &source_colour,
+                    )
+                    .unwrap_or_else(|e| fail(e));
                     (
                         Some(video_path),
-                        audio.map(|a| vec![PathBuf::from(a)]).unwrap_or_default(),
+                        audio
+                            .as_ref()
+                            .map(|a| vec![PathBuf::from(a)])
+                            .unwrap_or_default(),
                     )
                 }
             } else {
                 (
                     None,
-                    audio.map(|a| vec![PathBuf::from(a)]).unwrap_or_default(),
+                    audio
+                        .as_ref()
+                        .map(|a| vec![PathBuf::from(a)])
+                        .unwrap_or_default(),
                 )
             };
 
-            let audio_tracks = audio_files
+            let source = imfwizard_core::source_edits::apply_source_edits(
+                &edits,
+                &imfwizard_core::source_edits::CompositionSource {
+                    j2k_dir,
+                    audio_files,
+                    timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
+                },
+                &output,
+                fps_num,
+                fps_den,
+            )
+            .unwrap_or_else(|e| fail(e));
+
+            let audio_tracks = source
+                .audio_files
                 .into_iter()
                 .map(|path| imfwizard_core::imp::AudioTrack {
                     path,
@@ -1270,9 +1431,9 @@ fn run() {
                 compositions: vec![imfwizard_core::imp::Composition {
                     title,
                     content_kind: kind,
-                    j2k_dir,
+                    j2k_dir: source.j2k_dir,
                     audio_files: audio_tracks,
-                    timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
+                    timed_text_files: source.timed_text_files,
                     hdr,
                 }],
                 fps_num,

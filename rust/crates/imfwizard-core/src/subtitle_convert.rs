@@ -268,7 +268,7 @@ fn render_runs(runs: &[StyledRun]) -> String {
     out
 }
 
-fn format_ttml_time(ms: u64) -> String {
+pub(crate) fn format_ttml_time(ms: u64) -> String {
     let h = ms / 3_600_000;
     let m = (ms % 3_600_000) / 60_000;
     let s = (ms % 60_000) / 1000;

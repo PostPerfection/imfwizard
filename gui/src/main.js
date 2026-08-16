@@ -479,6 +479,29 @@ document.getElementById("btn-supplement")?.addEventListener("click", () => {
 // === Build IMP ===
 let currentJobId = null;
 
+// durations are spelled as the CLI spells them: frames or seconds, never bare
+const DURATION_SPEC = /^(\d+f|\d+(\.\d+)?s)$/i;
+
+// Read the Properties panel's source treatment. A bad duration throws here so a
+// build fails before the encode rather than partway through it.
+function readSourceSettings() {
+  const duration = (id, label) => {
+    const value = document.getElementById(id)?.value?.trim();
+    if (!value) return null;
+    if (!DURATION_SPEC.test(value)) {
+      throw new Error(`${label} "${value}" is not a duration: use frames like 48f or seconds like 2s`);
+    }
+    return value;
+  };
+  return {
+    audioDelayMs: parseInt(document.getElementById("prop-audio-delay")?.value) || 0,
+    sourceColourspace: document.getElementById("prop-source-colourspace")?.value || "rec709",
+    trimStart: duration("prop-trim-start", "Trim from start"),
+    trimEnd: duration("prop-trim-end", "Trim from end"),
+    stillLength: duration("prop-still-length", "Still length"),
+  };
+}
+
 document.getElementById("btn-build")?.addEventListener("click", async () => {
   // a second build would queue behind the first and encode all over again
   if (buildInFlight) return;
@@ -502,6 +525,14 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     })
     .filter(Boolean);
   if (!comps.length) { tauriMessage("Import a video asset first"); return; }
+
+  let sourceSettings;
+  try {
+    sourceSettings = readSourceSettings();
+  } catch (e) {
+    tauriMessage(e.message, { title: "Build failed", kind: "error" });
+    return;
+  }
 
   // re-derive an auto-filled output folder so it follows the current title
   const outputEl = document.getElementById("prop-output");
@@ -563,7 +594,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   try {
     beginBuild();
     currentJobId = await invoke("submit_job", {
-      title, outputDir: output, compositions: comps,
+      title, outputDir: output, compositions: comps, sourceSettings,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
       bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     });

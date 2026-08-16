@@ -197,13 +197,10 @@
                     </select>
                   </div>
                   <div class="prop-field">
-                    <label for="prop-colour">Color Space</label>
-                    <select id="prop-colour">
-                      <option value="bt709">BT.709 (SDR)</option>
-                      <option value="bt2020-pq">BT.2020 PQ (HDR10)</option>
-                      <option value="bt2020-hlg">BT.2020 HLG</option>
-                      <option value="p3-d65-pq">P3-D65 PQ</option>
-                      <option value="aces">ACES (App#5)</option>
+                    <label for="prop-source-colourspace">Source Color Space</label>
+                    <select id="prop-source-colourspace">
+                      <option value="rec709">Rec. 709</option>
+                      <option value="xyz">X'Y'Z' (already transformed)</option>
                     </select>
                   </div>
                   <div class="prop-field">
@@ -213,6 +210,10 @@
                   <div class="prop-field">
                     <label for="prop-threads">Encode Threads</label>
                     <input type="number" id="prop-threads" value="0" min="0" placeholder="0 = auto">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-still-length">Still Length</label>
+                    <input type="text" id="prop-still-length" placeholder="48f or 2s, images only">
                   </div>
                 </fieldset>
 
@@ -226,6 +227,22 @@
                       <option value="stereo">Stereo</option>
                       <option value="mono">Mono</option>
                     </select>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-audio-delay">Delay (ms)</label>
+                    <input type="number" id="prop-audio-delay" value="0" step="1" placeholder="+ later, - earlier">
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Trim</legend>
+                  <div class="prop-field">
+                    <label for="prop-trim-start">From Start</label>
+                    <input type="text" id="prop-trim-start" placeholder="48f or 2s">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-trim-end">From End</label>
+                    <input type="text" id="prop-trim-end" placeholder="48f or 2s">
                   </div>
                 </fieldset>
 

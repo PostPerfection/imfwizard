@@ -114,6 +114,201 @@ fn create_requires_input() {
     cmd().args(["create"]).assert().failure();
 }
 
+/// Every source treatment flag has to reach `create`, since the GUI's Properties
+/// panel offers a control for each and the two are meant to stay one tool.
+#[test]
+fn create_offers_every_source_treatment_flag() {
+    let help = cmd().args(["create", "--help"]).assert().success();
+    let mut assertion = help;
+    for flag in [
+        "--audio-delay",
+        "--source-colourspace",
+        "--trim-start",
+        "--trim-end",
+        "--still-length",
+    ] {
+        assertion = assertion.stdout(predicate::str::contains(flag));
+    }
+}
+
+/// A negative delay is a value, not an unknown flag. Proven by making the delay
+/// itself the thing that fails: a one second WAV cannot absorb five seconds.
+#[test]
+fn a_negative_audio_delay_reaches_the_delay() {
+    let dir = TempDir::new().unwrap();
+    let wav = dir.path().join("sound.wav");
+    write_sine_wav(&wav, 0.5);
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().to_string_lossy(),
+            "-t",
+            "T",
+            "--audio",
+            &wav.to_string_lossy(),
+            "--audio-delay",
+            "-5000",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("audio delay of -5000 ms"));
+}
+
+/// A J2K directory goes straight to the wrapper, so a source colour space would
+/// have nothing to act on and must not be accepted in silence.
+#[test]
+fn a_source_colourspace_on_precompressed_picture_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let frames = dir.path().join("j2k");
+    std::fs::create_dir_all(&frames).unwrap();
+    std::fs::write(frames.join("frame_00000000.j2c"), b"codestream").unwrap();
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "T",
+            "--video",
+            &frames.to_string_lossy(),
+            "--source-colourspace",
+            "xyz",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already J2K"));
+}
+
+#[test]
+fn an_unknown_source_colourspace_is_refused_by_name() {
+    let dir = TempDir::new().unwrap();
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().to_string_lossy(),
+            "-t",
+            "Test",
+            "--source-colourspace",
+            "rec601",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("rec601"));
+}
+
+/// postkit models only the Rec.709 to X'Y'Z' transform, so the wide-gamut and log
+/// spaces are refused rather than encoded through the wrong matrix.
+#[test]
+fn a_colourspace_with_no_transform_is_refused() {
+    let dir = TempDir::new().unwrap();
+    for space in ["p3", "rec2020", "aces", "acescg", "logc"] {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &dir.path().to_string_lossy(),
+                "-t",
+                "Test",
+                "--source-colourspace",
+                space,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("X'Y'Z' transform is available"));
+    }
+}
+
+/// --hdr says nothing transformed the essence, so a source the encoder would
+/// transform contradicts it.
+#[test]
+fn hdr_refuses_a_source_the_encoder_would_transform() {
+    let dir = TempDir::new().unwrap();
+    let create = |space: &str| {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &dir.path().to_string_lossy(),
+                "-t",
+                "Test",
+                "--hdr",
+                "pq-bt2020",
+                "--source-colourspace",
+                space,
+            ])
+            .assert()
+            .failure()
+    };
+    create("rec709").stderr(predicate::str::contains("--source-colourspace rec709"));
+    // xyz leaves the frames alone, so it composes with an HDR label
+    create("xyz").stderr(predicate::str::contains("--source-colourspace").not());
+}
+
+#[test]
+fn a_bad_duration_spec_names_both_forms() {
+    let dir = TempDir::new().unwrap();
+    for flag in ["--trim-start", "--trim-end", "--still-length"] {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &dir.path().to_string_lossy(),
+                "-t",
+                "Test",
+                flag,
+                "48",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("48f").and(predicate::str::contains("2s")));
+    }
+}
+
+#[test]
+fn a_still_length_without_a_still_input_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let movie = dir.path().join("clip.mov");
+    std::fs::write(&movie, b"not really a movie").unwrap();
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().to_string_lossy(),
+            "-t",
+            "Test",
+            "--video",
+            &movie.to_string_lossy(),
+            "--still-length",
+            "2s",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--still-length"));
+}
+
+#[test]
+fn a_still_input_without_a_still_length_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let image = dir.path().join("slate.tif");
+    std::fs::write(&image, b"not really a tiff").unwrap();
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().to_string_lossy(),
+            "-t",
+            "Test",
+            "--video",
+            &image.to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single image"));
+}
+
 #[test]
 fn transcode_subcommand_help() {
     cmd()
