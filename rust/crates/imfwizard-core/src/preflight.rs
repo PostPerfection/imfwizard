@@ -54,7 +54,8 @@ pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
     format!(
         "{} is not a picture the encoder can read: it takes a video container \
          (mp4, mov, mkv, avi, mxf, ts, m2ts, webm), a directory of images \
-         (tif, tiff, dpx, exr, bmp), a directory of J2K codestreams (j2c, j2k), \
+         (tif, tiff, dpx, exr, bmp, png, jpg, jpeg), a directory of J2K \
+         codestreams (j2c, j2k), \
          or a single still image held for a length",
         picture.display()
     )

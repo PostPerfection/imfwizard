@@ -384,9 +384,9 @@ imfwizard create \
   --output /path/to/output/
 ```
 
-A directory holding anything else is refused by name. PNG and JPEG sequences are
-not read: a lone PNG works as a still with `--still-length`, but a directory of
-them is not one of the shapes the encoder classifies.
+A directory holding anything else is refused by name. PNG and JPEG sequences
+decode through ffmpeg on the way to the encoder, the other formats go to
+`grk_compress` directly.
 
 ### Transcode via ffmpeg
 

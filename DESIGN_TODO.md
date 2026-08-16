@@ -105,10 +105,7 @@ order `create` builds its sources in.
   ends call it, but the rounding itself needs a rational rate on postkit's
   `EncodeRunOptions`, `StreamEncodeOptions` and `write_image_concat_list`, which
   is a postkit change shared with dcpwizard. The GUI menu therefore gained only
-  whole rates (50, 100, 120) and keeps 29.97 and 59.94 as they were. A related
-  postkit gap: `detect_input_type` classifies no png or jpeg directory even
-  though `detect_image_format` encodes both, so a png sequence is refused by
-  name rather than encoded.
+  whole rates (50, 100, 120) and keeps 29.97 and 59.94 as they were.
 - Burn-in line height and margin. `create` reaches every field of postkit's
   `BurnStyleOverrides`, but `BurnStyle::line_height_ratio` and `margin_ratio`
   have no override field, so a caller cannot set line spacing or the distance
