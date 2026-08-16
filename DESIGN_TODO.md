@@ -111,13 +111,6 @@ repos plus postkit, not an imfwizard-only fix.
   `<set>` has to be flattened first.
 - The GUI's Source Color Space select lists only rec709 and xyz, the two that
   work. It grows when the transforms above land.
-- `--hdr` without an explicit `--source-colourspace` skips the already-X'Y'Z'
-  guard in the create handler, so `--hdr pq-bt2020` alone still runs the encoder's
-  X'Y'Z' transform over the essence it just declared untransformed. Wrong picture,
-  not a refusal. The new burn refusal covers `--hdr` unconditionally, the encode
-  guard should too: reading the resolved `SourceColour` rather than the
-  `colourspace` flag fixes it, and collapses the burn refusal to one condition.
-  Found 2026-08-16 while mirroring the burn.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
   items in dcpwizard's DESIGN_TODO): playback overlays (safe area, aspect mask,
   center cross, thirds grid, subtitle/CC render toggles), decode resolution
@@ -128,6 +121,14 @@ repos plus postkit, not an imfwizard-only fix.
   counters, and a check whether the CLI has dcpwizard's missing-bitrate-flag hole.
 
 # Done
+
+## Fixed 2026-08-16 (--hdr guard read the flag, not the route)
+
+`--hdr` without an explicit `--source-colourspace` skipped the already-X'Y'Z'
+guard, so `--hdr pq-bt2020` alone ran the encoder's X'Y'Z' transform over
+essence it declared untransformed. The guard now reads the resolved
+`SourceColour` (rec709 when the flag is absent) and refuses with the same hint,
+and the burn refusal's `frames_already_xyz` is that one condition too.
 
 ## Fixed 2026-08-12 (postkit c6406d1: one asset id, and a clean Photon run)
 

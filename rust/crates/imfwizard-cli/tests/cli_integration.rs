@@ -247,6 +247,20 @@ fn hdr_refuses_a_source_the_encoder_would_transform() {
     create("rec709").stderr(predicate::str::contains("--source-colourspace rec709"));
     // xyz leaves the frames alone, so it composes with an HDR label
     create("xyz").stderr(predicate::str::contains("--source-colourspace").not());
+    // no flag at all resolves to rec709, which the encoder transforms
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().to_string_lossy(),
+            "-t",
+            "Test",
+            "--hdr",
+            "pq-bt2020",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--source-colourspace rec709"));
 }
 
 #[test]
@@ -457,7 +471,13 @@ fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
             create(&clip, &["--source-colourspace", "xyz"]),
             "X'Y'Z' already",
         ),
-        (create(&clip, &["--hdr", "pq-bt2020"]), "X'Y'Z' already"),
+        (
+            create(
+                &clip,
+                &["--hdr", "pq-bt2020", "--source-colourspace", "xyz"],
+            ),
+            "X'Y'Z' already",
+        ),
         (create(&codestreams, &[]), "already compressed"),
         (
             create(&clip, &["--subtitle", &srt.to_string_lossy()]),

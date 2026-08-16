@@ -50,13 +50,6 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
     }
 }
 
-/// Whether the encoder applies its own transform to frames in this space, which
-/// decides whether an HDR label would describe essence the encoder had already
-/// rewritten.
-pub fn applies_encoder_transform(space: ColourSpace) -> bool {
-    to_source_colour(space).is_ok_and(|colour| colour.applies_xyz_transform())
-}
-
 /// Refuse a source colour that asks the encoder for something when the picture
 /// arrives already compressed, since `create` passes a J2K directory straight to
 /// the wrapper and the request would otherwise be dropped without a word.
@@ -127,7 +120,6 @@ mod tests {
             to_source_colour(ColourSpace::Rec709).unwrap(),
             postkit::pipeline::EncodeRunOptions::default().source_colour
         );
-        assert!(applies_encoder_transform(ColourSpace::Rec709));
     }
 
     #[test]
@@ -136,7 +128,6 @@ mod tests {
             to_source_colour(ColourSpace::Xyz).unwrap(),
             SourceColour::AlreadyPq
         );
-        assert!(!applies_encoder_transform(ColourSpace::Xyz));
     }
 
     #[test]

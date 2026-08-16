@@ -1205,21 +1205,21 @@ fn run() {
             let colourspace = source_colourspace
                 .as_deref()
                 .map(|s| imfwizard_core::source_colourspace::parse(s).unwrap_or_else(|e| fail(e)));
-            if let Some(space) = colourspace
-                && hdr.is_some()
-                && imfwizard_core::source_colourspace::applies_encoder_transform(space)
-            {
-                fail(format!(
-                    "--hdr labels the picture as essence nothing transformed, but \
-                     --source-colourspace {} makes the encoder run its own X'Y'Z' transform. \
-                     Use xyz for a source that is already X'Y'Z'",
-                    source_colourspace.as_deref().unwrap_or_default()
-                ));
-            }
             let source_colour = imfwizard_core::source_colourspace::to_source_colour(
                 colourspace.unwrap_or(postkit::colour::ColourSpace::Rec709),
             )
             .unwrap_or_else(|e| fail(e));
+            // --hdr declares the essence untransformed, so the resolved route
+            // (not the flag, which defaults to rec709 when absent) must not
+            // run the encoder transform
+            if hdr.is_some() && source_colour.applies_xyz_transform() {
+                fail(format!(
+                    "--hdr labels the picture as essence nothing transformed, but \
+                     --source-colourspace {} makes the encoder run its own X'Y'Z' transform. \
+                     Use --source-colourspace xyz for a source that is already X'Y'Z'",
+                    source_colourspace.as_deref().unwrap_or("rec709")
+                ));
+            }
 
             // durations are in edit-rate frames, so they parse against the
             // declared frame rate and fail before the encode
@@ -1264,7 +1264,7 @@ fn run() {
                     std::path::Path::new(burn),
                     &imfwizard_core::subtitle_burn::BurnTarget {
                         timed_text: &timed_text_files,
-                        frames_already_xyz: !source_colour.applies_xyz_transform() || hdr.is_some(),
+                        frames_already_xyz: !source_colour.applies_xyz_transform(),
                         input_is_codestreams: postkit::encode::detect_input_type(picture)
                             == postkit::encode::InputType::J2kSequence,
                     },
