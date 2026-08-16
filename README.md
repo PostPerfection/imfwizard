@@ -242,8 +242,9 @@ imfwizard create \
   --fps-num 24 --fps-den 1
 ```
 
-`--fps-num`/`--fps-den` take any rate. The GUI's Frame Rate menu offers 24, 25,
-29.97, 30, 48, 50, 59.94, 60, 100 and 120.
+`--fps-num`/`--fps-den` take any rate, and the encode runs at the fraction they
+name rather than at the nearest whole rate. The GUI's Frame Rate menu offers
+23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 100, 119.88 and 120.
 
 ### Set the picture bitrate
 

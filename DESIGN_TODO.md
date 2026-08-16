@@ -94,18 +94,6 @@ order `create` builds its sources in.
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok
   exposes through grok-ffi before scoping. Shared with dcpwizard, one postkit fix.
-- A fractional frame rate is encoded at the nearest whole one. The CPL EditRate
-  and the AS-02 wrap edit rate carry `--fps-num`/`--fps-den` exactly, but
-  `postkit::pipeline::EncodeRunOptions::fps` is a `u32` that becomes an ffmpeg
-  `fps=N` filter in `postkit::encode::decode_filters` and a `frame_rate: u16` on
-  the grok encoder, so a 24000/1001 source is decoded through `fps=24`: 1439
-  source frames over a minute come out as 1440, and the composition then runs
-  0.04% long against a CPL that says 24000/1001. Nothing rounds silently any
-  more, `whole_frames_per_second` is the one place it happens and both front
-  ends call it, but the rounding itself needs a rational rate on postkit's
-  `EncodeRunOptions`, `StreamEncodeOptions` and `write_image_concat_list`, which
-  is a postkit change shared with dcpwizard. The GUI menu therefore gained only
-  whole rates (50, 100, 120) and keeps 29.97 and 59.94 as they were.
 - Burn-in line height and margin. `create` reaches every field of postkit's
   `BurnStyleOverrides`, but `BurnStyle::line_height_ratio` and `margin_ratio`
   have no override field, so a caller cannot set line spacing or the distance
