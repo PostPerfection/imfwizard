@@ -297,8 +297,11 @@ pub async fn submit_job(
         Some("30000/1001") => (30000, 1001),
         Some("30/1") => (30, 1),
         Some("48/1") => (48, 1),
+        Some("50/1") => (50, 1),
         Some("60000/1001") => (60000, 1001),
         Some("60/1") => (60, 1),
+        Some("100/1") => (100, 1),
+        Some("120/1") => (120, 1),
         _ => (24, 1),
     };
 
@@ -748,6 +751,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         log_to(&log_file, &format!("[HINT] {hint}"));
     }
 
+    let encode_fps = imfwizard_core::encode::whole_frames_per_second(job.fps_num, job.fps_den);
+
     // submit_job already proved the file parses, so a failure here is a file that
     // changed underneath
     let subtitle_burn = match &job.burn_subtitle {
@@ -755,7 +760,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             path,
             job.burn_subtitle_font.as_deref(),
             &job.burn_style,
-            job.fps_num,
+            encode_fps,
         )?),
         None => None,
     };
@@ -807,15 +812,13 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             }
         };
         let compression_ratio = match (&probed, &picture) {
-            (Some(info), Some(picture)) => {
-                let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
-                // the bitrate target is against the raster that is encoded, which
-                // the picture plan may have changed
-                let raw_bits = picture.encode_width as f64 * picture.encode_height as f64 * 36.0;
-                let target_bits = (job.bandwidth as f64 * 1_000_000.0) / fps;
-                (raw_bits / target_bits).max(1.0)
-            }
-            _ => 10.0,
+            (Some(info), Some(picture)) => imfwizard_core::encode::compression_ratio_for_bitrate(
+                picture.encode_width,
+                picture.encode_height,
+                info.fps_num as f64 / info.fps_den.max(1) as f64,
+                job.bandwidth as f64,
+            ),
+            _ => imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
         };
 
         // per-composition scratch dir so multiple encodes don't clobber each other
@@ -833,7 +836,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
                     image: &video_path,
                     frames: hold_for,
-                    fps: job.fps_num,
+                    fps: encode_fps,
                     width: plan.encode_width,
                     height: plan.encode_height,
                     filters: &plan.plan.filters,
@@ -856,7 +859,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     &enc_dir,
                     &postkit::pipeline::EncodeRunOptions {
                         compression_ratio,
-                        fps: job.fps_num,
+                        fps: encode_fps,
                         source_colour: job.source_colour.clone(),
                         subtitle_burn: subtitle_burn.clone(),
                         picture: picture
