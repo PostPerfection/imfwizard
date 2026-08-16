@@ -194,7 +194,9 @@ fn precheck_j2k(input_dir: &std::path::Path) -> Result<(), String> {
 }
 
 /// The picture rasters App 2E allows.
-const APP2E_RASTERS: [(u32, u32); 4] = [(1920, 1080), (2048, 1080), (3840, 2160), (4096, 2160)];
+/// Every picture raster App 2E allows. `source_picture` names them too, as the
+/// only targets `--raster` takes.
+pub const APP2E_RASTERS: [(u32, u32); 4] = [(1920, 1080), (2048, 1080), (3840, 2160), (4096, 2160)];
 
 /// Check a picture raster against App 2E. Split out of [`validate_app2e_picture`]
 /// so `create` can run it on the probed source before spending a whole encode on

@@ -13,6 +13,7 @@ pub mod duration_spec;
 pub mod encode;
 pub mod probe;
 pub mod source_edits;
+pub mod source_picture;
 pub mod still;
 pub mod transcode;
 
@@ -27,6 +28,7 @@ pub mod source_colourspace;
 pub mod atmos;
 pub mod audio;
 pub mod audio_desc;
+pub mod audio_map;
 pub mod channel_map;
 pub mod mca;
 

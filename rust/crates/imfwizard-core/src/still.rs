@@ -32,12 +32,21 @@ pub fn is_still_image(path: &Path) -> bool {
 }
 
 /// Decode `image` to one rgb48be frame at `width`x`height`, sized by the caller
-/// from its own probe so a mismatch is refused before this runs.
-fn decode_rgb48(image: &Path, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let output = std::process::Command::new("ffmpeg")
-        .arg("-y")
-        .arg("-i")
-        .arg(image)
+/// from the picture plan so a mismatch is refused before this runs. The plan's
+/// filters run here, which is where a still meets the crop, turn and raster fit
+/// a video meets inside the encode pipeline.
+fn decode_rgb48(
+    image: &Path,
+    width: u32,
+    height: u32,
+    filters: &[String],
+) -> Result<Vec<u8>, String> {
+    let mut command = std::process::Command::new("ffmpeg");
+    command.arg("-y").arg("-i").arg(image);
+    if !filters.is_empty() {
+        command.arg("-vf").arg(filters.join(","));
+    }
+    let output = command
         .args(["-frames:v", "1", "-pix_fmt", "rgb48be", "-f", "rawvideo"])
         .arg("pipe:1")
         .stderr(std::process::Stdio::null())
@@ -62,8 +71,12 @@ pub struct StillHold<'a> {
     pub image: &'a Path,
     pub frames: u64,
     pub fps: u32,
+    /// Size of the encoded frame, which is the picture plan's output raster.
     pub width: u32,
     pub height: u32,
+    /// ffmpeg filters the picture plan resolved to, applied while the image
+    /// decodes.
+    pub filters: &'a [String],
     /// How the still reaches X'Y'Z': the compressor's own Rec.709 pass, or
     /// nothing when the image is already X'Y'Z'.
     pub source_colour: &'a SourceColour,
@@ -88,6 +101,7 @@ pub fn build_still_frames(hold: &StillHold) -> Result<(), String> {
         fps,
         width,
         height,
+        filters,
         source_colour,
         burn,
         out_dir,
@@ -97,7 +111,7 @@ pub fn build_still_frames(hold: &StillHold) -> Result<(), String> {
     if frames == 0 {
         return Err("a still needs a hold of at least one frame".into());
     }
-    let data = decode_rgb48(image, width, height)?;
+    let data = decode_rgb48(image, width, height, filters)?;
     crate::source_edits::fresh_dir(out_dir)?;
 
     let params = CompressParams {
@@ -223,6 +237,7 @@ mod tests {
             fps: 24,
             width: 1920,
             height: 1080,
+            filters: &[],
             source_colour: &SourceColour::DisplayRgb,
             burn: None,
             out_dir: &dir.path().join("held"),

@@ -73,6 +73,107 @@ fn encode_picture(
     result
 }
 
+/// What `create` does to the source picture before it is compressed. Boxed
+/// where it is flattened, so `create` does not dwarf every other subcommand in
+/// the parsed command enum.
+#[derive(clap::Args)]
+struct PictureArguments {
+    /// Pixels cut off the left of the source, before any rotation.
+    #[arg(long = "crop-left", default_value_t = 0)]
+    crop_left: u32,
+
+    /// Pixels cut off the right of the source, before any rotation.
+    #[arg(long = "crop-right", default_value_t = 0)]
+    crop_right: u32,
+
+    /// Pixels cut off the top of the source, before any rotation.
+    #[arg(long = "crop-top", default_value_t = 0)]
+    crop_top: u32,
+
+    /// Pixels cut off the bottom of the source, before any rotation.
+    #[arg(long = "crop-bottom", default_value_t = 0)]
+    crop_bottom: u32,
+
+    /// Measure the black borders of the source and crop them away.
+    #[arg(long = "auto-crop")]
+    auto_crop: bool,
+
+    /// How black a pixel has to be to count as border, 0 to 1. Requires
+    /// --auto-crop.
+    #[arg(long = "auto-crop-threshold")]
+    auto_crop_threshold: Option<f32>,
+
+    /// Crop the source to the target raster's aspect instead of padding it, so
+    /// the picture fills the frame and the excess is cut away.
+    #[arg(long = "fill-crop")]
+    fill_crop: bool,
+
+    /// Turn the source's fields into progressive frames (yadif).
+    #[arg(long)]
+    deinterlace: bool,
+
+    /// Run the source through a denoiser (hqdn3d) at its defaults.
+    #[arg(long)]
+    denoise: bool,
+
+    /// Turn the picture clockwise: 90, 180 or 270 degrees.
+    #[arg(long)]
+    rotate: Option<String>,
+
+    /// Mirror the picture: horizontal, vertical or both.
+    #[arg(long)]
+    flip: Option<String>,
+
+    /// Raster the picture is fitted into, one of 1920x1080, 2048x1080,
+    /// 3840x2160 or 4096x2160. Defaults to the source's own raster.
+    #[arg(long)]
+    raster: Option<String>,
+}
+
+impl PictureArguments {
+    /// Read the flags into the shared options, failing on a bad spelling.
+    fn resolve(&self) -> imfwizard_core::source_picture::SourcePictureOptions {
+        if self.auto_crop_threshold.is_some() && !self.auto_crop {
+            fail("--auto-crop-threshold requires --auto-crop");
+        }
+        let rotation = self
+            .rotate
+            .as_deref()
+            .map(|value| {
+                imfwizard_core::source_picture::parse_rotation(value).unwrap_or_else(|e| fail(e))
+            })
+            .unwrap_or_default();
+        let (flip_horizontal, flip_vertical) = self
+            .flip
+            .as_deref()
+            .map(|value| {
+                imfwizard_core::source_picture::parse_flip(value).unwrap_or_else(|e| fail(e))
+            })
+            .unwrap_or((false, false));
+        imfwizard_core::source_picture::SourcePictureOptions {
+            crop: postkit::picture_processing::Crop {
+                left: self.crop_left,
+                right: self.crop_right,
+                top: self.crop_top,
+                bottom: self.crop_bottom,
+            },
+            auto_crop: self.auto_crop,
+            auto_crop_threshold: self
+                .auto_crop_threshold
+                .unwrap_or(imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD),
+            fill_crop: self.fill_crop,
+            deinterlace: self.deinterlace,
+            denoise: self.denoise,
+            rotation,
+            flip_horizontal,
+            flip_vertical,
+            raster: self.raster.as_deref().map(|value| {
+                imfwizard_core::source_picture::parse_raster(value).unwrap_or_else(|e| fail(e))
+            }),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Create a new IMP (Interoperable Master Package)
@@ -181,6 +282,16 @@ enum Commands {
         /// directory of frames.
         #[arg(long = "still-length")]
         still_length: Option<String>,
+
+        #[command(flatten)]
+        picture: Box<PictureArguments>,
+
+        /// Route and mix the --audio channels, as comma-separated IN:OUT or
+        /// IN:OUT@GAIN entries. IN is a 1-based input channel, OUT is a channel
+        /// number or a name (L, R, C, LFE, Ls, Rs, Lrs, Rrs) and GAIN is
+        /// decibels, e.g. "1:L,2:R,1:C@-6".
+        #[arg(long = "audio-map")]
+        audio_map: Option<String>,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1152,6 +1263,8 @@ fn run() {
             trim_start,
             trim_end,
             still_length,
+            picture: picture_arguments,
+            audio_map,
         } => {
             // the HDR detail flags only make sense with an HDR preset
             for (name, given) in [
@@ -1219,6 +1332,16 @@ fn run() {
                      Use --source-colourspace xyz for a source that is already X'Y'Z'",
                     source_colourspace.as_deref().unwrap_or("rec709")
                 ));
+            }
+
+            let picture_options = picture_arguments.resolve();
+
+            // the auto-demuxed track is written after the map would have run, so
+            // mapping it would silently do nothing
+            if audio_map.is_some() && audio.is_none() {
+                fail(
+                    "--audio-map needs --audio: pass the WAV to map explicitly, since the track demuxed from --video is written after the map runs",
+                );
             }
 
             // durations are in edit-rate frames, so they parse against the
@@ -1297,9 +1420,19 @@ fn run() {
                 let info = imfwizard_core::probe::probe_video(image).unwrap_or_else(|| {
                     fail(format!("cannot read the size of {}", image.display()))
                 });
-                if let Err(error) =
-                    imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)
-                {
+                let picture = imfwizard_core::source_picture::resolve_picture(
+                    &picture_options,
+                    image,
+                    info.width,
+                    info.height,
+                    false,
+                )
+                .unwrap_or_else(|e| fail(e));
+                tracing::info!("Picture: {}", picture.plan.describe());
+                if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_raster(
+                    picture.encode_width,
+                    picture.encode_height,
+                ) {
                     fail(error);
                 }
                 let fps = fps_num / fps_den.max(1);
@@ -1308,8 +1441,9 @@ fn run() {
                     image,
                     frames: hold_for,
                     fps,
-                    width: info.width,
-                    height: info.height,
+                    width: picture.encode_width,
+                    height: picture.encode_height,
+                    filters: &picture.plan.filters,
                     source_colour: &source_colour,
                     burn: build_subtitle_burn(fps),
                     out_dir: &held,
@@ -1353,13 +1487,26 @@ fn run() {
                             info.fps_num,
                             info.fps_den
                         );
-                        // the wrapper refuses an illegal raster too, but only after
-                        // the encode has already run
-                        if let Err(error) =
-                            imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)
-                        {
-                            fail(error);
-                        }
+                    }
+                    let (source_width, source_height) =
+                        imfwizard_core::source_picture::source_raster(&video_path)
+                            .unwrap_or_else(|e| fail(e));
+                    let picture = imfwizard_core::source_picture::resolve_picture(
+                        &picture_options,
+                        &video_path,
+                        source_width,
+                        source_height,
+                        false,
+                    )
+                    .unwrap_or_else(|e| fail(e));
+                    tracing::info!("Picture: {}", picture.plan.describe());
+                    // the wrapper refuses an illegal raster too, but only after
+                    // the encode has already run
+                    if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_raster(
+                        picture.encode_width,
+                        picture.encode_height,
+                    ) {
+                        fail(error);
                     }
 
                     tracing::info!("Compressor: Grok");
@@ -1368,7 +1515,10 @@ fn run() {
                     let compression_ratio = match (&preset, &probed) {
                         (Some(p), Some(info)) => {
                             let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
-                            let raw_bits = info.width as f64 * info.height as f64 * 36.0;
+                            // the bitrate target is against the raster that is
+                            // encoded, which the picture plan may have changed
+                            let raw_bits =
+                                picture.encode_width as f64 * picture.encode_height as f64 * 36.0;
                             let target_bits = (p.bitrate_mbps * 1_000_000.0) / fps;
                             (raw_bits / target_bits).max(1.0)
                         }
@@ -1390,6 +1540,7 @@ fn run() {
                             fps: actual_fps,
                             source_colour: source_colour.clone(),
                             subtitle_burn: build_subtitle_burn(actual_fps),
+                            picture: picture.processing.clone(),
                             ..Default::default()
                         },
                     );
@@ -1437,6 +1588,11 @@ fn run() {
                         &source_colour,
                     )
                     .unwrap_or_else(|e| fail(e));
+                    imfwizard_core::source_picture::reject_on_precompressed_picture(
+                        &video_path,
+                        &picture_options,
+                    )
+                    .unwrap_or_else(|e| fail(e));
                     (
                         Some(video_path),
                         audio
@@ -1453,6 +1609,21 @@ fn run() {
                         .map(|a| vec![PathBuf::from(a)])
                         .unwrap_or_default(),
                 )
+            };
+
+            // the map runs before the delay, the trim and the MCA labels, so the
+            // labelled layout describes the file that is actually packaged
+            let audio_files = match &audio_map {
+                Some(spec) => audio_files
+                    .iter()
+                    .map(|wav| {
+                        imfwizard_core::audio_map::map_audio_file(spec, wav, &output, |line| {
+                            tracing::info!("{line}")
+                        })
+                        .unwrap_or_else(|e| fail(e))
+                    })
+                    .collect(),
+                None => audio_files,
             };
 
             let source = imfwizard_core::source_edits::apply_source_edits(
