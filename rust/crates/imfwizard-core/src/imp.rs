@@ -329,34 +329,8 @@ mod tests {
         assert!(cpl_xml.contains("Test &amp; &lt;Special&gt; &quot;Film&quot;"));
     }
 
-    /// Minimal JPEG 2000 codestream the AS-02 writer accepts: SOC, a 2048x1080
-    /// 3-component SIZ, then SOD/EOC.
     fn synthetic_j2k() -> Vec<u8> {
-        let mut d = vec![0xFF, 0x4F]; // SOC
-        d.extend_from_slice(&[0xFF, 0x51]); // SIZ
-        let mut siz = Vec::new();
-        siz.extend_from_slice(&3u16.to_be_bytes()); // Rsiz
-        siz.extend_from_slice(&2048u32.to_be_bytes()); // Xsiz
-        siz.extend_from_slice(&1080u32.to_be_bytes()); // Ysiz
-        siz.extend_from_slice(&0u32.to_be_bytes()); // XOsiz
-        siz.extend_from_slice(&0u32.to_be_bytes()); // YOsiz
-        siz.extend_from_slice(&2048u32.to_be_bytes()); // XTsiz
-        siz.extend_from_slice(&1080u32.to_be_bytes()); // YTsiz
-        siz.extend_from_slice(&0u32.to_be_bytes()); // XTOsiz
-        siz.extend_from_slice(&0u32.to_be_bytes()); // YTOsiz
-        siz.extend_from_slice(&3u16.to_be_bytes()); // Csiz
-        for _ in 0..3 {
-            siz.push(11); // 12-bit unsigned
-            siz.push(1);
-            siz.push(1);
-        }
-        let lsiz = (siz.len() + 2) as u16;
-        d.extend_from_slice(&lsiz.to_be_bytes());
-        d.extend_from_slice(&siz);
-        d.extend_from_slice(&[0xFF, 0x93]); // SOD
-        d.extend_from_slice(&[0u8; 64]);
-        d.extend_from_slice(&[0xFF, 0xD9]); // EOC
-        d
+        crate::mxf_wrap::synthetic_j2k_codestream(2048, 1080, 12)
     }
 
     /// A --hdr create writes the transfer/colour ULs and ST 2086 mastering values

@@ -11,6 +11,8 @@ pub mod timeline;
 // Encoding/transcoding
 pub mod duration_spec;
 pub mod encode;
+pub mod hints;
+pub mod preflight;
 pub mod probe;
 pub mod source_edits;
 pub mod source_picture;

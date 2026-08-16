@@ -404,6 +404,11 @@ enum Commands {
         /// decibels, e.g. "1:L,2:R,1:C@-6".
         #[arg(long = "audio-map")]
         audio_map: Option<String>,
+
+        /// Run the pre-build check and stop: every refusal and every hint,
+        /// without encoding or writing anything under --output.
+        #[arg(long)]
+        check: bool,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1386,6 +1391,7 @@ fn run() {
             still_length,
             picture: picture_arguments,
             audio_map,
+            check,
         } => {
             // the HDR detail flags only make sense with an HDR preset
             for (name, given) in [
@@ -1509,20 +1515,41 @@ fn run() {
             imfwizard_core::subtitle_burn::resolve_burn_style(&burn_style)
                 .unwrap_or_else(|e| fail(e));
 
-            if let Some(burn) = burn_arguments.burn_subtitle.as_deref() {
-                let Some(picture) = video.as_deref().map(std::path::Path::new) else {
-                    fail("--burn-subtitle needs --video: there is no picture to draw on");
-                };
-                imfwizard_core::subtitle_burn::check_burn_supported(
-                    std::path::Path::new(burn),
-                    &imfwizard_core::subtitle_burn::BurnTarget {
-                        timed_text: &timed_text_files,
-                        frames_already_xyz: !source_colour.applies_xyz_transform(),
-                        input_is_codestreams: postkit::encode::detect_input_type(picture)
-                            == postkit::encode::InputType::J2kSequence,
-                    },
-                )
-                .unwrap_or_else(|e| fail(e));
+            if burn_arguments.burn_subtitle.is_some() && video.is_none() {
+                fail("--burn-subtitle needs --video: there is no picture to draw on");
+            }
+
+            let plan = imfwizard_core::preflight::CreatePlan {
+                picture: video.as_deref().map(PathBuf::from),
+                audio_files: audio.iter().map(PathBuf::from).collect(),
+                audio_language: audio_lang.clone(),
+                timed_text_files: timed_text_files.clone(),
+                fps_num,
+                fps_den,
+                edits,
+                audio_map: audio_map.clone(),
+                burn_subtitle: burn_arguments.burn_subtitle.as_deref().map(PathBuf::from),
+                burn_subtitle_font: burn_arguments
+                    .burn_subtitle_font
+                    .as_deref()
+                    .map(PathBuf::from),
+                burn_style: burn_style.clone(),
+                picture_options: picture_options.clone(),
+                source_colour: source_colour.clone(),
+                still_frames,
+            };
+            imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
+
+            let hints = imfwizard_core::hints::gather_hints(&plan);
+            for hint in &hints {
+                tracing::warn!("hint: {}", hint.text);
+            }
+            if check {
+                println!(
+                    "Pre-build check passed with {} hint(s); nothing was encoded or written",
+                    hints.len()
+                );
+                return;
             }
 
             // the edit rate is settled inside each branch, and the cue timings are
@@ -1563,12 +1590,6 @@ fn run() {
                 )
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
-                if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_raster(
-                    picture.encode_width,
-                    picture.encode_height,
-                ) {
-                    fail(error);
-                }
                 let fps = fps_num / fps_den.max(1);
                 let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
                 imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
@@ -1634,15 +1655,6 @@ fn run() {
                     )
                     .unwrap_or_else(|e| fail(e));
                     tracing::info!("Picture: {}", picture.plan.describe());
-                    // the wrapper refuses an illegal raster too, but only after
-                    // the encode has already run
-                    if let Err(error) = imfwizard_core::mxf_wrap::validate_app2e_raster(
-                        picture.encode_width,
-                        picture.encode_height,
-                    ) {
-                        fail(error);
-                    }
-
                     tracing::info!("Compressor: Grok");
                     // A delivery preset sets the target bitrate; convert it to a J2K
                     // compression ratio (raw = w*h*36 bits/frame), else default 10x.
@@ -1717,16 +1729,6 @@ fn run() {
                     (Some(j2k_out), audio_files)
                 } else {
                     // Assume it's a J2K directory
-                    imfwizard_core::source_colourspace::reject_on_precompressed_picture(
-                        &video_path,
-                        &source_colour,
-                    )
-                    .unwrap_or_else(|e| fail(e));
-                    imfwizard_core::source_picture::reject_on_precompressed_picture(
-                        &video_path,
-                        &picture_options,
-                    )
-                    .unwrap_or_else(|e| fail(e));
                     (
                         Some(video_path),
                         audio

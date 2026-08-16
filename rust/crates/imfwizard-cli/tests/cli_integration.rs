@@ -1450,3 +1450,108 @@ fn subtitle_convert_writes_a_default_size_and_colour() {
         .failure()
         .stderr(predicate::str::contains("--colour: octarine is not"));
 }
+
+/// `create --check` is the pre-build pass: it has to refuse a job that cannot
+/// finish and leave the output folder untouched, rather than encoding first.
+#[test]
+fn the_pre_build_check_refuses_a_trim_longer_than_the_clip() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Trimmed",
+            "--video",
+            &clip.to_string_lossy(),
+            "--trim-start",
+            "200f",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("leaves nothing of the 24 picture"));
+
+    assert!(!output.exists(), "the check must write nothing");
+}
+
+/// A first cue a second in is the DoM four-second rule, and `--check` is where a
+/// caller sees it without spending an encode.
+#[test]
+fn the_pre_build_check_prints_the_first_cue_hint() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(
+        &srt,
+        "1\n00:00:01,000 --> 00:00:03,000\nA cue that starts early\n\n",
+    )
+    .unwrap();
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Early",
+            "--video",
+            &clip.to_string_lossy(),
+            "--burn-subtitle",
+            &srt.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("The first subtitle in cues.srt"))
+        .stdout(predicate::str::contains("at least 4 seconds"));
+
+    assert!(!output.exists(), "the check must write nothing");
+}
+
+/// Nothing to say is the common case, and it has to say nothing rather than
+/// inventing a hint.
+#[test]
+fn the_pre_build_check_is_quiet_on_a_clean_job() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Clean",
+            "--video",
+            &clip.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0 hint(s)"))
+        .stdout(predicate::str::contains("hint:").not());
+
+    assert!(!output.exists(), "the check must write nothing");
+}

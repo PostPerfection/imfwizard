@@ -180,7 +180,10 @@ fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
-fn precheck_j2k(input_dir: &std::path::Path) -> Result<(), String> {
+/// Check a J2K directory's first codestream against App 2E. The wrapper runs it
+/// on the way in, and `preflight` runs it before the encode, so a directory the
+/// package could never carry is refused without a build.
+pub fn precheck_j2k(input_dir: &std::path::Path) -> Result<(), String> {
     let files = collect_input_files(input_dir)?;
     let first = std::fs::read(&files[0])
         .map_err(|e| format!("failed to read {}: {e}", files[0].display()))?;
@@ -225,6 +228,39 @@ pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<
         ));
     }
     Ok(())
+}
+
+/// A minimal JPEG 2000 codestream at a given raster: SOC, SIZ, SOD, EOC. The
+/// App 2E checks and the AS-02 writer read only the SIZ, so nothing more is
+/// needed to exercise either.
+#[cfg(test)]
+pub(crate) fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -> Vec<u8> {
+    const COMPONENTS: u16 = 3;
+    let mut siz = Vec::new();
+    siz.extend_from_slice(&3u16.to_be_bytes()); // Rsiz
+    siz.extend_from_slice(&width.to_be_bytes()); // Xsiz
+    siz.extend_from_slice(&height.to_be_bytes()); // Ysiz
+    siz.extend_from_slice(&0u32.to_be_bytes()); // XOsiz
+    siz.extend_from_slice(&0u32.to_be_bytes()); // YOsiz
+    siz.extend_from_slice(&width.to_be_bytes()); // XTsiz
+    siz.extend_from_slice(&height.to_be_bytes()); // YTsiz
+    siz.extend_from_slice(&0u32.to_be_bytes()); // XTOsiz
+    siz.extend_from_slice(&0u32.to_be_bytes()); // YTOsiz
+    siz.extend_from_slice(&COMPONENTS.to_be_bytes()); // Csiz
+    for _ in 0..COMPONENTS {
+        siz.push(bit_depth - 1); // unsigned Ssiz
+        siz.push(1); // XRsiz
+        siz.push(1); // YRsiz
+    }
+
+    let mut codestream = vec![0xFF, 0x4F]; // SOC
+    codestream.extend_from_slice(&[0xFF, 0x51]); // SIZ
+    codestream.extend_from_slice(&((siz.len() + 2) as u16).to_be_bytes());
+    codestream.extend_from_slice(&siz);
+    codestream.extend_from_slice(&[0xFF, 0x93]); // SOD
+    codestream.extend_from_slice(&[0u8; 64]);
+    codestream.extend_from_slice(&[0xFF, 0xD9]); // EOC
+    codestream
 }
 
 #[cfg(test)]

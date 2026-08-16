@@ -27,9 +27,232 @@ pub struct SourceEdits {
 }
 
 impl SourceEdits {
-    fn trims(&self) -> bool {
+    pub fn trims(&self) -> bool {
         self.trim_start_frames > 0 || self.trim_end_frames > 0
     }
+}
+
+/// The source lengths the edit refusals measure against, gathered before the
+/// encode by [`probe_source_facts`] and from the files themselves at edit time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceFacts {
+    pub picture: Option<PictureFacts>,
+    pub audio: Vec<AudioFacts>,
+    /// The edit rate the trim's frame counts are in.
+    pub fps: f64,
+}
+
+/// How many frames the picture holds, and where they came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PictureFacts {
+    pub path: PathBuf,
+    pub frames: u64,
+}
+
+/// How long one sound file runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioFacts {
+    pub path: PathBuf,
+    pub sample_frames: u64,
+    pub sample_rate: u32,
+}
+
+const NO_SOUND_TO_DELAY: &str =
+    "an audio delay needs a sound track to shift, but the composition has none";
+const NO_PICTURE_TO_TRIM: &str =
+    "a trim needs picture frames to measure against, but the composition has none";
+
+/// Refuse every edit the source cannot absorb.
+///
+/// The edit functions run the same pieces on the files they open, so a job that
+/// cannot finish is refused before the encode as well as at the edit itself.
+pub fn check_edits(edits: &SourceEdits, facts: &SourceFacts) -> Result<(), String> {
+    if edits.audio_delay_ms != 0 && facts.audio.is_empty() {
+        return Err(NO_SOUND_TO_DELAY.to_string());
+    }
+    if edits.trims() {
+        let Some(picture) = &facts.picture else {
+            return Err(NO_PICTURE_TO_TRIM.to_string());
+        };
+        check_picture_trim(edits, picture)?;
+    }
+    for audio in &facts.audio {
+        check_audio_delay(edits.audio_delay_ms, audio)?;
+        check_audio_trim(edits, audio, facts.fps)?;
+    }
+    Ok(())
+}
+
+fn check_picture_trim(edits: &SourceEdits, picture: &PictureFacts) -> Result<(), String> {
+    let head = edits.trim_start_frames;
+    let tail = edits.trim_end_frames;
+    if head + tail < picture.frames {
+        return Ok(());
+    }
+    Err(format!(
+        "trimming {head} frames off the head and {tail} off the tail leaves nothing of the {} picture frames in {}",
+        picture.frames,
+        picture.path.display()
+    ))
+}
+
+fn check_audio_delay(delay_ms: i64, audio: &AudioFacts) -> Result<(), String> {
+    if delay_ms == 0 || delay_shift_frames(delay_ms, audio.sample_rate) < audio.sample_frames {
+        return Ok(());
+    }
+    let programme_ms = audio.sample_frames as f64 * 1000.0 / audio.sample_rate.max(1) as f64;
+    Err(format!(
+        "an audio delay of {delay_ms} ms is at least as long as the {programme_ms:.0} ms of sound in {}",
+        audio.path.display()
+    ))
+}
+
+fn check_audio_trim(edits: &SourceEdits, audio: &AudioFacts, fps: f64) -> Result<(), String> {
+    if !edits.trims() {
+        return Ok(());
+    }
+    let (head, tail) = trim_sample_frames(edits, audio.sample_rate, fps);
+    if head + tail < audio.sample_frames {
+        return Ok(());
+    }
+    Err(format!(
+        "trimming {head} + {tail} sample frames leaves nothing of the {} in {}",
+        audio.sample_frames,
+        audio.path.display()
+    ))
+}
+
+/// How many sample frames a delay shifts the sound by.
+fn delay_shift_frames(delay_ms: i64, sample_rate: u32) -> u64 {
+    (delay_ms.unsigned_abs() as f64 * sample_rate.max(1) as f64 / 1000.0).round() as u64
+}
+
+/// The head and tail trims as sample frames, measured through the edit rate.
+fn trim_sample_frames(edits: &SourceEdits, sample_rate: u32, fps: f64) -> (u64, u64) {
+    let to_samples =
+        |picture_frames: u64| (picture_frames as f64 / fps * sample_rate as f64).round() as u64;
+    (
+        to_samples(edits.trim_start_frames),
+        to_samples(edits.trim_end_frames),
+    )
+}
+
+/// Extensions the encoder enumerates as picture frames in a directory.
+const PICTURE_FRAME_EXTENSIONS: [&str; 7] = ["j2c", "j2k", "tif", "tiff", "dpx", "exr", "bmp"];
+
+/// What ffprobe is asked for to length a video: the stream's frame count, then
+/// the container duration for the sources that do not carry one.
+const FFPROBE_LENGTH_ARGUMENTS: [&str; 8] = [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=nb_frames:format=duration",
+    "-of",
+    "default=nw=1:nk=1",
+];
+
+/// Measure the source the edits will act on, before anything is encoded.
+///
+/// A still is as long as the hold asks for, since the source image is one frame
+/// whatever the trim says.
+pub fn probe_source_facts(
+    picture: Option<&Path>,
+    still_frames: Option<u64>,
+    audio: &[PathBuf],
+    fps_num: u32,
+    fps_den: u32,
+) -> Result<SourceFacts, String> {
+    let fps = fps_num.max(1) as f64 / fps_den.max(1) as f64;
+    let picture = match picture {
+        Some(path) => Some(PictureFacts {
+            path: path.to_path_buf(),
+            frames: match still_frames {
+                Some(frames) => frames,
+                None => source_frame_count(path, fps)?,
+            },
+        }),
+        None => None,
+    };
+    let audio = audio
+        .iter()
+        .map(|path| audio_facts(path))
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(SourceFacts {
+        picture,
+        audio,
+        fps,
+    })
+}
+
+fn audio_facts(path: &Path) -> Result<AudioFacts, String> {
+    let reader =
+        hound::WavReader::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    Ok(AudioFacts {
+        path: path.to_path_buf(),
+        sample_frames: reader.duration() as u64,
+        sample_rate: reader.spec().sample_rate,
+    })
+}
+
+fn source_frame_count(picture: &Path, fps: f64) -> Result<u64, String> {
+    if picture.is_dir() {
+        return directory_frame_count(picture);
+    }
+    video_frame_count(picture, fps)
+}
+
+fn directory_frame_count(dir: &Path) -> Result<u64, String> {
+    let frames = std::fs::read_dir(dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| {
+                    PICTURE_FRAME_EXTENSIONS.contains(&extension.to_lowercase().as_str())
+                })
+                .unwrap_or(false)
+        })
+        .count() as u64;
+    if frames == 0 {
+        return Err(format!("no picture frames in {}", dir.display()));
+    }
+    Ok(frames)
+}
+
+fn video_frame_count(picture: &Path, fps: f64) -> Result<u64, String> {
+    let unreadable = || {
+        format!(
+            "cannot read how long {} runs, so a trim cannot be measured against it",
+            picture.display()
+        )
+    };
+    let output = std::process::Command::new("ffprobe")
+        .args(FFPROBE_LENGTH_ARGUMENTS)
+        .arg(picture)
+        .output()
+        .map_err(|e| format!("cannot run ffprobe on {}: {e}", picture.display()))?;
+    if !output.status.success() {
+        return Err(unreadable());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines = text.lines().map(str::trim);
+    let counted = lines
+        .next()
+        .and_then(|line| line.parse::<u64>().ok())
+        .filter(|frames| *frames > 0);
+    if let Some(frames) = counted {
+        return Ok(frames);
+    }
+    let seconds: f64 = lines
+        .next()
+        .and_then(|line| line.parse().ok())
+        .ok_or_else(unreadable)?;
+    Ok((seconds * fps).round() as u64)
 }
 
 /// One composition's picture, sound and timed text, before or after the edits.
@@ -53,30 +276,25 @@ pub fn apply_source_edits(
         return Ok(source.clone());
     }
     if edits.audio_delay_ms != 0 && source.audio_files.is_empty() {
-        return Err(
-            "an audio delay needs a sound track to shift, but the composition has none".to_string(),
-        );
+        return Err(NO_SOUND_TO_DELAY.to_string());
     }
     let fps = fps_num.max(1) as f64 / fps_den.max(1) as f64;
     let mut edited = source.clone();
 
     if edits.trims() {
         let Some(picture_dir) = &source.j2k_dir else {
-            return Err(
-                "a trim needs picture frames to measure against, but the composition has none"
-                    .to_string(),
-            );
+            return Err(NO_PICTURE_TO_TRIM.to_string());
         };
         let frames = picture_frames(picture_dir)?;
+        check_picture_trim(
+            edits,
+            &PictureFacts {
+                path: picture_dir.clone(),
+                frames: frames.len() as u64,
+            },
+        )?;
         let head = edits.trim_start_frames as usize;
         let tail = edits.trim_end_frames as usize;
-        if head + tail >= frames.len() {
-            return Err(format!(
-                "trimming {head} frames off the head and {tail} off the tail leaves nothing of the {} picture frames in {}",
-                frames.len(),
-                picture_dir.display()
-            ));
-        }
         edited.j2k_dir = Some(write_frame_dir(
             &frames[head..frames.len() - tail],
             &work_dir.join(TRIMMED_PICTURE_DIR),
@@ -121,13 +339,7 @@ fn edit_one_wav(
     }
     if edits.trims() {
         let trimmed = work_dir.join(format!("trimmed_audio_{index}.wav"));
-        trim_wav(
-            &current,
-            &trimmed,
-            edits.trim_start_frames,
-            edits.trim_end_frames,
-            fps,
-        )?;
+        trim_wav(&current, &trimmed, edits, fps)?;
         current = trimmed;
     }
     Ok(current)
@@ -144,14 +356,15 @@ pub fn apply_audio_delay(input: &Path, output: &Path, delay_ms: i64) -> Result<(
     let sample_rate = spec.sample_rate.max(1);
     let sample_frames = samples.len() / channels;
 
-    let shift = (delay_ms.unsigned_abs() as f64 * sample_rate as f64 / 1000.0).round() as usize;
-    if shift >= sample_frames {
-        let programme_ms = sample_frames as f64 * 1000.0 / sample_rate as f64;
-        return Err(format!(
-            "an audio delay of {delay_ms} ms is at least as long as the {programme_ms:.0} ms of sound in {}",
-            input.display()
-        ));
-    }
+    check_audio_delay(
+        delay_ms,
+        &AudioFacts {
+            path: input.to_path_buf(),
+            sample_frames: sample_frames as u64,
+            sample_rate,
+        },
+    )?;
+    let shift = delay_shift_frames(delay_ms, sample_rate) as usize;
 
     // the shifted samples are copied untouched, so the output stays bit-exact
     // for every PCM format, 32-bit int included
@@ -184,13 +397,7 @@ pub fn apply_audio_delay(input: &Path, output: &Path, delay_ms: i64) -> Result<(
 }
 
 /// Drop the head and tail of a WAV matching a picture trim of the same length.
-fn trim_wav(
-    input: &Path,
-    output: &Path,
-    trim_start_frames: u64,
-    trim_end_frames: u64,
-    fps: f64,
-) -> Result<(), String> {
+fn trim_wav(input: &Path, output: &Path, edits: &SourceEdits, fps: f64) -> Result<(), String> {
     use postkit::wav_io::Samples;
     let (spec, samples) = postkit::wav_io::read_interleaved_exact(input)
         .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
@@ -198,16 +405,17 @@ fn trim_wav(
     let sample_rate = spec.sample_rate.max(1);
     let sample_frames = samples.len() / channels;
 
-    let to_samples =
-        |picture_frames: u64| (picture_frames as f64 / fps * sample_rate as f64).round() as usize;
-    let head = to_samples(trim_start_frames);
-    let tail = to_samples(trim_end_frames);
-    if head + tail >= sample_frames {
-        return Err(format!(
-            "trimming {head} + {tail} sample frames leaves nothing of the {sample_frames} in {}",
-            input.display()
-        ));
-    }
+    check_audio_trim(
+        edits,
+        &AudioFacts {
+            path: input.to_path_buf(),
+            sample_frames: sample_frames as u64,
+            sample_rate,
+        },
+        fps,
+    )?;
+    let (head, tail) = trim_sample_frames(edits, sample_rate, fps);
+    let (head, tail) = (head as usize, tail as usize);
 
     let window = head * channels..(sample_frames - tail) * channels;
     let kept = match &samples {
@@ -228,6 +436,24 @@ fn trim_timed_text(
     kept_end: f64,
     fps: f64,
 ) -> Result<(), String> {
+    let retimed = retimed_timed_text(input, kept_start, kept_end, fps)?;
+    std::fs::write(output, retimed).map_err(|e| format!("cannot write {}: {e}", output.display()))
+}
+
+/// Refuse a timed-text file a trim could not move, without writing anything.
+///
+/// The whole file is kept, so every cue is read and every refusal the trim
+/// itself would make fires here instead.
+pub fn check_timed_text_trimmable(input: &Path, fps: f64) -> Result<(), String> {
+    retimed_timed_text(input, 0.0, f64::INFINITY, fps).map(|_| ())
+}
+
+fn retimed_timed_text(
+    input: &Path,
+    kept_start: f64,
+    kept_end: f64,
+    fps: f64,
+) -> Result<Vec<u8>, String> {
     let content = std::fs::read_to_string(input)
         .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
 
@@ -259,8 +485,89 @@ fn trim_timed_text(
         }
     }
 
-    std::fs::write(output, writer.into_inner())
-        .map_err(|e| format!("cannot write {}: {e}", output.display()))
+    Ok(writer.into_inner())
+}
+
+/// One `<p>` cue of a timed-text file, as the hints read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimedTextCue {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub lines: Vec<String>,
+}
+
+/// Read the `<p>` cues of a timed-text file, through the same time parser the
+/// trim uses so both read the same shapes.
+///
+/// A cue whose times cannot be read is skipped rather than refused: this feeds
+/// the advisory hints, and the trim is what refuses such a file.
+pub fn read_timed_text_cues(input: &Path, fps: f64) -> Result<Vec<TimedTextCue>, String> {
+    let content = std::fs::read_to_string(input)
+        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
+    let mut reader = Reader::from_str(&content);
+    let mut cues = Vec::new();
+    let mut open: Option<TimedTextCue> = None;
+
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|e| format!("cannot parse {}: {e}", input.display()))?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref element) if is_named(element, b"p") => {
+                open = cue_milliseconds(element, fps).map(|(start_ms, end_ms)| TimedTextCue {
+                    start_ms,
+                    end_ms,
+                    lines: vec![String::new()],
+                });
+            }
+            Event::End(ref element) if element.name().local_name().as_ref() == b"p" => {
+                if let Some(cue) = open.take() {
+                    cues.push(finished_cue(cue));
+                }
+            }
+            Event::Start(ref element) | Event::Empty(ref element) if is_named(element, b"br") => {
+                if let Some(cue) = open.as_mut() {
+                    cue.lines.push(String::new());
+                }
+            }
+            Event::Text(text) => {
+                if let Some(cue) = open.as_mut() {
+                    let decoded = text
+                        .unescape()
+                        .map_err(|e| format!("cannot parse {}: {e}", input.display()))?;
+                    if let Some(line) = cue.lines.last_mut() {
+                        line.push_str(decoded.as_ref());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(cues)
+}
+
+fn is_named(element: &BytesStart, name: &[u8]) -> bool {
+    element.name().local_name().as_ref() == name
+}
+
+fn finished_cue(mut cue: TimedTextCue) -> TimedTextCue {
+    cue.lines = cue
+        .lines
+        .iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    cue
+}
+
+fn cue_milliseconds(element: &BytesStart, fps: f64) -> Option<(u64, u64)> {
+    let to_milliseconds = |value: String| {
+        cue_seconds(&value, fps).map(|seconds| (seconds.max(0.0) * 1000.0).round() as u64)
+    };
+    let begin = to_milliseconds(attribute(element, "begin")?)?;
+    let end = to_milliseconds(attribute(element, "end")?)?;
+    Some((begin, end))
 }
 
 /// TTML attributes that put an element on the timeline.
@@ -873,6 +1180,165 @@ mod tests {
         };
         let error = apply_source_edits(&edits, &source, dir.path(), 24, 1).unwrap_err();
         assert!(error.contains("sound track"), "{error}");
+    }
+
+    fn facts(picture_frames: Option<u64>, sample_frames: Option<u64>) -> SourceFacts {
+        SourceFacts {
+            picture: picture_frames.map(|frames| PictureFacts {
+                path: PathBuf::from("/pictures"),
+                frames,
+            }),
+            audio: sample_frames
+                .map(|sample_frames| AudioFacts {
+                    path: PathBuf::from("/sound.wav"),
+                    sample_frames,
+                    sample_rate: 48_000,
+                })
+                .into_iter()
+                .collect(),
+            fps: 24.0,
+        }
+    }
+
+    /// Every refusal the edits themselves make has to fire from the plan-time
+    /// check too, so nothing spends an encode finding out.
+    #[test]
+    fn the_plan_time_check_refuses_what_the_edits_refuse() {
+        // 48 frames at 24 fps is two seconds, so 96000 sample frames at 48 kHz
+        let whole = facts(Some(48), Some(96_000));
+
+        let delay_without_sound = SourceEdits {
+            audio_delay_ms: 250,
+            ..Default::default()
+        };
+        let error = check_edits(&delay_without_sound, &facts(Some(48), None)).unwrap_err();
+        assert!(error.contains("sound track"), "{error}");
+
+        let trim_without_picture = SourceEdits {
+            trim_start_frames: 2,
+            ..Default::default()
+        };
+        let error = check_edits(&trim_without_picture, &facts(None, Some(96_000))).unwrap_err();
+        assert!(error.contains("picture frames to measure"), "{error}");
+
+        let trim_past_the_picture = SourceEdits {
+            trim_start_frames: 24,
+            trim_end_frames: 24,
+            ..Default::default()
+        };
+        let error = check_edits(&trim_past_the_picture, &whole).unwrap_err();
+        assert!(error.contains("48 picture frames"), "{error}");
+
+        let delay_past_the_programme = SourceEdits {
+            audio_delay_ms: 2_000,
+            ..Default::default()
+        };
+        let error = check_edits(&delay_past_the_programme, &whole).unwrap_err();
+        assert!(error.contains("2000 ms"), "{error}");
+        assert!(error.contains("2000 ms of sound"), "{error}");
+
+        // the sound is shorter than the picture, so only the audio trim refuses
+        let trim_past_the_sound = SourceEdits {
+            trim_start_frames: 20,
+            trim_end_frames: 20,
+            ..Default::default()
+        };
+        let error = check_edits(&trim_past_the_sound, &facts(Some(48), Some(48_000))).unwrap_err();
+        assert!(error.contains("sample frames leaves nothing"), "{error}");
+    }
+
+    #[test]
+    fn a_trim_the_source_can_absorb_passes_the_plan_time_check() {
+        let edits = SourceEdits {
+            audio_delay_ms: 250,
+            trim_start_frames: 12,
+            trim_end_frames: 12,
+        };
+        assert_eq!(check_edits(&edits, &facts(Some(48), Some(96_000))), Ok(()));
+    }
+
+    #[test]
+    fn the_plan_time_check_measures_a_directory_and_a_still() {
+        let dir = tempfile::tempdir().unwrap();
+        let picture = dir.path().join("j2k");
+        std::fs::create_dir_all(&picture).unwrap();
+        for index in 0..30 {
+            std::fs::write(picture.join(format!("frame_{index:08}.j2c")), [0u8]).unwrap();
+        }
+
+        let counted = probe_source_facts(Some(&picture), None, &[], 24, 1).unwrap();
+        assert_eq!(counted.picture.unwrap().frames, 30);
+
+        let held = probe_source_facts(Some(&picture), Some(240), &[], 24, 1).unwrap();
+        assert_eq!(held.picture.unwrap().frames, 240);
+    }
+
+    #[test]
+    fn the_plan_time_check_measures_a_wav_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = ramp_wav(dir.path(), "sound.wav", 96_000, 2);
+        let measured = probe_source_facts(None, None, &[wav], 24, 1).unwrap();
+        assert_eq!(measured.audio[0].sample_frames, 96_000);
+        assert_eq!(measured.audio[0].sample_rate, 48_000);
+    }
+
+    #[test]
+    fn a_timed_text_file_is_checked_without_writing_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("good.xml");
+        std::fs::write(
+            &good,
+            r#"<tt><body><div><p begin="00:00:01.000" end="00:00:02.000">fine</p></div></body></tt>"#,
+        )
+        .unwrap();
+        assert_eq!(check_timed_text_trimmable(&good, 24.0), Ok(()));
+
+        let timed_div = dir.path().join("div.xml");
+        std::fs::write(
+            &timed_div,
+            r#"<tt><body><div begin="00:00:01.000" end="00:00:02.000"><p>on the div</p></div></body></tt>"#,
+        )
+        .unwrap();
+        let error = check_timed_text_trimmable(&timed_div, 24.0).unwrap_err();
+        assert!(error.contains("<div>"), "{error}");
+
+        let with_dur = dir.path().join("dur.xml");
+        std::fs::write(
+            &with_dur,
+            r#"<tt><body><div><p begin="00:00:01.000" dur="00:00:02.000">held</p></div></body></tt>"#,
+        )
+        .unwrap();
+        let error = check_timed_text_trimmable(&with_dur, 24.0).unwrap_err();
+        assert!(error.contains("dur"), "{error}");
+
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            3,
+            "the check must write nothing beside the files it read"
+        );
+    }
+
+    #[test]
+    fn timed_text_cues_come_back_with_their_times_and_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("subs.xml");
+        std::fs::write(
+            &input,
+            r#"<tt><body><div>
+<p begin="00:00:01.500" end="00:00:03.000">first line<br/>second line</p>
+<p begin="0.8s" end="1.2s">offset &amp; escaped</p>
+<p>no times at all</p>
+</div></body></tt>"#,
+        )
+        .unwrap();
+
+        let cues = read_timed_text_cues(&input, 24.0).unwrap();
+        assert_eq!(cues.len(), 2, "{cues:?}");
+        assert_eq!(cues[0].start_ms, 1_500);
+        assert_eq!(cues[0].end_ms, 3_000);
+        assert_eq!(cues[0].lines, ["first line", "second line"]);
+        assert_eq!(cues[1].start_ms, 800);
+        assert_eq!(cues[1].lines, ["offset & escaped"]);
     }
 
     #[test]

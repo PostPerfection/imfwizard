@@ -107,6 +107,17 @@ pub struct ResolvedPicture {
     pub encode_height: u32,
 }
 
+/// The raster the encode lands on: the named `--raster` when there is one, else
+/// the source's own. No crop or turn moves it, so the plan-time App 2E check can
+/// ask for it without running a border detection the encode would repeat.
+pub fn encode_raster(
+    options: &SourcePictureOptions,
+    source_width: u32,
+    source_height: u32,
+) -> (u32, u32) {
+    options.raster.unwrap_or((source_width, source_height))
+}
+
 /// Turn the flags into a plan against a source of the given size.
 ///
 /// The picture is fitted into `options.raster` when one is named and into the
@@ -120,7 +131,7 @@ pub fn resolve_picture(
     is_image_sequence: bool,
 ) -> Result<ResolvedPicture, String> {
     options.check()?;
-    let (target_width, target_height) = options.raster.unwrap_or((source_width, source_height));
+    let (target_width, target_height) = encode_raster(options, source_width, source_height);
 
     let crop = if options.auto_crop {
         detect_crop(
