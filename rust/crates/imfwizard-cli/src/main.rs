@@ -1488,6 +1488,12 @@ fn run() {
                 );
             }
 
+            if fps_num == 0 || fps_den == 0 {
+                fail(format!(
+                    "--fps-num {fps_num} --fps-den {fps_den}: an edit rate needs both above 0"
+                ));
+            }
+
             // durations are in edit-rate frames, so they parse against the
             // declared frame rate and fail before the encode
             let frames_from_spec = |spec: &Option<String>| -> Option<u64> {
@@ -1571,22 +1577,23 @@ fn run() {
 
             // the edit rate is settled inside each branch, and the cue timings are
             // read against it, so the burn is built there
-            let build_subtitle_burn =
-                |fps: u32| -> Option<std::sync::Arc<postkit::subtitle_raster::SubtitleBurn>> {
-                    let path = burn_arguments.burn_subtitle.as_deref()?;
-                    Some(
-                        imfwizard_core::subtitle_burn::prepare_subtitle_burn(
-                            std::path::Path::new(path),
-                            burn_arguments
-                                .burn_subtitle_font
-                                .as_deref()
-                                .map(std::path::Path::new),
-                            &burn_style,
-                            fps,
-                        )
-                        .unwrap_or_else(|e| fail(e)),
+            let build_subtitle_burn = |fps: imfwizard_core::encode::FrameRate| -> Option<
+                std::sync::Arc<postkit::subtitle_raster::SubtitleBurn>,
+            > {
+                let path = burn_arguments.burn_subtitle.as_deref()?;
+                Some(
+                    imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+                        std::path::Path::new(path),
+                        burn_arguments
+                            .burn_subtitle_font
+                            .as_deref()
+                            .map(std::path::Path::new),
+                        &burn_style,
+                        fps,
                     )
-                };
+                    .unwrap_or_else(|e| fail(e)),
+                )
+            };
 
             let _ = std::fs::create_dir_all(&output);
 
@@ -1607,7 +1614,7 @@ fn run() {
                 )
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
-                let fps = imfwizard_core::encode::whole_frames_per_second(fps_num, fps_den);
+                let fps = imfwizard_core::encode::FrameRate::new(fps_num, fps_den);
                 let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
                 imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
                     image,
@@ -1663,18 +1670,22 @@ fn run() {
                                 info.fps_den
                             );
                         }
+                        // ffprobe answers 0/0 for a stream whose rate it cannot
+                        // read, and the declared rate is the better guess
                         let (rate_num, rate_den) = match &probed {
-                            Some(info) => (info.fps_num, info.fps_den),
-                            None => (fps_num, fps_den),
+                            Some(info) if info.fps_num > 0 && info.fps_den > 0 => {
+                                (info.fps_num, info.fps_den)
+                            }
+                            _ => (fps_num, fps_den),
                         };
-                        let encode_fps =
-                            imfwizard_core::encode::whole_frames_per_second(rate_num, rate_den);
+                        let encode_fps = imfwizard_core::encode::FrameRate::new(rate_num, rate_den);
                         tracing::info!(
-                            "Detected {}, encoding to J2K at {encode_fps} fps",
+                            "Detected {}, encoding to J2K at {:.2} fps ({rate_num}/{rate_den})",
                             match is_image_sequence {
                                 true => "image sequence",
                                 false => "video file",
-                            }
+                            },
+                            encode_fps.as_f64()
                         );
 
                         let (source_width, source_height) =
@@ -1706,7 +1717,7 @@ fn run() {
                             preset_bitrate_mbps,
                             picture.encode_width,
                             picture.encode_height,
-                            rate_num as f64 / rate_den.max(1) as f64,
+                            encode_fps.as_f64(),
                         );
                         match bitrate.or(preset_bitrate_mbps) {
                             Some(mbps) => {

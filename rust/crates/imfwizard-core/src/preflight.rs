@@ -96,7 +96,7 @@ fn check_burn(plan: &CreatePlan) -> Result<(), String> {
         burn,
         plan.burn_subtitle_font.as_deref(),
         &plan.burn_style,
-        plan.fps_num,
+        crate::encode::FrameRate::new(plan.fps_num, plan.fps_den),
     )
     .map(|_| ())
 }

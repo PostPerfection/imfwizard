@@ -94,7 +94,7 @@ pub fn prepare_subtitle_burn(
     input: &Path,
     font: Option<&Path>,
     appearance: &postkit::subtitle_raster::BurnStyleOverrides,
-    fps: u32,
+    fps: postkit::encode::FrameRate,
 ) -> Result<Arc<postkit::subtitle_raster::SubtitleBurn>, String> {
     if let Some(path) = font
         && !path.is_file()
@@ -103,7 +103,7 @@ pub fn prepare_subtitle_burn(
     }
     let style = resolve_burn_style(appearance)?;
     let cues = load_styled_cues(input)?;
-    postkit::subtitle_raster::SubtitleBurn::new(cues, font, style, fps.max(1) as f64)
+    postkit::subtitle_raster::SubtitleBurn::new(cues, font, style, fps.as_f64())
         .map(Arc::new)
         .map_err(|e| format!("cannot burn {}: {e}", input.display()))
 }

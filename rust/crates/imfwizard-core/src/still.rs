@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use postkit::encode::SourceColour;
+use postkit::encode::{FrameRate, SourceColour};
 
 /// Where the held codestreams are written, under the job's output directory.
 pub const HELD_PICTURE_DIR: &str = "j2k_still";
@@ -31,6 +31,15 @@ pub fn is_still_image(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
+/// The filter chain the still decodes through: the picture plan's filters plus
+/// the hold's rate, exactly as the encode pipeline writes it, so 24000/1001
+/// reaches ffmpeg as itself.
+fn decode_filters(filters: &[String], fps: FrameRate) -> String {
+    let mut chain = filters.to_vec();
+    chain.push(format!("fps={}", fps.ffmpeg_filter_value()));
+    chain.join(",")
+}
+
 /// Decode `image` to one rgb48be frame at `width`x`height`, sized by the caller
 /// from the picture plan so a mismatch is refused before this runs. The plan's
 /// filters run here, which is where a still meets the crop, turn and raster fit
@@ -40,12 +49,11 @@ fn decode_rgb48(
     width: u32,
     height: u32,
     filters: &[String],
+    fps: FrameRate,
 ) -> Result<Vec<u8>, String> {
     let mut command = std::process::Command::new("ffmpeg");
     command.arg("-y").arg("-i").arg(image);
-    if !filters.is_empty() {
-        command.arg("-vf").arg(filters.join(","));
-    }
+    command.arg("-vf").arg(decode_filters(filters, fps));
     let output = command
         .args(["-frames:v", "1", "-pix_fmt", "rgb48be", "-f", "rawvideo"])
         .arg("pipe:1")
@@ -70,7 +78,7 @@ fn decode_rgb48(
 pub struct StillHold<'a> {
     pub image: &'a Path,
     pub frames: u64,
-    pub fps: u32,
+    pub fps: FrameRate,
     /// Size of the encoded frame, which is the picture plan's output raster.
     pub width: u32,
     pub height: u32,
@@ -111,11 +119,12 @@ pub fn build_still_frames(hold: &StillHold) -> Result<(), String> {
     if frames == 0 {
         return Err("a still needs a hold of at least one frame".into());
     }
-    let data = decode_rgb48(image, width, height, filters)?;
+    let data = decode_rgb48(image, width, height, filters, fps)?;
     crate::source_edits::fresh_dir(out_dir)?;
 
     let params = CompressParams {
-        frame_rate: fps.max(1) as u16,
+        // grok only sizes the per-frame byte budget from this, so the whole rate is enough
+        frame_rate: fps.as_f64().round() as u16,
         apply_xyz_transform: source_colour.applies_xyz_transform(),
         source_preparation: SourcePreparation {
             subtitle_burn: burn.clone(),
@@ -227,6 +236,18 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_decodes_at_the_rate_it_was_given_rather_than_a_whole_one() {
+        assert_eq!(
+            decode_filters(&[], FrameRate::new(24000, 1001)),
+            "fps=24000/1001"
+        );
+        assert_eq!(
+            decode_filters(&["crop=1920:804:0:138".into()], FrameRate::whole(25)),
+            "crop=1920:804:0:138,fps=25"
+        );
+    }
+
+    #[test]
     fn a_zero_length_hold_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("card.png");
@@ -234,7 +255,7 @@ mod tests {
         let err = build_still_frames(&StillHold {
             image: &image,
             frames: 0,
-            fps: 24,
+            fps: FrameRate::whole(24),
             width: 1920,
             height: 1080,
             filters: &[],

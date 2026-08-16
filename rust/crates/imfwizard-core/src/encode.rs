@@ -1,5 +1,6 @@
 pub use postkit::encode::{
-    EncodeOptions, EncodeResult, ImageFormat, detect_image_format, encode, find_source_frames,
+    EncodeOptions, EncodeResult, FrameRate, ImageFormat, detect_image_format, encode,
+    find_source_frames,
 };
 
 /// A J2K frame carries 12-bit RGB, three components a pixel, so an uncompressed
@@ -33,14 +34,6 @@ pub fn compression_ratio_for_job(
     }
 }
 
-/// The rate the encoder is driven at, as whole frames per second. postkit's
-/// `EncodeRunOptions::fps` is a `u32` feeding an ffmpeg `fps=` filter, so a
-/// fractional rate lands on the nearest whole one (see DESIGN_TODO).
-pub fn whole_frames_per_second(fps_num: u32, fps_den: u32) -> u32 {
-    let rate = fps_num as f64 / fps_den.max(1) as f64;
-    (rate.round() as u32).max(1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,12 +61,5 @@ mod tests {
 
         let neither = compression_ratio_for_job(None, None, 1920, 1080, 24.0);
         assert_eq!(neither, DEFAULT_COMPRESSION_RATIO);
-    }
-
-    #[test]
-    fn a_fractional_rate_lands_on_the_nearest_whole_one() {
-        assert_eq!(whole_frames_per_second(24000, 1001), 24);
-        assert_eq!(whole_frames_per_second(30000, 1001), 30);
-        assert_eq!(whole_frames_per_second(120, 1), 120);
     }
 }

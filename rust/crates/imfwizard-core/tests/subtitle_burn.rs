@@ -8,10 +8,14 @@
 use imfwizard_core::subtitle_burn::{
     BurnTarget, check_burn_supported, prepare_subtitle_burn, resolve_burn_style,
 };
+use postkit::encode::FrameRate;
 use postkit::subtitle_raster::{BurnEffect, BurnStyleOverrides};
 use std::path::{Path, PathBuf};
 
-const FPS: u32 = 24;
+const FPS: FrameRate = FrameRate {
+    numerator: 24,
+    denominator: 1,
+};
 
 const SRT: &str = "1\n00:00:00,000 --> 00:00:01,000\nfirst line\n\n\
                    2\n00:00:02,000 --> 00:00:03,000\nsecond line\n\n";

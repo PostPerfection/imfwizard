@@ -293,6 +293,7 @@ pub async fn submit_job(
     let id = queue.next_id.fetch_add(1, Ordering::Relaxed);
 
     let (fps_num, fps_den) = match framerate.as_deref() {
+        Some("24000/1001") => (24000, 1001),
         Some("25/1") => (25, 1),
         Some("30000/1001") => (30000, 1001),
         Some("30/1") => (30, 1),
@@ -301,6 +302,7 @@ pub async fn submit_job(
         Some("60000/1001") => (60000, 1001),
         Some("60/1") => (60, 1),
         Some("100/1") => (100, 1),
+        Some("120000/1001") => (120000, 1001),
         Some("120/1") => (120, 1),
         _ => (24, 1),
     };
@@ -751,7 +753,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         log_to(&log_file, &format!("[HINT] {hint}"));
     }
 
-    let encode_fps = imfwizard_core::encode::whole_frames_per_second(job.fps_num, job.fps_den);
+    let encode_fps = imfwizard_core::encode::FrameRate::new(job.fps_num, job.fps_den);
+    log_to(
+        &log_file,
+        &format!(
+            "Frame rate: {:.2} fps ({}/{})",
+            encode_fps.as_f64(),
+            job.fps_num,
+            job.fps_den
+        ),
+    );
 
     // submit_job already proved the file parses, so a failure here is a file that
     // changed underneath

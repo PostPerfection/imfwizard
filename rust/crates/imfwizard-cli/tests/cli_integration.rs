@@ -435,6 +435,77 @@ fn a_video_source_encodes_and_packages() {
     );
 }
 
+/// A fractional rate has to reach the decoder as itself. At `fps=24` a 23.976
+/// source gains a frame every 42 seconds, so 500 frames come out as 501 and the
+/// composition runs long against a CPL that says 24000/1001.
+#[test]
+fn a_23_976_source_encodes_one_codestream_per_source_frame() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    if postkit::grok::find_grk_compress().is_none() {
+        eprintln!("skipping: grk_compress not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    let made = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=s=1920x1080:r=24000/1001",
+            "-frames:v",
+            "500",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&clip)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Fractional Rate",
+            "--video",
+            &clip.to_string_lossy(),
+            "--fps-num",
+            "24000",
+            "--fps-den",
+            "1001",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    let codestreams = std::fs::read_dir(output.join("j2k"))
+        .expect("j2k output directory")
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "j2c"))
+        })
+        .count();
+    assert_eq!(
+        codestreams, 500,
+        "a 23.976 source decoded at 24 fps would gain a frame"
+    );
+}
+
 /// `create` classifies its picture the way the GUI does, so a directory of
 /// stills encodes through postkit instead of reaching the MXF wrapper as
 /// codestreams it cannot read.
@@ -588,7 +659,7 @@ fn a_burnt_subtitle_changes_the_encoded_picture() {
         &srt,
         None,
         &postkit::subtitle_raster::BurnStyleOverrides::default(),
-        24,
+        postkit::encode::FrameRate::whole(24),
     )
     .is_err()
     {
@@ -673,7 +744,7 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
         &srt,
         None,
         &postkit::subtitle_raster::BurnStyleOverrides::default(),
-        24,
+        postkit::encode::FrameRate::whole(24),
     )
     .is_err()
     {

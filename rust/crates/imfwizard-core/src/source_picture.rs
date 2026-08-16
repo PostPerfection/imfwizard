@@ -290,7 +290,11 @@ fn detect_crop(
             "imfwizard-auto-crop-{}.ffconcat",
             std::process::id()
         ));
-        postkit::encode::write_image_concat_list(&frames, AUTO_CROP_LIST_FPS, &list)?;
+        postkit::encode::write_image_concat_list(
+            &frames,
+            postkit::encode::FrameRate::whole(AUTO_CROP_LIST_FPS),
+            &list,
+        )?;
         let detected = detect_black_borders(
             &list,
             DecodeSource::ImageList,
