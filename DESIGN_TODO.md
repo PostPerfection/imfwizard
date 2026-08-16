@@ -117,6 +117,19 @@ repos plus postkit, not an imfwizard-only fix.
   `<set>` has to be flattened first.
 - The GUI's Source Color Space select lists only rec709 and xyz, the two that
   work. It grows when the transforms above land.
+- `--hdr` without an explicit `--source-colourspace` skips the already-X'Y'Z'
+  guard in the create handler, so `--hdr pq-bt2020` alone still runs the encoder's
+  X'Y'Z' transform over the essence it just declared untransformed. Wrong picture,
+  not a refusal. The new burn refusal covers `--hdr` unconditionally, the encode
+  guard should too. Found 2026-08-16 while mirroring the burn.
+- From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
+  items in dcpwizard's DESIGN_TODO): playback overlays (safe area, aspect mask,
+  center cross, thirds grid, subtitle/CC render toggles), decode resolution
+  full/half/quarter (J2K discards DWT levels natively), a codestream forensics
+  section in the QC report (decomp levels, precincts, tile-parts, POC, MCT, worst
+  frame vs cap), a crop indicator in the preview, post-build Inspect/Play/Reveal
+  buttons, per-stage encode log timings, player HUD buffer and dropped-frame
+  counters, and a check whether the CLI has dcpwizard's missing-bitrate-flag hole.
 
 # Done
 
