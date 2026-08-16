@@ -133,11 +133,14 @@ order `create` builds its sources in.
   output-folder-already-holds-an-IMP and already-building-into guards. Moving
   them would need the plan to carry which front end built it.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
-  items in dcpwizard's DESIGN_TODO): playback overlays (safe area, aspect mask,
-  center cross, thirds grid, subtitle/CC render toggles), decode resolution
-  full/half/quarter (J2K discards DWT levels natively), a codestream forensics
-  section in the QC report (decomp levels, precincts, tile-parts, POC, MCT, worst
-  frame vs cap), and player HUD buffer and dropped-frame counters. The CLI did
+  items in dcpwizard's DESIGN_TODO): a codestream forensics section in the QC
+  report (decomp levels, precincts, tile-parts, POC, MCT, worst frame vs cap),
+  and subtitle/CC render toggles in the preview. The playback overlays (safe
+  area, aspect mask, centre cross, thirds grid), the decode resolution control
+  (full/half/quarter through the J2K decoder's `lowres`) and the player HUD
+  (frame, fps, buffer depth, dropped frames) landed in guikit's preview header,
+  shared with dcpwizard, verified with the mpv CLI and not yet clicked through
+  in the running window. The CLI did
   have dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>`
   closes it. The post-build Play/Inspect/Reveal buttons and the per-stage
   `[TIMING]` lines in the job log are done. What the timings do not give is the
