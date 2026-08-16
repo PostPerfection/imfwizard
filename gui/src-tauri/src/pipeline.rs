@@ -68,6 +68,71 @@ pub struct SourceSettings {
     pub burn_subtitle: Option<String>,
     #[serde(default)]
     pub burn_subtitle_font: Option<String>,
+    #[serde(default)]
+    pub crop_left: u32,
+    #[serde(default)]
+    pub crop_right: u32,
+    #[serde(default)]
+    pub crop_top: u32,
+    #[serde(default)]
+    pub crop_bottom: u32,
+    /// Crop to the target raster's aspect rather than padding to it.
+    #[serde(default)]
+    pub fill_crop: bool,
+    #[serde(default)]
+    pub deinterlace: bool,
+    #[serde(default)]
+    pub denoise: bool,
+    /// Clockwise quarter turns, as "90", "180" or "270".
+    #[serde(default)]
+    pub rotate: Option<String>,
+    /// "horizontal", "vertical" or "both".
+    #[serde(default)]
+    pub flip: Option<String>,
+    /// Raster the picture is fitted into, as "2048x1080". None keeps the
+    /// source's own.
+    #[serde(default)]
+    pub raster: Option<String>,
+    /// Channel map for the composition's sound, in the CLI's `--audio-map`
+    /// grammar.
+    #[serde(default)]
+    pub audio_map: Option<String>,
+}
+
+impl SourceSettings {
+    /// Read the picture fields into the shared options.
+    fn picture(&self) -> Result<imfwizard_core::source_picture::SourcePictureOptions, String> {
+        let rotation = match self.rotate.as_deref().filter(|value| !value.is_empty()) {
+            Some(value) => imfwizard_core::source_picture::parse_rotation(value)?,
+            None => postkit::picture_processing::Rotation::None,
+        };
+        let (flip_horizontal, flip_vertical) =
+            match self.flip.as_deref().filter(|value| !value.is_empty()) {
+                Some(value) => imfwizard_core::source_picture::parse_flip(value)?,
+                None => (false, false),
+            };
+        let raster = match self.raster.as_deref().filter(|value| !value.is_empty()) {
+            Some(value) => Some(imfwizard_core::source_picture::parse_raster(value)?),
+            None => None,
+        };
+        Ok(imfwizard_core::source_picture::SourcePictureOptions {
+            crop: postkit::picture_processing::Crop {
+                left: self.crop_left,
+                right: self.crop_right,
+                top: self.crop_top,
+                bottom: self.crop_bottom,
+            },
+            auto_crop: false,
+            auto_crop_threshold: imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD,
+            fill_crop: self.fill_crop,
+            deinterlace: self.deinterlace,
+            denoise: self.denoise,
+            rotation,
+            flip_horizontal,
+            flip_vertical,
+            raster,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -85,6 +150,8 @@ struct JobConfig {
     still_frames: Option<u64>,
     burn_subtitle: Option<PathBuf>,
     burn_subtitle_font: Option<PathBuf>,
+    picture: imfwizard_core::source_picture::SourcePictureOptions,
+    audio_map: Option<String>,
 }
 
 // ─── Queue state (managed by Tauri) ────────────────────────────────────────
@@ -208,6 +275,7 @@ pub async fn submit_job(
         )?),
         None => None,
     };
+    let picture_options = settings.picture()?;
     let burn_subtitle = settings
         .burn_subtitle
         .filter(|s| !s.is_empty())
@@ -216,12 +284,26 @@ pub async fn submit_job(
         .burn_subtitle_font
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
+    let audio_map = settings
+        .audio_map
+        .clone()
+        .filter(|spec| !spec.trim().is_empty());
     for composition in &compositions {
         let picture = PathBuf::from(&composition.video_path);
         imfwizard_core::source_colourspace::reject_on_precompressed_picture(
             &picture,
             &source_colour,
         )?;
+        imfwizard_core::source_picture::reject_on_precompressed_picture(
+            &picture,
+            &picture_options,
+        )?;
+        if audio_map.is_some() && composition.audio_path.is_none() {
+            return Err(format!(
+                "{} has no sound to map: drop a WAV on its Sound track or clear the audio map",
+                composition.title
+            ));
+        }
         // a burn draws display-RGB text onto decoded frames, so refuse every
         // route that hands the encoder X'Y'Z' or nothing to draw on
         if let Some(burn) = &burn_subtitle {
@@ -294,6 +376,8 @@ pub async fn submit_job(
         still_frames,
         burn_subtitle,
         burn_subtitle_font,
+        picture: picture_options,
+        audio_map,
     };
 
     {
@@ -309,6 +393,62 @@ pub async fn submit_job(
     }
 
     Ok(id)
+}
+
+/// The black borders of a source, and the plan cropping them away resolves to.
+#[derive(Serialize)]
+pub struct DetectedCrop {
+    pub left: u32,
+    pub right: u32,
+    pub top: u32,
+    pub bottom: u32,
+    pub description: String,
+}
+
+/// Measure the black borders of a picture source, for the Auto-crop button.
+#[tauri::command]
+pub async fn detect_source_crop(
+    video_path: String,
+    threshold: Option<f32>,
+) -> Result<DetectedCrop, String> {
+    let picture = PathBuf::from(&video_path);
+    let (source_width, source_height) = imfwizard_core::source_picture::source_raster(&picture)?;
+    let options = imfwizard_core::source_picture::SourcePictureOptions {
+        auto_crop: true,
+        auto_crop_threshold: threshold
+            .unwrap_or(imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD),
+        ..Default::default()
+    };
+    let resolved = imfwizard_core::source_picture::resolve_picture(
+        &options,
+        &picture,
+        source_width,
+        source_height,
+        postkit::encode::detect_input_type(&picture) == postkit::encode::InputType::ImageSequence,
+    )?;
+    Ok(DetectedCrop {
+        left: resolved.plan.crop.left,
+        right: resolved.plan.crop.right,
+        top: resolved.plan.crop.top,
+        bottom: resolved.plan.crop.bottom,
+        description: resolved.plan.describe(),
+    })
+}
+
+/// The channel count and lane names an audio mapping matrix is laid out from.
+#[derive(Serialize)]
+pub struct AudioMapShape {
+    pub input_channels: usize,
+    pub destination_names: Vec<String>,
+}
+
+/// How many channels a WAV carries, for sizing the mapping matrix.
+#[tauri::command]
+pub async fn audio_map_shape(audio_path: String) -> Result<AudioMapShape, String> {
+    Ok(AudioMapShape {
+        input_channels: imfwizard_core::audio_map::input_channels(&PathBuf::from(&audio_path))?,
+        destination_names: imfwizard_core::audio_map::destination_names(),
+    })
 }
 
 #[tauri::command]
@@ -558,20 +698,42 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
         // input; image/J2K sequences fall back to the encoder default.
         let probed = imfwizard_core::probe::probe_video(&video_path);
-        if let Some(info) = &probed {
-            // the wrapper refuses an illegal raster too, but only after the encode
-            // has already run
-            imfwizard_core::mxf_wrap::validate_app2e_raster(info.width, info.height)?;
-        }
-        let compression_ratio = probed
-            .as_ref()
-            .map(|info| {
+        let input_type = postkit::encode::detect_input_type(&video_path);
+        // a J2K directory reaches the wrapper with no decode at all, so it has
+        // no picture to plan; submit_job already refused any processing on one
+        let picture = match input_type {
+            postkit::encode::InputType::J2kSequence => None,
+            _ => {
+                let (source_width, source_height) =
+                    imfwizard_core::source_picture::source_raster(&video_path)?;
+                let resolved = imfwizard_core::source_picture::resolve_picture(
+                    &job.picture,
+                    &video_path,
+                    source_width,
+                    source_height,
+                    input_type == postkit::encode::InputType::ImageSequence,
+                )?;
+                log_to(&log_file, &format!("[ENCODE] {}", resolved.plan.describe()));
+                // the wrapper refuses an illegal raster too, but only after the
+                // encode has already run
+                imfwizard_core::mxf_wrap::validate_app2e_raster(
+                    resolved.encode_width,
+                    resolved.encode_height,
+                )?;
+                Some(resolved)
+            }
+        };
+        let compression_ratio = match (&probed, &picture) {
+            (Some(info), Some(picture)) => {
                 let fps = (info.fps_num as f64 / info.fps_den.max(1) as f64).max(1.0);
-                let raw_bits = info.width as f64 * info.height as f64 * 36.0;
+                // the bitrate target is against the raster that is encoded, which
+                // the picture plan may have changed
+                let raw_bits = picture.encode_width as f64 * picture.encode_height as f64 * 36.0;
                 let target_bits = (job.bandwidth as f64 * 1_000_000.0) / fps;
                 (raw_bits / target_bits).max(1.0)
-            })
-            .unwrap_or(10.0);
+            }
+            _ => 10.0,
+        };
 
         // per-composition scratch dir so multiple encodes don't clobber each other
         let enc_dir = output.join(format!("enc_{idx}"));
@@ -581,15 +743,17 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         // sharing a cue set, linked for the rest of the hold
         let picture_dir = match job.still_frames {
             Some(hold_for) => {
-                let info = probed
+                let plan = picture
+                    .as_ref()
                     .ok_or_else(|| format!("cannot read the size of {}", video_path.display()))?;
                 let held = enc_dir.join(imfwizard_core::still::HELD_PICTURE_DIR);
                 imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
                     image: &video_path,
                     frames: hold_for,
                     fps: job.fps_num,
-                    width: info.width,
-                    height: info.height,
+                    width: plan.encode_width,
+                    height: plan.encode_height,
+                    filters: &plan.plan.filters,
                     source_colour: &job.source_colour,
                     burn: subtitle_burn.clone(),
                     out_dir: &held,
@@ -598,7 +762,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     &log_file,
                     &format!(
                         "[ENCODE] Still held for {hold_for} frame(s) at {}x{}",
-                        info.width, info.height
+                        plan.encode_width, plan.encode_height
                     ),
                 );
                 held
@@ -612,6 +776,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                         fps: job.fps_num,
                         source_colour: job.source_colour.clone(),
                         subtitle_burn: subtitle_burn.clone(),
+                        picture: picture
+                            .as_ref()
+                            .map(|resolved| resolved.processing.clone())
+                            .unwrap_or_default(),
                         ..Default::default()
                     },
                     &cancel,
@@ -638,11 +806,29 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             }
         };
 
+        // the map runs before the delay, the trim and the MCA labels, so the
+        // labelled layout describes the file that is actually packaged
+        let audio_files: Vec<PathBuf> = match &job.audio_map {
+            Some(spec) => ci
+                .audio_path
+                .iter()
+                .map(|wav| {
+                    imfwizard_core::audio_map::map_audio_file(
+                        spec,
+                        &PathBuf::from(wav),
+                        &enc_dir,
+                        |line| log_to(&log_file, line),
+                    )
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+            None => ci.audio_path.iter().map(PathBuf::from).collect(),
+        };
+
         let source = imfwizard_core::source_edits::apply_source_edits(
             &job.edits,
             &imfwizard_core::source_edits::CompositionSource {
                 j2k_dir: Some(picture_dir),
-                audio_files: ci.audio_path.iter().map(PathBuf::from).collect(),
+                audio_files,
                 timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
             },
             &enc_dir,

@@ -346,6 +346,8 @@ function renderSegments() {
       if (seg) { seg[track.dataset.track] = asset; renderSegments(); }
     });
   });
+
+  renderAudioMap();
 }
 
 document.getElementById("add-segment")?.addEventListener("click", () => {
@@ -499,6 +501,89 @@ document.getElementById("btn-supplement")?.addEventListener("click", () => {
   }, 100);
 });
 
+// === Source picture processing ===
+document.getElementById("prop-auto-crop")?.addEventListener("click", async () => {
+  const picture = project.segments[0]?.picture;
+  const plan = document.getElementById("prop-picture-plan");
+  const button = document.getElementById("prop-auto-crop");
+  if (!picture) { tauriMessage("Import a video asset first"); return; }
+  const threshold = parseFloat(document.getElementById("prop-auto-crop-threshold")?.value);
+  button.disabled = true;
+  plan.textContent = "Measuring the black borders...";
+  try {
+    const crop = await invoke("detect_source_crop", {
+      videoPath: picture.path,
+      threshold: Number.isFinite(threshold) ? threshold : null,
+    });
+    for (const side of ["left", "right", "top", "bottom"]) {
+      const field = document.getElementById(`prop-crop-${side}`);
+      if (field) field.value = crop[side];
+    }
+    plan.textContent = crop.description;
+  } catch (e) {
+    plan.textContent = "";
+    tauriMessage(String(e), { title: "Auto-crop failed", kind: "error" });
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// === Audio channel map ===
+// The matrix is the CLI's --audio-map: one cell per (input channel, output lane)
+// holding that route's gain in dB, empty where the route is left out.
+let audioMapShape = null;
+
+async function renderAudioMap() {
+  const container = document.getElementById("prop-audio-map");
+  if (!container) return;
+  const sound = project.segments[0]?.sound;
+  if (!sound) {
+    audioMapShape = null;
+    container.innerHTML = '<div class="audio-map-empty">Drop a WAV on the Sound track to map its channels.</div>';
+    return;
+  }
+  if (audioMapShape?.path === sound.path) return;
+  try {
+    const shape = await invoke("audio_map_shape", { audioPath: sound.path });
+    audioMapShape = { path: sound.path, ...shape };
+  } catch (e) {
+    audioMapShape = null;
+    container.innerHTML = `<div class="audio-map-empty">${e}</div>`;
+    return;
+  }
+  const header = audioMapShape.destination_names.map((name) => `<th>${name}</th>`).join("");
+  const rows = [];
+  for (let channel = 1; channel <= audioMapShape.input_channels; channel++) {
+    const cells = audioMapShape.destination_names
+      .map((name) => `<td><input type="text" data-input="${channel}" data-output="${name}" title="Input ${channel} to ${name}, in dB"></td>`)
+      .join("");
+    rows.push(`<tr><th>${channel}</th>${cells}</tr>`);
+  }
+  container.innerHTML = `<table><thead><tr><th></th>${header}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  container.querySelectorAll("input[data-input]").forEach((cell) => {
+    cell.addEventListener("click", () => { if (!cell.value) cell.value = "0"; });
+  });
+}
+
+// Serialise the matrix into the CLI's spec. A bad gain throws so the build stops
+// here rather than at the mixer.
+function readAudioMap() {
+  const container = document.getElementById("prop-audio-map");
+  if (!container || !audioMapShape) return null;
+  const entries = [];
+  container.querySelectorAll("input[data-input]").forEach((cell) => {
+    const value = cell.value.trim();
+    if (!value) return;
+    const gain = Number(value);
+    if (!Number.isFinite(gain)) {
+      throw new Error(`Channel map gain "${value}" is not a number of decibels`);
+    }
+    const route = `${cell.dataset.input}:${cell.dataset.output}`;
+    entries.push(gain === 0 ? route : `${route}@${gain}`);
+  });
+  return entries.length ? entries.join(",") : null;
+}
+
 // === Build IMP ===
 let currentJobId = null;
 
@@ -524,7 +609,29 @@ function readSourceSettings() {
     stillLength: duration("prop-still-length", "Still length"),
     burnSubtitle: document.getElementById("prop-burn-subtitle")?.value || null,
     burnSubtitleFont: document.getElementById("prop-burn-subtitle-font")?.value || null,
+    cropLeft: cropPixels("prop-crop-left", "Crop left"),
+    cropRight: cropPixels("prop-crop-right", "Crop right"),
+    cropTop: cropPixels("prop-crop-top", "Crop top"),
+    cropBottom: cropPixels("prop-crop-bottom", "Crop bottom"),
+    fillCrop: document.getElementById("prop-fill-crop")?.checked || false,
+    deinterlace: document.getElementById("prop-deinterlace")?.checked || false,
+    denoise: document.getElementById("prop-denoise")?.checked || false,
+    rotate: document.getElementById("prop-rotate")?.value || null,
+    flip: document.getElementById("prop-flip")?.value || null,
+    raster: document.getElementById("prop-raster")?.value || null,
+    audioMap: readAudioMap(),
   };
+}
+
+// A crop is whole pixels off one side, so anything else is a typo, not a crop.
+function cropPixels(id, label) {
+  const value = document.getElementById(id)?.value?.trim();
+  if (!value) return 0;
+  const pixels = Number(value);
+  if (!Number.isInteger(pixels) || pixels < 0) {
+    throw new Error(`${label} "${value}" is not a whole number of pixels`);
+  }
+  return pixels;
 }
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {

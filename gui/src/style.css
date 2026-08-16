@@ -28,3 +28,47 @@
   align-items: center;
   gap: 4px;
 }
+
+.crop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.crop-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audio-map {
+  overflow-x: auto;
+}
+
+.audio-map table {
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.audio-map th {
+  color: var(--text-muted);
+  font-weight: normal;
+  padding: 2px 4px;
+}
+
+.audio-map td {
+  padding: 1px;
+}
+
+.audio-map input {
+  width: 40px;
+  text-align: center;
+  padding: 2px;
+}
+
+.audio-map-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+}

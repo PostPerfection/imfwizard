@@ -118,6 +118,8 @@ pub fn run() {
             pipeline::list_jobs,
             pipeline::delete_imp,
             pipeline::disk_space,
+            pipeline::detect_source_crop,
+            pipeline::audio_map_shape,
             timeline_cmd::list_cpls,
             timeline_cmd::get_timeline,
         ])
