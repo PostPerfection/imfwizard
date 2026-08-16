@@ -125,6 +125,17 @@ order `create` builds its sources in.
   `<set>` has to be flattened first.
 - The GUI's Source Color Space select lists only rec709 and xyz, the two that
   work. It grows when the transforms above land.
+- Not every pre-encode check moved into `preflight::check_before_encode`. The
+  ones still in the front ends are the flag and control shape checks, each of
+  which names the flag or control that carried it and so cannot share one
+  message: the HDR detail flags requiring `--hdr`, the `--hdr` plus transforming
+  source colour space guard, the spelling parsers (hdr preset, audio role,
+  delivery profile, source colour space, duration specs, rotation, flip, raster),
+  `--audio-map` without `--audio` (and the GUI's per-composition wording of it),
+  `--still-length` without a still and a still without one, an appearance flag
+  without `--burn-subtitle`, `--burn-subtitle` without `--video`, and the GUI's
+  output-folder-already-holds-an-IMP and already-building-into guards. Moving
+  them would need the plan to carry which front end built it.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
   items in dcpwizard's DESIGN_TODO): playback overlays (safe area, aspect mask,
   center cross, thirds grid, subtitle/CC render toggles), decode resolution
@@ -136,6 +147,37 @@ order `create` builds its sources in.
   served for now by the `PicturePlan::describe()` line the CLI and the GUI both
   log, and by the plan the GUI's Auto-crop button shows. Drawing the crop over
   the preview picture is still open.
+
+## Open: DCP-o-matic hints not ported (2026-08-16)
+
+The hint set in `hints.rs` takes the DoM checks that mean something for an IMP.
+The rest are deliberately out:
+
+- Projector frame-rate hints (25, 30, 48/50/60 fps "not supported by all
+  projectors"). IMF is not a projection format and allows far more rates than
+  DCI does, so porting them would warn about every legal delivery.
+- Container ratio hints (Scope content in a Flat container and back, unusual
+  ratios). An IMF composition has no container ratio: `--raster` picks one of the
+  four App 2E rasters and the picture is fitted into it, which is already refused
+  rather than hinted when it does not fit.
+- Interop hints (SMPTE-versus-Interop advice, Interop font size, overlapping
+  Interop closed captions). imfwizard writes SMPTE only.
+- Certificate hints (signing chain UTF-8 strings, validity over 15 years). They
+  are about DoM's stored configuration, not about a job, and imfwizard takes a
+  cert and key per invocation rather than holding one.
+- Reel-splitting hints (text asset larger than 115 MB, caption XML over 256 KB,
+  more than 4096 PNG subtitles per reel, missing FFEC/FFMC markers). imfwizard
+  writes one reel per composition and has no marker or split concept yet.
+- Audio channel-count hints (fewer than 6 channels, not 8 or 16). The IMF sound
+  layout comes from the MCA labels and `--audio-map`, and a QC rule about how
+  many lanes a distributor expects belongs in the compliance profiles, not here.
+- The 4K 3D, upmixer, VOB, alpha and mixed-encryption hints have no imfwizard
+  feature behind them at all.
+
+Two more are worth doing when the pieces exist. A large source-to-composition
+frame rate difference (DoM warns about audio pitch) needs the retime work that
+does not exist here. Closed captions are not packaged as a separate track, so
+the 32-character caption rules have nothing to run on.
 
 # Done
 

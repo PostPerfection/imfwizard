@@ -42,6 +42,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
 
 ### Quality Control
+- **Pre-build check**, `create --check` runs every refusal `create` can make and prints the advisory hints, then stops without encoding or writing anything under `--output`. Every refusal that could once fire after the encode (an illegal raster on a J2K directory, a trim or delay longer than the source, timed text a trim cannot move, a bad audio map) now fires here first
+- **Pre-build hints**, advisory findings that build but are usually wrong for the audience: audio true peak above -3 dBTP, sound with no language set, a first subtitle before 4 seconds, a cue under 15 frames, cues less than 2 frames apart, more than 3 lines in a cue, and lines over 52 or 79 characters. The CLI prints them before the encode, the GUI shows them in a dialog you can build through
 - **Loudness analysis**, EBU R128 integrated/true-peak measurement (measure only, no normalization)
 - **Native XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
 - **Structural validation** via dcpdoctor-core (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification
@@ -105,6 +107,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Preview player**, mpv-based playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
+- **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
 - **Job queue manager**, submit, monitor, cancel background jobs
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs
@@ -337,6 +340,19 @@ imfwizard create \
   --video /path/to/video.mov \
   --audio /path/to/stereo.wav \
   --audio-map "1:L,2:R,1:C@-6" \
+  --output /path/to/output/
+```
+
+### Check a job before building it
+
+```bash
+# Runs the refusals and the hints, encodes nothing, writes nothing.
+# Exits 1 on a refusal, 0 otherwise.
+imfwizard create --check \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --audio /path/to/sound.wav \
+  --burn-subtitle /path/to/cues.srt \
   --output /path/to/output/
 ```
 
