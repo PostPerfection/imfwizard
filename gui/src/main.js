@@ -770,6 +770,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       setTitleProgress(-1);
       notifyBuildComplete(true, title);
       addRecentProject(output, title);
+      showPostBuildActions(output);
       endBuild();
       unlisten();
     } else if (p.stage === "cancelled") {
@@ -821,13 +822,49 @@ document.getElementById("progress-cancel")?.addEventListener("click", async () =
   if (currentJobId) { await invoke("cancel_job", { jobId: currentJobId }); setStatus("Cancelled"); }
 });
 
+// === Post-build actions ===
+function finishedOutputDir() {
+  return document.getElementById("post-build-actions")?.dataset.output;
+}
+
+function showPostBuildActions(outputDir) {
+  const row = document.getElementById("post-build-actions");
+  if (!row) return;
+  row.dataset.output = outputDir;
+  row.hidden = false;
+}
+
+function hidePostBuildActions() {
+  const row = document.getElementById("post-build-actions");
+  if (row) row.hidden = true;
+}
+
+document.getElementById("post-build-play")?.addEventListener("click", () => {
+  const output = finishedOutputDir();
+  if (output) previewDcp(output);
+});
+
+document.getElementById("post-build-inspect")?.addEventListener("click", () => {
+  const output = finishedOutputDir();
+  if (!output) return;
+  switchView("validate");
+  document.getElementById("val-path").textContent = output;
+  document.getElementById("val-run").disabled = false;
+  runValidation();
+});
+
+document.getElementById("post-build-reveal")?.addEventListener("click", () => {
+  const output = finishedOutputDir();
+  if (output) revealItemInDir(output);
+});
+
 // === Validate ===
 document.getElementById("val-browse")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
   if (dir) { document.getElementById("val-path").textContent = dir; document.getElementById("val-run").disabled = false; }
 });
 
-document.getElementById("val-run")?.addEventListener("click", async () => {
+async function runValidation() {
   const dir = document.getElementById("val-path").textContent;
   if (!dir || dir.startsWith("No ")) return;
   const box = document.getElementById("val-results");
@@ -839,7 +876,9 @@ document.getElementById("val-run")?.addEventListener("click", async () => {
     ? "✓ IMP validation PASSED\n\n" + result.stdout
     : "✗ Validation failed\n\n" + (result.stderr || result.stdout);
   setStatus(result.code === 0 ? "Validation passed" : "Validation failed");
-});
+}
+
+document.getElementById("val-run")?.addEventListener("click", runValidation);
 
 // === Tools: Transcode ===
 document.getElementById("tc-browse-input")?.addEventListener("click", async () => {
@@ -1301,6 +1340,7 @@ let buildInFlight = false;
 
 function beginBuild() {
   buildInFlight = true;
+  hidePostBuildActions();
   updateToolbarState();
 }
 
