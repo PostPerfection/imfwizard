@@ -91,6 +91,18 @@ CREATE_CONTROLS=(
   "prop-content-kind=--kind"
   "prop-burn-subtitle=--burn-subtitle"
   "prop-burn-subtitle-font=--burn-subtitle-font"
+  "prop-crop-left=--crop-left"
+  "prop-crop-right=--crop-right"
+  "prop-crop-top=--crop-top"
+  "prop-crop-bottom=--crop-bottom"
+  "prop-auto-crop-threshold=--auto-crop-threshold"
+  "prop-fill-crop=--fill-crop"
+  "prop-deinterlace=--deinterlace"
+  "prop-denoise=--denoise"
+  "prop-rotate=--rotate"
+  "prop-flip=--flip"
+  "prop-raster=--raster"
+  "prop-audio-map=--audio-map"
 )
 
 echo "Checking Properties panel controls against 'create' flags"

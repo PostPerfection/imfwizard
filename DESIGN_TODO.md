@@ -67,6 +67,20 @@ Closing it needs a postkit change, one of:
 dcpwizard needs the same decision, so this is a coordinated change across both
 repos plus postkit, not an imfwizard-only fix.
 
+## Open: the picture flags reach fewer inputs than the encoder does (2026-08-16)
+
+`create --auto-crop` measures an image sequence through a concat list, and
+`source_picture::resolve_picture` takes an `is_image_sequence` flag for it, but
+only the GUI can reach that path: CLI `create` treats every `--video` that is not
+a container extension as a J2K directory and hands it to the wrapper, so an image
+sequence never decodes there at all. Giving the CLI the same input detection the
+GUI uses is the fix, and it is wider than the picture flags.
+
+`--audio-map` maps only the WAV `--audio` names. The track demuxed from `--video`
+is written after the map would have run, so it is refused by name rather than
+mapped; moving the demux ahead of the map would fix it and is a change to the
+order `create` builds its sources in.
+
 ## Open: smaller gaps in the source edits (2026-08-16)
 
 - PK wav_io round-trips samples through normalised f32, so 32-bit int PCM is not
@@ -100,8 +114,8 @@ repos plus postkit, not an imfwizard-only fix.
   packages, has no reader anywhere and is refused by name. PAC and Interop
   DCSubtitle have postkit parsers, but imfwizard packages neither format, so
   claiming them only for the burn would leave `subtitle-convert` behind.
-- The GUI applies one trim, delay and colour space to every composition in a
-  build, because they live in the shared Properties panel. Per-composition values
+- The GUI applies one trim, delay, colour space, picture plan and audio map to
+  every composition in a build, because they live in the shared Properties panel. Per-composition values
   would need them on the CPL tab instead. The batch delivery panel deliberately
   sends none of them: it picks its own source in `del-video`, so the Build tab's
   trim and still length describe a different file.
@@ -116,9 +130,12 @@ repos plus postkit, not an imfwizard-only fix.
   center cross, thirds grid, subtitle/CC render toggles), decode resolution
   full/half/quarter (J2K discards DWT levels natively), a codestream forensics
   section in the QC report (decomp levels, precincts, tile-parts, POC, MCT, worst
-  frame vs cap), a crop indicator in the preview, post-build Inspect/Play/Reveal
-  buttons, per-stage encode log timings, player HUD buffer and dropped-frame
-  counters, and a check whether the CLI has dcpwizard's missing-bitrate-flag hole.
+  frame vs cap), post-build Inspect/Play/Reveal buttons, per-stage encode log
+  timings, player HUD buffer and dropped-frame counters, and a check whether the
+  CLI has dcpwizard's missing-bitrate-flag hole. The survey's crop indicator is
+  served for now by the `PicturePlan::describe()` line the CLI and the GUI both
+  log, and by the plan the GUI's Auto-crop button shows. Drawing the crop over
+  the preview picture is still open.
 
 # Done
 

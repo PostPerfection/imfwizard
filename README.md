@@ -31,6 +31,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source or a J2K directory is refused
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
+- **Source picture processing**, `create --crop-left/--crop-right/--crop-top/--crop-bottom` cut source pixels off each side, `--auto-crop` (`--auto-crop-threshold`) measures the black borders and cuts them, `--fill-crop` crops to the target aspect instead of padding to it, `--deinterlace`, `--denoise`, `--rotate 90|180|270`, `--flip horizontal|vertical|both`, and `--raster <WxH>` fits the result into one of the App 2E rasters. Anything other than the untouched source is fitted into a raster, so the App 2E check runs on what the encoder writes rather than on the source
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
 ### HDR & Advanced
@@ -53,6 +54,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Color & Audio Processing
 - **Source colour space**, `create --source-colourspace rec709|xyz` picks whether the encoder runs its X'Y'Z' transform (rec709, the default) or leaves frames that already carry it alone (xyz). p3, rec2020, aces, acescg and logc are accepted spellings but refused, since nothing here builds the transform they would need
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
+- **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the `--audio` WAV's channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
 - **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
 - **Audio description mixing**, combine AD narration with main mix using ducking
@@ -101,6 +103,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **IMP metadata editor**, edit CPL title/annotation
 - **Preview player**, mpv-based playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
 - **Subtitle burn-in**, GUI for hardcoding subs into video
+- **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Job queue manager**, submit, monitor, cancel background jobs
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs
@@ -295,6 +298,31 @@ next to ApplicationIdentification and nowhere else.
 
 The CLI writes one CPL per `create`. The GUI packages multiple compositions
 (one CPL tab each) into a single IMP that shares one PKL and ASSETMAP.
+
+### Crop and fit the picture into a legal raster
+
+```bash
+# --auto-crop measures the black borders. --fill-crop would crop to the target
+# aspect instead of letterboxing back onto it. --raster takes App 2E rasters only.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/letterboxed.mov \
+  --auto-crop --rotate 90 --raster 1920x1080 \
+  --output /path/to/output/
+```
+
+### Route and mix the audio channels
+
+```bash
+# Stereo into a three-lane file: left and right straight through, plus a centre
+# fed from the left at -6 dB. OUT is a channel name or a 1-based number.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --audio /path/to/stereo.wav \
+  --audio-map "1:L,2:R,1:C@-6" \
+  --output /path/to/output/
+```
 
 ### Create an IMP from non-J2K images (auto-encode)
 
