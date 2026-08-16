@@ -1082,3 +1082,236 @@ fn a_kdm_without_content_keys_warns_that_it_unlocks_nothing() {
                 .and(predicate::str::contains("will not unlock")),
         );
 }
+
+/// Every picture and audio-map flag has to reach `create`, since the GUI's
+/// Properties panel offers a control for each and the two are one tool.
+#[test]
+fn create_offers_every_picture_and_audio_map_flag() {
+    let help = cmd().args(["create", "--help"]).assert().success();
+    let mut assertion = help;
+    for flag in [
+        "--crop-left",
+        "--crop-right",
+        "--crop-top",
+        "--crop-bottom",
+        "--auto-crop",
+        "--auto-crop-threshold",
+        "--fill-crop",
+        "--deinterlace",
+        "--denoise",
+        "--rotate",
+        "--flip",
+        "--raster",
+        "--audio-map",
+    ] {
+        assertion = assertion.stdout(predicate::str::contains(flag));
+    }
+}
+
+/// The picture flags are refused before anything is encoded, since each of them
+/// would otherwise be dropped without a word.
+#[test]
+fn the_picture_flags_are_refused_where_they_cannot_act() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"not really a movie").unwrap();
+    let codestreams = dir.path().join("j2k");
+    std::fs::create_dir_all(&codestreams).unwrap();
+    std::fs::write(codestreams.join("frame_00000000.j2c"), b"codestream").unwrap();
+
+    let create = |source: &Path, extra: &[&str]| {
+        let mut command = cmd();
+        command.args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Picture",
+            "--video",
+            &source.to_string_lossy(),
+        ]);
+        command.args(extra);
+        command
+    };
+
+    for (mut command, needle) in [
+        (create(&codestreams, &["--deinterlace"]), "already J2K"),
+        (create(&clip, &["--raster", "1998x1080"]), "1998x1080"),
+        (create(&clip, &["--rotate", "45"]), "45"),
+        (create(&clip, &["--flip", "sideways"]), "sideways"),
+        (
+            create(&clip, &["--auto-crop-threshold", "0.2"]),
+            "requires --auto-crop",
+        ),
+        (
+            create(&clip, &["--fill-crop", "--crop-left", "10"]),
+            "only one of them",
+        ),
+        (
+            create(&clip, &["--fill-crop", "--auto-crop"]),
+            "only one of them",
+        ),
+    ] {
+        command
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(needle));
+    }
+}
+
+/// The auto-demuxed track is written after the map would have run, so a map with
+/// no --audio has to say so rather than doing nothing.
+#[test]
+fn an_audio_map_without_an_audio_file_is_refused() {
+    let dir = TempDir::new().unwrap();
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Map",
+            "--audio-map",
+            "1:L,2:R",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--audio-map needs --audio"));
+}
+
+#[test]
+fn an_unreadable_audio_map_is_refused_by_name() {
+    let dir = TempDir::new().unwrap();
+    let wav = dir.path().join("sound.wav");
+    write_sine_wav(&wav, 0.5);
+    for (spec, needle) in [("1:Middle", "Middle"), ("banana", "not IN:OUT")] {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &dir.path().join("out").to_string_lossy(),
+                "-t",
+                "Map",
+                "--audio",
+                &wav.to_string_lossy(),
+                "--audio-map",
+                spec,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(needle));
+    }
+}
+
+/// The picture plan has to reach the encoder, not just the log: a turned source
+/// fitted into a named raster comes out on that raster, not the source's own.
+#[test]
+fn a_rotated_source_encodes_onto_the_named_raster() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 2048, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Rotated",
+            "--video",
+            &clip.to_string_lossy(),
+            "--rotate",
+            "90",
+            "--raster",
+            "1920x1080",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    let mut frames: Vec<PathBuf> = std::fs::read_dir(output.join("j2k"))
+        .expect("j2k output directory")
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().is_some_and(|x| x == "j2c"))
+        .collect();
+    frames.sort();
+    let codestream = std::fs::read(frames.first().expect("a codestream")).unwrap();
+    let header = postkit::j2k::parse_j2k_header(&codestream).expect("a J2K header");
+    assert_eq!(
+        (header.width, header.height),
+        (1920, 1080),
+        "the encode landed on {}x{}",
+        header.width,
+        header.height
+    );
+}
+
+/// A stereo ramp mapped to L/R plus a -6 dB centre: the centre lane has to carry
+/// the left channel at half amplitude, which is what -6 dB is.
+#[test]
+fn an_audio_map_writes_the_gained_lane_into_the_package() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let wav = dir.path().join("stereo.wav");
+    write_stereo_ramp_wav(&wav);
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Mapped",
+            "--video",
+            &clip.to_string_lossy(),
+            "--audio",
+            &wav.to_string_lossy(),
+            "--audio-map",
+            "1:L,2:R,1:C@-6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    let mapped = output.join("audio_mapped.wav");
+    let mut reader = hound::WavReader::open(&mapped).expect("the mapped wav");
+    assert_eq!(reader.spec().channels, 3);
+    let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
+    let half = 10f64.powf(-6.0 / 20.0);
+    for frame in 1..samples.len() / 3 {
+        let left = samples[frame * 3] as f64;
+        let centre = samples[frame * 3 + 2] as f64;
+        assert!(
+            (centre - left * half).abs() <= 1.0,
+            "frame {frame}: centre {centre} is not {half} of {left}"
+        );
+    }
+}
+
+/// A rising 16-bit stereo ramp, so a gained lane is checked sample by sample.
+fn write_stereo_ramp_wav(path: &std::path::Path) {
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for frame in 0..48_000i32 {
+        let sample = (frame % 30_000) as i16;
+        writer.write_sample(sample).unwrap();
+        writer.write_sample(-sample).unwrap();
+    }
+    writer.finalize().unwrap();
+}

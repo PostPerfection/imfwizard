@@ -115,7 +115,7 @@ impl SourceSettings {
             Some(value) => Some(imfwizard_core::source_picture::parse_raster(value)?),
             None => None,
         };
-        Ok(imfwizard_core::source_picture::SourcePictureOptions {
+        let options = imfwizard_core::source_picture::SourcePictureOptions {
             crop: postkit::picture_processing::Crop {
                 left: self.crop_left,
                 right: self.crop_right,
@@ -131,7 +131,9 @@ impl SourceSettings {
             flip_horizontal,
             flip_vertical,
             raster,
-        })
+        };
+        options.check()?;
+        Ok(options)
     }
 }
 

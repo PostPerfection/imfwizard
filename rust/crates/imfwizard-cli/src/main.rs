@@ -150,7 +150,7 @@ impl PictureArguments {
                 imfwizard_core::source_picture::parse_flip(value).unwrap_or_else(|e| fail(e))
             })
             .unwrap_or((false, false));
-        imfwizard_core::source_picture::SourcePictureOptions {
+        let options = imfwizard_core::source_picture::SourcePictureOptions {
             crop: postkit::picture_processing::Crop {
                 left: self.crop_left,
                 right: self.crop_right,
@@ -170,7 +170,9 @@ impl PictureArguments {
             raster: self.raster.as_deref().map(|value| {
                 imfwizard_core::source_picture::parse_raster(value).unwrap_or_else(|e| fail(e))
             }),
-        }
+        };
+        options.check().unwrap_or_else(|e| fail(e));
+        options
     }
 }
 

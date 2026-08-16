@@ -1126,6 +1126,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "ctrlc",
+ "hound",
  "imfwizard-core",
  "postkit",
  "predicates",

@@ -69,6 +69,33 @@ impl SourcePictureOptions {
     pub fn is_default(&self) -> bool {
         *self == SourcePictureOptions::default()
     }
+
+    /// Refuse flags that contradict each other. Callers run this as they read
+    /// the flags, so a contradiction is named before anything opens the source.
+    pub fn check(&self) -> Result<(), String> {
+        let deciders: Vec<&str> = [
+            (
+                !self.crop.is_none(),
+                "--crop-left/--crop-right/--crop-top/--crop-bottom",
+            ),
+            (self.auto_crop, "--auto-crop"),
+            (self.fill_crop, "--fill-crop"),
+        ]
+        .into_iter()
+        .filter(|(given, _)| *given)
+        .map(|(_, name)| name)
+        .collect();
+        if deciders.len() > 1 {
+            return Err(format!(
+                "{} each decide the crop, so give only one of them",
+                deciders.join(" and ")
+            ));
+        }
+        match self.raster {
+            Some((width, height)) => require_app2e_raster(width, height),
+            None => Ok(()),
+        }
+    }
 }
 
 /// The processing, the sizes it resolves to, and the raster the encoder writes.
@@ -92,32 +119,8 @@ pub fn resolve_picture(
     source_height: u32,
     is_image_sequence: bool,
 ) -> Result<ResolvedPicture, String> {
-    let deciders: Vec<&str> = [
-        (
-            !options.crop.is_none(),
-            "--crop-left/--crop-right/--crop-top/--crop-bottom",
-        ),
-        (options.auto_crop, "--auto-crop"),
-        (options.fill_crop, "--fill-crop"),
-    ]
-    .into_iter()
-    .filter(|(given, _)| *given)
-    .map(|(_, name)| name)
-    .collect();
-    if deciders.len() > 1 {
-        return Err(format!(
-            "{} each decide the crop, so give only one of them",
-            deciders.join(" and ")
-        ));
-    }
-
-    let (target_width, target_height) = match options.raster {
-        Some((width, height)) => {
-            require_app2e_raster(width, height)?;
-            (width, height)
-        }
-        None => (source_width, source_height),
-    };
+    options.check()?;
+    let (target_width, target_height) = options.raster.unwrap_or((source_width, source_height));
 
     let crop = if options.auto_crop {
         detect_crop(
