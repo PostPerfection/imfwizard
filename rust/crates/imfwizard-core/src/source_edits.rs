@@ -137,7 +137,8 @@ fn edit_one_wav(
 /// delay prepends silence and drops the same amount off the tail, a negative one
 /// drops the head and pads the tail.
 pub fn apply_audio_delay(input: &Path, output: &Path, delay_ms: i64) -> Result<(), String> {
-    let (spec, samples) = postkit::wav_io::read_interleaved(input)
+    use postkit::wav_io::Samples;
+    let (spec, samples) = postkit::wav_io::read_interleaved_exact(input)
         .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
     let channels = spec.channels.max(1) as usize;
     let sample_rate = spec.sample_rate.max(1);
@@ -152,15 +153,33 @@ pub fn apply_audio_delay(input: &Path, output: &Path, delay_ms: i64) -> Result<(
         ));
     }
 
-    let kept = (sample_frames - shift) * channels;
-    let mut shifted = vec![0.0f32; sample_frames * channels];
-    if delay_ms >= 0 {
-        shifted[shift * channels..].copy_from_slice(&samples[..kept]);
-    } else {
-        shifted[..kept].copy_from_slice(&samples[shift * channels..sample_frames * channels]);
+    // the shifted samples are copied untouched, so the output stays bit-exact
+    // for every PCM format, 32-bit int included
+    fn shifted_window<T: Copy + Default>(
+        samples: &[T],
+        shift: usize,
+        channels: usize,
+        sample_frames: usize,
+        later: bool,
+    ) -> Vec<T> {
+        let kept = (sample_frames - shift) * channels;
+        let mut out = vec![T::default(); sample_frames * channels];
+        if later {
+            out[shift * channels..].copy_from_slice(&samples[..kept]);
+        } else {
+            out[..kept].copy_from_slice(&samples[shift * channels..sample_frames * channels]);
+        }
+        out
     }
+    let later = delay_ms >= 0;
+    let shifted = match &samples {
+        Samples::Int(v) => Samples::Int(shifted_window(v, shift, channels, sample_frames, later)),
+        Samples::Float(v) => {
+            Samples::Float(shifted_window(v, shift, channels, sample_frames, later))
+        }
+    };
 
-    postkit::wav_io::write_interleaved(output, spec, &shifted)
+    postkit::wav_io::write_interleaved_exact(output, spec, &shifted)
         .map_err(|e| format!("cannot write {}: {e}", output.display()))
 }
 
@@ -172,7 +191,8 @@ fn trim_wav(
     trim_end_frames: u64,
     fps: f64,
 ) -> Result<(), String> {
-    let (spec, samples) = postkit::wav_io::read_interleaved(input)
+    use postkit::wav_io::Samples;
+    let (spec, samples) = postkit::wav_io::read_interleaved_exact(input)
         .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
     let channels = spec.channels.max(1) as usize;
     let sample_rate = spec.sample_rate.max(1);
@@ -189,8 +209,12 @@ fn trim_wav(
         ));
     }
 
-    let kept = &samples[head * channels..(sample_frames - tail) * channels];
-    postkit::wav_io::write_interleaved(output, spec, kept)
+    let window = head * channels..(sample_frames - tail) * channels;
+    let kept = match &samples {
+        Samples::Int(v) => Samples::Int(v[window].to_vec()),
+        Samples::Float(v) => Samples::Float(v[window].to_vec()),
+    };
+    postkit::wav_io::write_interleaved_exact(output, spec, &kept)
         .map_err(|e| format!("cannot write {}: {e}", output.display()))
 }
 
@@ -492,6 +516,40 @@ mod tests {
 
     fn read_samples(path: &Path) -> Vec<f32> {
         postkit::wav_io::read_interleaved(path).unwrap().1
+    }
+
+    #[test]
+    fn a_delay_is_bit_exact_for_32_bit_int_pcm() {
+        use postkit::wav_io::Samples;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i32.wav");
+        // values with low bits set, which the old f32 round-trip destroyed
+        let samples: Vec<i32> = (0..48_000i32)
+            .map(|i| i.wrapping_mul(2_654_435_761u32 as i32))
+            .collect();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Int,
+        };
+        postkit::wav_io::write_interleaved_exact(&path, spec, &Samples::Int(samples.clone()))
+            .unwrap();
+
+        let out = dir.path().join("delayed.wav");
+        apply_audio_delay(&path, &out, 100).unwrap();
+
+        let (_, delayed) = postkit::wav_io::read_interleaved_exact(&out).unwrap();
+        let Samples::Int(delayed) = delayed else {
+            panic!("32-bit int in must come back out as int");
+        };
+        assert_eq!(delayed.len(), samples.len());
+        assert!(delayed[..4800].iter().all(|&s| s == 0), "prepended silence");
+        assert_eq!(
+            &delayed[4800..],
+            &samples[..samples.len() - 4800],
+            "every shifted sample must be bit-identical"
+        );
     }
 
     #[test]
