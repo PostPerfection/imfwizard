@@ -81,7 +81,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
-- **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`
+- **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
 - **Watch folder**, print filesystem events for a directory
 - **EDL conform**, import CMX3600/FCP7 edit decisions to build a CPL timeline
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
@@ -242,6 +242,21 @@ imfwizard create \
   --fps-num 24 --fps-den 1
 ```
 
+`--fps-num`/`--fps-den` take any rate. The GUI's Frame Rate menu offers 24, 25,
+29.97, 30, 48, 50, 59.94, 60, 100 and 120.
+
+### Set the picture bitrate
+
+```bash
+# --bitrate is the J2K target in Mbps, above 0 and at most 1000. It wins over the
+# bitrate --profile carries. Without either, the encode runs at a 10:1 ratio.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --bitrate 100 \
+  --output /path/to/output/
+```
+
 ### Create an IMP with subtitles
 
 ```bash
@@ -359,13 +374,19 @@ imfwizard create --check \
 ### Create an IMP from non-J2K images (auto-encode)
 
 ```bash
-# Input can be DPX, TIFF, EXR, PNG, automatically encoded to J2K
+# A directory of DPX, TIFF, EXR or BMP frames is encoded to J2K on the way in.
+# The frames carry no rate of their own, so --fps-num/--fps-den is the rate.
 imfwizard create \
   --title "My Film" \
   --video /path/to/dpx_frames/ \
   --audio /path/to/audio.wav \
+  --fps-num 24 --fps-den 1 \
   --output /path/to/output/
 ```
+
+A directory holding anything else is refused by name. PNG and JPEG sequences are
+not read: a lone PNG works as a still with `--still-length`, but a directory of
+them is not one of the shapes the encoder classifies.
 
 ### Transcode via ffmpeg
 

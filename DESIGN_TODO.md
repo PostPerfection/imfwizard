@@ -67,14 +67,7 @@ Closing it needs a postkit change, one of:
 dcpwizard needs the same decision, so this is a coordinated change across both
 repos plus postkit, not an imfwizard-only fix.
 
-## Open: the picture flags reach fewer inputs than the encoder does (2026-08-16)
-
-`create --auto-crop` measures an image sequence through a concat list, and
-`source_picture::resolve_picture` takes an `is_image_sequence` flag for it, but
-only the GUI can reach that path: CLI `create` treats every `--video` that is not
-a container extension as a J2K directory and hands it to the wrapper, so an image
-sequence never decodes there at all. Giving the CLI the same input detection the
-GUI uses is the fix, and it is wider than the picture flags.
+## Open: --audio-map reaches only the WAV that is named (2026-08-16)
 
 `--audio-map` maps only the WAV `--audio` names. The track demuxed from `--video`
 is written after the map would have run, so it is refused by name rather than
@@ -101,9 +94,21 @@ order `create` builds its sources in.
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok
   exposes through grok-ffi before scoping. Shared with dcpwizard, one postkit fix.
-- The GUI frame-rate menu stops at 60 while the CLI takes arbitrary
-  --fps-num/--fps-den. easyDCP advertises 23.98 to 120. Extending the menu is
-  cheap once the build path is validated at the higher rates.
+- A fractional frame rate is encoded at the nearest whole one. The CPL EditRate
+  and the AS-02 wrap edit rate carry `--fps-num`/`--fps-den` exactly, but
+  `postkit::pipeline::EncodeRunOptions::fps` is a `u32` that becomes an ffmpeg
+  `fps=N` filter in `postkit::encode::decode_filters` and a `frame_rate: u16` on
+  the grok encoder, so a 24000/1001 source is decoded through `fps=24`: 1439
+  source frames over a minute come out as 1440, and the composition then runs
+  0.04% long against a CPL that says 24000/1001. Nothing rounds silently any
+  more, `whole_frames_per_second` is the one place it happens and both front
+  ends call it, but the rounding itself needs a rational rate on postkit's
+  `EncodeRunOptions`, `StreamEncodeOptions` and `write_image_concat_list`, which
+  is a postkit change shared with dcpwizard. The GUI menu therefore gained only
+  whole rates (50, 100, 120) and keeps 29.97 and 59.94 as they were. A related
+  postkit gap: `detect_input_type` classifies no png or jpeg directory even
+  though `detect_image_format` encodes both, so a png sequence is refused by
+  name rather than encoded.
 - Burn-in line height and margin. `create` reaches every field of postkit's
   `BurnStyleOverrides`, but `BurnStyle::line_height_ratio` and `margin_ratio`
   have no override field, so a caller cannot set line spacing or the distance
@@ -142,8 +147,9 @@ order `create` builds its sources in.
   full/half/quarter (J2K discards DWT levels natively), a codestream forensics
   section in the QC report (decomp levels, precincts, tile-parts, POC, MCT, worst
   frame vs cap), post-build Inspect/Play/Reveal buttons, per-stage encode log
-  timings, player HUD buffer and dropped-frame counters, and a check whether the
-  CLI has dcpwizard's missing-bitrate-flag hole. The survey's crop indicator is
+  timings, and player HUD buffer and dropped-frame counters. The CLI did have
+  dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>` closes it.
+  The survey's crop indicator is
   served for now by the `PicturePlan::describe()` line the CLI and the GUI both
   log, and by the plan the GUI's Auto-crop button shows. Drawing the crop over
   the preview picture is still open.
