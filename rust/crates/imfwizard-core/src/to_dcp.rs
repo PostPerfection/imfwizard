@@ -515,6 +515,8 @@ fn write_cpl(
         issue_date: crate::issue_date(),
         // Bv2.1 8.1: present, and equal to the content title
         annotation_text: Some(title.to_string()),
+        content_version_label: None,
+        ratings: Vec::new(),
         reels: vec![reel],
     };
     std::fs::write(path, cpl.to_xml()).map_err(|e| format!("writing CPL {}: {e}", path.display()))
