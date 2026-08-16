@@ -80,7 +80,23 @@ repos plus postkit, not an imfwizard-only fix.
   postkit.
 - A still input is whatever `postkit::encode::detect_image_format` reads: dpx,
   tif/tiff, exr, png, bmp. There is no jpeg arm there, so a .jpg still is refused
-  even though the README's encoder bullet claims JPEG.
+  even though the README's encoder bullet claims JPEG. Same gap for jpeg image
+  sequences into `encode`/`create`. easyDCP advertises JPEG and BMP input (surveyed
+  2026-08-16, dcpwizard DESIGN_TODO batch E has the full survey).
+- GPU J2K encoding. easyDCP and DCP-o-matic both offer GPU/CUDA acceleration;
+  nothing here touches it. postkit grok_encoder names no device, and the concept
+  exists only on the decode side (preview's gpu_device). Check what the pinned grok
+  exposes through grok-ffi before scoping. Shared with dcpwizard, one postkit fix.
+- The GUI frame-rate menu stops at 60 while the CLI takes arbitrary
+  --fps-num/--fps-den. easyDCP advertises 23.98 to 120. Extending the menu is
+  cheap once the build path is validated at the higher rates.
+- Subtitle burn-in costs an extra transcode generation and only reaches video
+  input, same as dcpwizard: the standalone burn-in pass and the create path each
+  decode the source once, and PK burnin.rs's ffmpeg filter cannot touch an image
+  sequence or J2K input at all. The fix is shared and lives in postkit: composite
+  rasterised cues onto decoded frames the way DCP-o-matic does. Crate settled:
+  cosmic-text 0.17 + swash, design reference is glass2glass g2g-plugins
+  textoverlay.rs. Full write-up in dcpwizard's DESIGN_TODO.
 - The GUI applies one trim, delay and colour space to every composition in a
   build, because they live in the shared Properties panel. Per-composition values
   would need them on the CPL tab instead. The batch delivery panel deliberately
