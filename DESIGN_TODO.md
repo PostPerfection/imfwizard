@@ -69,6 +69,11 @@ repos plus postkit, not an imfwizard-only fix.
 
 ## Open: smaller gaps in the source edits (2026-08-16)
 
+- PK wav_io round-trips samples through normalised f32, so 32-bit int PCM is not
+  bit-exact through audio delay or trim; 16-bit, 24-bit and float are. The fix is
+  postkit's WAV read/write path, queued to land with the next postkit pass so both
+  wizards bump pins once.
+
 - Trim happens after the encode, since `postkit::pipeline` takes no frame range.
   Trimming five minutes out of a two-hour source still encodes the two hours.
   A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
