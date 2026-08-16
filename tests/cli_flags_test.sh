@@ -89,6 +89,8 @@ CREATE_CONTROLS=(
   "prop-trim-end=--trim-end"
   "prop-still-length=--still-length"
   "prop-content-kind=--kind"
+  "prop-burn-subtitle=--burn-subtitle"
+  "prop-burn-subtitle-font=--burn-subtitle-font"
 )
 
 echo "Checking Properties panel controls against 'create' flags"

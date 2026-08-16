@@ -107,6 +107,16 @@ enum Commands {
         #[arg(long = "subtitle")]
         subtitles: Vec<String>,
 
+        /// Subtitle file rendered into the picture during the encode (SRT, ASS,
+        /// SCC, FCPXML or MKS). Burnt-in text is part of the image and registers
+        /// no timed-text track.
+        #[arg(long = "burn-subtitle")]
+        burn_subtitle: Option<String>,
+
+        /// TTF/OTF font to draw --burn-subtitle with (default: a system font)
+        #[arg(long = "burn-subtitle-font")]
+        burn_subtitle_font: Option<String>,
+
         /// Content kind (feature, trailer, etc.)
         #[arg(short, long, default_value = "feature")]
         kind: String,
@@ -1127,6 +1137,8 @@ fn run() {
             audio_lang,
             audio_role,
             subtitles,
+            burn_subtitle,
+            burn_subtitle_font,
             kind,
             profile,
             fps_num,
@@ -1239,6 +1251,43 @@ fn run() {
                 _ => {}
             }
 
+            let timed_text_files: Vec<PathBuf> = subtitles.iter().map(PathBuf::from).collect();
+
+            // a burn draws display-RGB text onto decoded frames, so refuse every
+            // route that hands the encoder X'Y'Z' or nothing to draw on, before
+            // anything is encoded
+            if let Some(burn) = burn_subtitle.as_deref() {
+                let Some(picture) = video.as_deref().map(std::path::Path::new) else {
+                    fail("--burn-subtitle needs --video: there is no picture to draw on");
+                };
+                imfwizard_core::subtitle_burn::check_burn_supported(
+                    std::path::Path::new(burn),
+                    &imfwizard_core::subtitle_burn::BurnTarget {
+                        timed_text: &timed_text_files,
+                        frames_already_xyz: !source_colour.applies_xyz_transform() || hdr.is_some(),
+                        input_is_codestreams: postkit::encode::detect_input_type(picture)
+                            == postkit::encode::InputType::J2kSequence,
+                        input_is_held_still: still_input.is_some(),
+                    },
+                )
+                .unwrap_or_else(|e| fail(e));
+            }
+
+            // the edit rate is settled inside each branch, and the cue timings are
+            // read against it, so the burn is built there
+            let build_subtitle_burn =
+                |fps: u32| -> Option<std::sync::Arc<postkit::subtitle_raster::SubtitleBurn>> {
+                    let path = burn_subtitle.as_deref()?;
+                    Some(
+                        imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+                            std::path::Path::new(path),
+                            burn_subtitle_font.as_deref().map(std::path::Path::new),
+                            fps,
+                        )
+                        .unwrap_or_else(|e| fail(e)),
+                    )
+                };
+
             let _ = std::fs::create_dir_all(&output);
 
             // If video is a file, run encode pipeline
@@ -1338,6 +1387,7 @@ fn run() {
                             compression_ratio,
                             fps: actual_fps,
                             source_colour: source_colour.clone(),
+                            subtitle_burn: build_subtitle_burn(actual_fps),
                             ..Default::default()
                         },
                     );
@@ -1408,7 +1458,7 @@ fn run() {
                 &imfwizard_core::source_edits::CompositionSource {
                     j2k_dir,
                     audio_files,
-                    timed_text_files: subtitles.iter().map(PathBuf::from).collect(),
+                    timed_text_files,
                 },
                 &output,
                 fps_num,

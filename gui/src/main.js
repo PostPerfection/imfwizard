@@ -420,6 +420,29 @@ document.getElementById("prop-content-kind")?.addEventListener("change", (e) => 
 
 renderCplTabs();
 
+// === Burn-in during the encode ===
+document.getElementById("prop-browse-burn-subtitle")?.addEventListener("click", async () => {
+  const path = await open({
+    directory: false, multiple: false,
+    filters: [
+      { name: 'Subtitles', extensions: ['srt','ass','ssa','scc','fcpxml','mks','mkv'] },
+      { name: 'All', extensions: ['*'] }
+    ]
+  });
+  if (path) document.getElementById("prop-burn-subtitle").value = path;
+});
+
+document.getElementById("prop-browse-burn-subtitle-font")?.addEventListener("click", async () => {
+  const path = await open({
+    directory: false, multiple: false,
+    filters: [
+      { name: 'Fonts', extensions: ['ttf','otf','ttc'] },
+      { name: 'All', extensions: ['*'] }
+    ]
+  });
+  if (path) document.getElementById("prop-burn-subtitle-font").value = path;
+});
+
 // === Output directory ===
 document.getElementById("browse-output")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
@@ -499,6 +522,8 @@ function readSourceSettings() {
     trimStart: duration("prop-trim-start", "Trim from start"),
     trimEnd: duration("prop-trim-end", "Trim from end"),
     stillLength: duration("prop-still-length", "Still length"),
+    burnSubtitle: document.getElementById("prop-burn-subtitle")?.value || null,
+    burnSubtitleFont: document.getElementById("prop-burn-subtitle-font")?.value || null,
   };
 }
 

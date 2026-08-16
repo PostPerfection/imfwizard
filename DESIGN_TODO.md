@@ -90,13 +90,22 @@ repos plus postkit, not an imfwizard-only fix.
 - The GUI frame-rate menu stops at 60 while the CLI takes arbitrary
   --fps-num/--fps-den. easyDCP advertises 23.98 to 120. Extending the menu is
   cheap once the build path is validated at the higher rates.
-- Subtitle burn-in costs an extra transcode generation and only reaches video
-  input, same as dcpwizard: the standalone burn-in pass and the create path each
-  decode the source once, and PK burnin.rs's ffmpeg filter cannot touch an image
-  sequence or J2K input at all. The fix is shared and lives in postkit: composite
-  rasterised cues onto decoded frames the way DCP-o-matic does. Crate settled:
-  cosmic-text 0.17 + swash, design reference is glass2glass g2g-plugins
-  textoverlay.rs. Full write-up in dcpwizard's DESIGN_TODO.
+- Burn-in styling flags. `create --burn-subtitle` composites with
+  `BurnStyle::default()` only: size, line height, margin and default colour exist
+  in the struct but no flag reaches them, and outline, shadow, effect colour and
+  outline width are not in the rasteriser at all. They land in PK
+  subtitle_raster.rs and are tracked in dcpwizard's DESIGN_TODO, one shared fix.
+- A `--still-length` hold refuses a burn. The image is encoded once and the
+  codestream repeated, so every frame would carry the cues of the first one.
+  dcpwizard encodes one frame per run of frames sharing a cue set, which its still
+  builder can do because it drives grok directly. imfwizard's goes through
+  `postkit::pipeline`, which has no way to say which composition frame a one-image
+  sequence stands for.
+- Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
+  MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
+  packages, has no reader anywhere and is refused by name. PAC and Interop
+  DCSubtitle have postkit parsers, but imfwizard packages neither format, so
+  claiming them only for the burn would leave `subtitle-convert` behind.
 - The GUI applies one trim, delay and colour space to every composition in a
   build, because they live in the shared Properties panel. Per-composition values
   would need them on the CPL tab instead. The batch delivery panel deliberately

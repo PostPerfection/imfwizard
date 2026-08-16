@@ -126,6 +126,8 @@ fn create_offers_every_source_treatment_flag() {
         "--trim-start",
         "--trim-end",
         "--still-length",
+        "--burn-subtitle",
+        "--burn-subtitle-font",
     ] {
         assertion = assertion.stdout(predicate::str::contains(flag));
     }
@@ -416,6 +418,112 @@ fn a_video_source_encodes_and_packages() {
     assert!(
         package.iter().any(|n| n.starts_with("VIDEO_")),
         "{package:?}"
+    );
+}
+
+/// A burn draws display-RGB text onto decoded frames, so every route that hands
+/// the encoder X'Y'Z' or nothing to draw on has to be refused before an encode
+/// starts.
+#[test]
+fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
+    let dir = TempDir::new().unwrap();
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:02,000\nhello\n\n").unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"not really a movie").unwrap();
+    let still = dir.path().join("slate.png");
+    std::fs::write(&still, b"not really a png").unwrap();
+    let codestreams = dir.path().join("j2k");
+    std::fs::create_dir_all(&codestreams).unwrap();
+    std::fs::write(codestreams.join("frame_00000000.j2c"), b"codestream").unwrap();
+
+    let create = |source: &Path, extra: &[&str]| {
+        let mut command = cmd();
+        command.args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Burn",
+            "--video",
+            &source.to_string_lossy(),
+            "--burn-subtitle",
+            &srt.to_string_lossy(),
+        ]);
+        command.args(extra);
+        command
+    };
+
+    for (mut command, needle) in [
+        (
+            create(&clip, &["--source-colourspace", "xyz"]),
+            "X'Y'Z' already",
+        ),
+        (create(&clip, &["--hdr", "pq-bt2020"]), "X'Y'Z' already"),
+        (create(&codestreams, &[]), "already compressed"),
+        (
+            create(&still, &["--still-length", "48f"]),
+            "--still-length hold",
+        ),
+        (
+            create(&clip, &["--subtitle", &srt.to_string_lossy()]),
+            "pick one",
+        ),
+    ] {
+        command
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(needle));
+    }
+}
+
+/// The burn has to reach the encoder, not just pass the pre-encode checks: the
+/// same clip encoded with and without cues must not come out the same picture.
+#[test]
+fn a_burnt_subtitle_changes_the_encoded_picture() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\nburnt in\n\n").unwrap();
+    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(&srt, None, 24).is_err() {
+        eprintln!("skipping: no font available to burn with");
+        return;
+    }
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+
+    let first_codestream = |name: &str, burn: bool| -> Vec<u8> {
+        let out = dir.path().join(name);
+        let mut command = cmd();
+        command.args([
+            "create",
+            "-o",
+            &out.to_string_lossy(),
+            "-t",
+            name,
+            "--video",
+            &clip.to_string_lossy(),
+        ]);
+        if burn {
+            command.args(["--burn-subtitle", &srt.to_string_lossy()]);
+        }
+        command.assert().success();
+        let mut frames: Vec<PathBuf> = std::fs::read_dir(out.join("j2k"))
+            .expect("j2k output directory")
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|x| x == "j2c"))
+            .collect();
+        frames.sort();
+        std::fs::read(frames.first().expect("a codestream")).unwrap()
+    };
+
+    assert_ne!(
+        first_codestream("plain", false),
+        first_codestream("burnt", true),
+        "the burn never reached the encoder"
     );
 }
 

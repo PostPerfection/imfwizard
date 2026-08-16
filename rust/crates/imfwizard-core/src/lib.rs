@@ -33,6 +33,7 @@ pub mod mca;
 // Subtitles/Captions
 pub mod burnin;
 pub mod scc;
+pub mod subtitle_burn;
 pub mod subtitle_convert;
 
 // Infrastructure

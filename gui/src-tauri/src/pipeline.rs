@@ -62,6 +62,12 @@ pub struct SourceSettings {
     pub trim_end: Option<String>,
     #[serde(default)]
     pub still_length: Option<String>,
+    /// Subtitle file drawn into the picture during the encode. Registers no
+    /// timed-text track: burnt-in text is part of the image.
+    #[serde(default)]
+    pub burn_subtitle: Option<String>,
+    #[serde(default)]
+    pub burn_subtitle_font: Option<String>,
 }
 
 #[derive(Clone)]
@@ -77,6 +83,8 @@ struct JobConfig {
     source_colour: postkit::encode::SourceColour,
     /// Frames to hold a still input for; None when the input is not a still.
     still_frames: Option<u64>,
+    burn_subtitle: Option<PathBuf>,
+    burn_subtitle_font: Option<PathBuf>,
 }
 
 // ─── Queue state (managed by Tauri) ────────────────────────────────────────
@@ -200,12 +208,36 @@ pub async fn submit_job(
         )?),
         None => None,
     };
+    let burn_subtitle = settings
+        .burn_subtitle
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let burn_subtitle_font = settings
+        .burn_subtitle_font
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
     for composition in &compositions {
         let picture = PathBuf::from(&composition.video_path);
         imfwizard_core::source_colourspace::reject_on_precompressed_picture(
             &picture,
             &source_colour,
         )?;
+        // a burn draws display-RGB text onto decoded frames, so refuse every
+        // route that hands the encoder X'Y'Z' or nothing to draw on
+        if let Some(burn) = &burn_subtitle {
+            let timed_text: Vec<PathBuf> =
+                composition.subtitles.iter().map(PathBuf::from).collect();
+            imfwizard_core::subtitle_burn::check_burn_supported(
+                burn,
+                &imfwizard_core::subtitle_burn::BurnTarget {
+                    timed_text: &timed_text,
+                    frames_already_xyz: !source_colour.applies_xyz_transform(),
+                    input_is_codestreams: postkit::encode::detect_input_type(&picture)
+                        == postkit::encode::InputType::J2kSequence,
+                    input_is_held_still: still_frames.is_some(),
+                },
+            )?;
+        }
         match (
             imfwizard_core::still::is_still_image(&picture),
             still_frames,
@@ -224,6 +256,16 @@ pub async fn submit_job(
             }
             _ => {}
         }
+    }
+
+    // parse the cue file and build the burn now, so a bad file or a missing font
+    // fails here instead of part way through the encode
+    if let Some(burn) = &burn_subtitle {
+        imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+            burn,
+            burn_subtitle_font.as_deref(),
+            fps_num,
+        )?;
     }
 
     // packages are folders named by title, so a reused title lands in the old
@@ -251,6 +293,8 @@ pub async fn submit_job(
         edits,
         source_colour,
         still_frames,
+        burn_subtitle,
+        burn_subtitle_font,
     };
 
     {
@@ -483,6 +527,17 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         ),
     );
 
+    // submit_job already proved the file parses, so a failure here is a file that
+    // changed underneath
+    let subtitle_burn = match &job.burn_subtitle {
+        Some(path) => Some(imfwizard_core::subtitle_burn::prepare_subtitle_burn(
+            path,
+            job.burn_subtitle_font.as_deref(),
+            job.fps_num,
+        )?),
+        None => None,
+    };
+
     let job_id = job.id;
     let n = job.compositions.len();
     let mut total_elapsed = 0.0;
@@ -541,6 +596,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 compression_ratio,
                 fps: job.fps_num,
                 source_colour: job.source_colour.clone(),
+                subtitle_burn: subtitle_burn.clone(),
                 ..Default::default()
             },
             &cancel,
