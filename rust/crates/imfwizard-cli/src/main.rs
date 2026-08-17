@@ -45,11 +45,21 @@ fn fail(message: impl std::fmt::Display) -> ! {
 
 /// Encode picture through the shared grok pipeline (grk_compress), printing
 /// per-frame progress. Ctrl-C cancels the run.
+///
+/// `wrap` writes the picture MXF as the frames finish instead of leaving the
+/// codestreams for `create_imp` to read back, and returns the track file it wrote.
 fn encode_picture(
     input: &std::path::Path,
     output_dir: &std::path::Path,
     options: &postkit::pipeline::EncodeRunOptions,
-) -> Result<postkit::pipeline::EncodeResult, String> {
+    wrap: Option<imfwizard_core::overlapped_picture::PictureWrapTarget>,
+) -> Result<
+    (
+        postkit::pipeline::EncodeResult,
+        Option<imfwizard_core::MxfTrackFile>,
+    ),
+    String,
+> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -59,23 +69,39 @@ fn encode_picture(
     let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
 
     let phase_breakdown: Mutex<Option<String>> = Mutex::new(None);
-    let result = postkit::pipeline::run_encode_with_options(
-        input,
-        output_dir,
-        options,
-        &cancel,
-        &pause,
-        |p: &postkit::pipeline::PipelineProgress| {
-            eprint!(
-                "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
-                p.frame, p.total_frames, p.percent, p.fps
-            );
-            if measured_any_phase(p) {
-                *phase_breakdown.lock().unwrap() = Some(p.phase_breakdown());
-            }
-        },
-        |msg: &str| tracing::info!("{msg}"),
-    );
+    let on_progress = |p: &postkit::pipeline::PipelineProgress| {
+        eprint!(
+            "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+            p.frame, p.total_frames, p.percent, p.fps
+        );
+        if measured_any_phase(p) {
+            *phase_breakdown.lock().unwrap() = Some(p.phase_breakdown());
+        }
+    };
+    let on_log = |msg: &str| tracing::info!("{msg}");
+    let result = match wrap {
+        Some(target) => imfwizard_core::overlapped_picture::encode_and_wrap_picture(
+            input,
+            output_dir,
+            options,
+            target,
+            &cancel,
+            &pause,
+            on_progress,
+            on_log,
+        )
+        .map(|(encode, track)| (encode, Some(track))),
+        None => postkit::pipeline::run_encode_with_options(
+            input,
+            output_dir,
+            options,
+            &cancel,
+            &pause,
+            on_progress,
+            on_log,
+        )
+        .map(|encode| (encode, None)),
+    };
     eprintln!();
     if let Some(breakdown) = phase_breakdown.lock().unwrap().as_deref() {
         tracing::info!("Encode breakdown: {breakdown}");
@@ -1642,7 +1668,7 @@ fn run() {
             let _ = std::fs::create_dir_all(&output);
 
             // If video is a file, run encode pipeline
-            let (j2k_dir, audio_files) = if let (Some(image), Some(hold_for)) =
+            let (j2k_dir, picture_mxf, audio_files) = if let (Some(image), Some(hold_for)) =
                 (&still_input, still_frames)
             {
                 tracing::info!("Holding {} for {hold_for} frames", image.display());
@@ -1674,6 +1700,7 @@ fn run() {
                 .unwrap_or_else(|e| fail(e));
                 (
                     Some(held),
+                    None,
                     audio
                         .as_ref()
                         .map(|a| vec![PathBuf::from(a)])
@@ -1694,7 +1721,9 @@ fn run() {
                     postkit::encode::InputType::Unknown => fail(
                         imfwizard_core::preflight::unclassified_picture_refusal(&video_path),
                     ),
-                    postkit::encode::InputType::J2kSequence => (Some(video_path), named_audio()),
+                    postkit::encode::InputType::J2kSequence => {
+                        (Some(video_path), None, named_audio())
+                    }
                     postkit::encode::InputType::Video
                     | postkit::encode::InputType::ImageSequence => {
                         let is_image_sequence =
@@ -1770,6 +1799,30 @@ fn run() {
                             None => tracing::info!("Ratio {compression_ratio:.1}"),
                         }
 
+                        // the picture MXF is written as the frames finish where the
+                        // job allows it, so the wrap costs nothing after the encode
+                        let overlap_refusal = imfwizard_core::overlapped_picture::overlap_refusal(
+                            &imfwizard_core::overlapped_picture::PictureJob {
+                                input_type,
+                                still_hold: false,
+                                trims_picture: edits.trims(),
+                            },
+                        );
+                        let wrap_target = match overlap_refusal {
+                            Some(reason) => {
+                                tracing::info!(
+                                    "Wrapping the picture MXF after the encode: {reason}"
+                                );
+                                None
+                            }
+                            None => Some(imfwizard_core::overlapped_picture::PictureWrapTarget {
+                                imp_dir: output.clone(),
+                                fps_num,
+                                fps_den,
+                                hdr: hdr.as_ref().map(|h| h.to_asdcp()),
+                            }),
+                        };
+
                         // encode via the shared grok pipeline (grk_compress); no fallback
                         let encoded = encode_picture(
                             &video_path,
@@ -1782,11 +1835,19 @@ fn run() {
                                 picture: picture.processing.clone(),
                                 ..Default::default()
                             },
+                            wrap_target,
                         );
-                        let j2k_out = match encoded {
-                            Ok(r) => {
+                        let (j2k_out, picture_mxf) = match encoded {
+                            Ok((r, track)) => {
                                 tracing::info!("Encoded {} frames", r.frames_encoded);
-                                r.j2k_dir
+                                if let Some(track) = &track {
+                                    tracing::info!(
+                                        "Picture MXF written during the encode: {} ({} frames)",
+                                        track.path.display(),
+                                        track.duration
+                                    );
+                                }
+                                (r.j2k_dir, track)
                             }
                             Err(e) => {
                                 eprintln!("Error: Encode failed: {e}");
@@ -1822,11 +1883,12 @@ fn run() {
                             }
                         };
 
-                        (Some(j2k_out), audio_files)
+                        (Some(j2k_out), picture_mxf, audio_files)
                     }
                 }
             } else {
                 (
+                    None,
                     None,
                     audio
                         .as_ref()
@@ -1878,6 +1940,7 @@ fn run() {
                     title,
                     content_kind: kind,
                     j2k_dir: source.j2k_dir,
+                    picture_mxf,
                     audio_files: audio_tracks,
                     timed_text_files: source.timed_text_files,
                     hdr,

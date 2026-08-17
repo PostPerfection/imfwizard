@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Accessibility role of an audio track, carried in the CPL as an MCA essence
 /// descriptor (ST 2067-2/-3). None is normal main audio.
@@ -38,6 +38,11 @@ pub struct Composition {
     pub content_kind: String,
     /// J2K codestream directory
     pub j2k_dir: Option<PathBuf>,
+    /// A picture MXF the caller already wrote, from
+    /// [`crate::overlapped_picture::encode_and_wrap_picture`]. When set it is
+    /// taken as the picture track and nothing here wraps `j2k_dir`.
+    #[serde(default)]
+    pub picture_mxf: Option<crate::MxfTrackFile>,
     /// WAV audio tracks
     pub audio_files: Vec<AudioTrack>,
     /// Timed text files
@@ -102,16 +107,25 @@ pub fn validate_language(tag: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Track file name prefix for the picture. `cpl.rs` reads the track kind back off
+/// it, so a picture MXF written anywhere has to carry it.
+pub const PICTURE_PREFIX: &str = "VIDEO";
+
+/// Where a track file of `prefix` kind under `asset_uuid` goes in the IMP.
+pub fn track_file_path(output_dir: &Path, prefix: &str, asset_uuid: &uuid::Uuid) -> PathBuf {
+    output_dir.join(format!("{prefix}_{asset_uuid}.mxf"))
+}
+
 fn wrap_one(
     opts: &ImpOptions,
-    output_dir: &std::path::Path,
+    output_dir: &Path,
     prefix: &str,
-    input: &std::path::Path,
+    input: &Path,
     essence: crate::EssenceType,
     hdr: Option<asdcplib::jp2k::HdrMetadata>,
 ) -> Result<crate::MxfTrackFile, String> {
     let asset_uuid = uuid::Uuid::new_v4();
-    let mxf_path = output_dir.join(format!("{prefix}_{asset_uuid}.mxf"));
+    let mxf_path = track_file_path(output_dir, prefix, &asset_uuid);
     let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
         input_dir: input.to_path_buf(),
         output_file: mxf_path,
@@ -153,6 +167,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
     }
 
     for comp in &opts.compositions {
+        if comp.picture_mxf.is_some() {
+            continue;
+        }
         let Some(j2k_dir) = comp.j2k_dir.as_ref() else {
             return ImpResult {
                 error: "A J2K input directory is required".into(),
@@ -181,21 +198,26 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
         let mut comp_tracks: Vec<crate::MxfTrackFile> = Vec::new();
 
         // picture (required, validated above)
-        let j2k_dir = comp.j2k_dir.as_ref().expect("checked above");
-        match wrap_one(
-            opts,
-            &opts.output_dir,
-            "VIDEO",
-            j2k_dir,
-            crate::EssenceType::J2k,
-            comp.hdr.as_ref().map(|h| h.to_asdcp()),
-        ) {
-            Ok(tf) => comp_tracks.push(tf),
-            Err(e) => {
-                return ImpResult {
-                    error: format!("MXF wrapping failed: {e}"),
-                    ..Default::default()
-                };
+        match &comp.picture_mxf {
+            Some(track) => comp_tracks.push(track.clone()),
+            None => {
+                let j2k_dir = comp.j2k_dir.as_ref().expect("checked above");
+                match wrap_one(
+                    opts,
+                    &opts.output_dir,
+                    PICTURE_PREFIX,
+                    j2k_dir,
+                    crate::EssenceType::J2k,
+                    comp.hdr.as_ref().map(|h| h.to_asdcp()),
+                ) {
+                    Ok(tf) => comp_tracks.push(tf),
+                    Err(e) => {
+                        return ImpResult {
+                            error: format!("MXF wrapping failed: {e}"),
+                            ..Default::default()
+                        };
+                    }
+                }
             }
         }
 

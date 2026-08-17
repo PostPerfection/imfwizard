@@ -5,6 +5,7 @@ pub mod cpl_annotation;
 pub mod edl_import;
 pub mod imp;
 pub mod mxf_wrap;
+pub mod overlapped_picture;
 pub mod pkl;
 pub mod timeline;
 

@@ -181,6 +181,24 @@ the 32-character caption rules have nothing to run on.
 
 # Done
 
+## Fixed 2026-08-17 (the picture MXF is written while the encode runs)
+
+dcpwizard's DESIGN_TODO carried this one for both wizards ("imfwizard too"); this
+is the imfwizard half.
+
+postkit's `pipeline::run_encode_and_wrap_picture` feeds a picture MXF one
+codestream at a time as the in-process encoder finishes it, essence-identical to
+the encode-then-wrap it replaces. `CORE/overlapped_picture.rs` is the adoption:
+`overlap_refusal` is the one predicate, refusing a held still, an image or J2K
+sequence and a head or tail trim, each with the reason, and
+`encode_and_wrap_picture` mints the `VIDEO_<uuid>.mxf` name and asset id
+`create_imp` would have written. `Composition::picture_mxf` is the seam:
+`create_imp` takes the track file the caller already wrote instead of wrapping
+`j2k_dir`. Both the CLI's `create` and the GUI build path route through it, and
+each logs which path ran and why. Nothing else needed a refusal: imfwizard never
+encrypts a track file, has no 3D or padding path, and HDR/WCG travels as
+`IncrementalWrapOptions::hdr`, so an `--hdr` create overlaps too.
+
 ## Fixed 2026-08-16 (--hdr guard read the flag, not the route)
 
 `--hdr` without an explicit `--source-colourspace` skipped the already-X'Y'Z'

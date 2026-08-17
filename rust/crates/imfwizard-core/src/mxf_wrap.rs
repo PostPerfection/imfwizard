@@ -124,27 +124,33 @@ fn delegate(
         };
     }
 
-    let hash = match base64_digest_from_hex(&pk.hash) {
-        Ok(h) => h,
-        Err(e) => {
-            return MxfWrapResult {
-                error: format!("unusable MXF hash from postkit: {e}"),
-                ..Default::default()
-            };
-        }
-    };
-
-    MxfWrapResult {
-        success: true,
-        error: String::new(),
-        track_file: crate::MxfTrackFile {
-            path: pk.path,
-            uuid: pk.uuid,
-            hash,
-            size: pk.size,
-            duration: pk.duration,
+    match track_file_from_postkit(pk) {
+        Ok(track_file) => MxfWrapResult {
+            success: true,
+            error: String::new(),
+            track_file,
+        },
+        Err(error) => MxfWrapResult {
+            error,
+            ..Default::default()
         },
     }
+}
+
+/// Adapt a track file postkit wrapped into the one the CPL/PKL writers read,
+/// re-encoding the hash the way the PKL wants it.
+pub fn track_file_from_postkit(
+    pk: postkit::mxf_wrap::MxfTrackFile,
+) -> Result<crate::MxfTrackFile, String> {
+    let hash = base64_digest_from_hex(&pk.hash)
+        .map_err(|e| format!("unusable MXF hash from postkit: {e}"))?;
+    Ok(crate::MxfTrackFile {
+        path: pk.path,
+        uuid: pk.uuid,
+        hash,
+        size: pk.size,
+        duration: pk.duration,
+    })
 }
 
 /// SHA-1 digest length. ST 2067-2 fixes the PKL Hash field to a SHA-1 digest.

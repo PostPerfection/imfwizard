@@ -972,6 +972,31 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         // a still never reaches the pipeline: it is one encode per run of frames
         // sharing a cue set, linked for the rest of the hold
         let encode_started = Instant::now();
+        // the picture MXF is written as the frames finish where the job allows
+        // it, so the wrap costs nothing after the encode
+        let overlap_refusal = imfwizard_core::overlapped_picture::overlap_refusal(
+            &imfwizard_core::overlapped_picture::PictureJob {
+                input_type,
+                still_hold: job.still_frames.is_some(),
+                trims_picture: job.edits.trims(),
+            },
+        );
+        let wrap_target = match overlap_refusal {
+            Some(reason) => {
+                log_to(
+                    &log_file,
+                    &format!("[ENCODE] Wrapping the picture MXF after the encode: {reason}"),
+                );
+                None
+            }
+            None => Some(imfwizard_core::overlapped_picture::PictureWrapTarget {
+                imp_dir: job.output_dir.clone(),
+                fps_num: job.fps_num,
+                fps_den: job.fps_den,
+                hdr: None,
+            }),
+        };
+        let mut picture_mxf = None;
         let picture_dir = match job.still_frames {
             Some(hold_for) => {
                 let plan = picture
@@ -999,42 +1024,70 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 held
             }
             None => {
-                let encode_result = postkit::pipeline::run_encode_with_options(
-                    &video_path,
-                    &enc_dir,
-                    &postkit::pipeline::EncodeRunOptions {
-                        compression_ratio,
-                        fps: encode_fps,
-                        source_colour: job.source_colour.clone(),
-                        subtitle_burn: subtitle_burn.clone(),
-                        picture: picture
-                            .as_ref()
-                            .map(|resolved| resolved.processing.clone())
-                            .unwrap_or_default(),
-                        ..Default::default()
-                    },
-                    &cancel,
-                    &pause,
-                    |p| {
-                        // scale each composition's 0..100 into its slice of the whole job
-                        let scaled = (idx as f64 + p.percent / 100.0) / n as f64 * 100.0;
-                        emit_progress(
-                            &app_ref,
-                            job_id,
-                            &p.stage,
-                            &p.message,
-                            p.frame,
-                            p.total_frames,
-                            p.fps,
-                            p.elapsed_secs,
-                            scaled,
+                let encode_options = postkit::pipeline::EncodeRunOptions {
+                    compression_ratio,
+                    fps: encode_fps,
+                    source_colour: job.source_colour.clone(),
+                    subtitle_burn: subtitle_burn.clone(),
+                    picture: picture
+                        .as_ref()
+                        .map(|resolved| resolved.processing.clone())
+                        .unwrap_or_default(),
+                    ..Default::default()
+                };
+                let on_progress = |p: &postkit::pipeline::PipelineProgress| {
+                    // scale each composition's 0..100 into its slice of the whole job
+                    let scaled = (idx as f64 + p.percent / 100.0) / n as f64 * 100.0;
+                    emit_progress(
+                        &app_ref,
+                        job_id,
+                        &p.stage,
+                        &p.message,
+                        p.frame,
+                        p.total_frames,
+                        p.fps,
+                        p.elapsed_secs,
+                        scaled,
+                    );
+                    if let Some(line) = format_encode_breakdown(&encode_stage_name, p) {
+                        *encode_breakdown_ref.lock().unwrap() = Some(line);
+                    }
+                };
+                let on_log = |msg: &str| log_to(&log_ref, msg);
+                let encode_result = match wrap_target {
+                    Some(target) => {
+                        let (encode, track) =
+                            imfwizard_core::overlapped_picture::encode_and_wrap_picture(
+                                &video_path,
+                                &enc_dir,
+                                &encode_options,
+                                target,
+                                &cancel,
+                                &pause,
+                                on_progress,
+                                on_log,
+                            )?;
+                        log_to(
+                            &log_file,
+                            &format!(
+                                "[ENCODE] Picture MXF written during the encode: {} ({} frames)",
+                                track.path.display(),
+                                track.duration
+                            ),
                         );
-                        if let Some(line) = format_encode_breakdown(&encode_stage_name, p) {
-                            *encode_breakdown_ref.lock().unwrap() = Some(line);
-                        }
-                    },
-                    |msg| log_to(&log_ref, msg),
-                )?;
+                        picture_mxf = Some(track);
+                        encode
+                    }
+                    None => postkit::pipeline::run_encode_with_options(
+                        &video_path,
+                        &enc_dir,
+                        &encode_options,
+                        &cancel,
+                        &pause,
+                        on_progress,
+                        on_log,
+                    )?,
+                };
                 total_elapsed += encode_result.elapsed_secs;
                 encode_result.j2k_dir
             }
@@ -1112,6 +1165,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 ci.content_kind.clone()
             },
             j2k_dir: source.j2k_dir,
+            picture_mxf,
             audio_files,
             timed_text_files: source.timed_text_files,
             hdr: None,
