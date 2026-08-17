@@ -497,27 +497,30 @@ document.getElementById("prop-output")?.addEventListener("input", (event) => {
 });
 
 // === Open existing IMP ===
+async function openImp(dir) {
+  const name = dir.split(/[/\\]/).pop();
+  document.getElementById("project-name").textContent = name;
+  project.title = name;
+  document.getElementById("prop-title").value = name;
+  // a name given in the recent list is the label for that row, so opening it keeps it
+  addRecentProject(dir, getRecentProjects().find(r => r.path === dir)?.title || name);
+  setStatus(`Opened: ${dir}`);
+
+  // Load timeline from the first CPL found
+  try {
+    const cpls = await invoke('list_cpls', { impDir: dir });
+    if (cpls && cpls.length > 0) {
+      const cplPath = dir + '/' + cpls[0].file_path;
+      loadTimelineFromCpl(cplPath);
+    }
+  } catch (e) {
+    console.warn('[main] Could not load timeline:', e);
+  }
+}
+
 document.getElementById("btn-open-project")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
-  if (dir) {
-    const name = dir.split(/[/\\]/).pop();
-    document.getElementById("project-name").textContent = name;
-    project.title = name;
-    document.getElementById("prop-title").value = name;
-    addRecentProject(dir, name);
-    setStatus(`Opened: ${dir}`);
-
-    // Load timeline from the first CPL found
-    try {
-      const cpls = await invoke('list_cpls', { impDir: dir });
-      if (cpls && cpls.length > 0) {
-        const cplPath = dir + '/' + cpls[0].file_path;
-        loadTimelineFromCpl(cplPath);
-      }
-    } catch (e) {
-      console.warn('[main] Could not load timeline:', e);
-    }
-  }
+  if (dir) openImp(dir);
 });
 
 // === Preview ===
@@ -1126,6 +1129,7 @@ document.getElementById("sup-create")?.addEventListener("click", async () => {
   const cmd = Command.sidecar("imfwizard", args);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? "✓ Supplemental IMP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+  if (result.code === 0) addRecentProject(output, title);
 });
 
 // === Metadata ===
@@ -1294,7 +1298,29 @@ document.getElementById("prop-title")?.addEventListener("input", (e) => {
 
 // === Recent Projects ===
 const RECENT_KEY = "imfwizard-recent-projects";
+const RECENT_COLLAPSED_KEY = "imfwizard-recent-projects-collapsed";
 const MAX_RECENT = 20;
+
+function recentProjectsCollapsed() {
+  return localStorage.getItem(RECENT_COLLAPSED_KEY) !== "false";
+}
+
+function applyRecentProjectsCollapsed() {
+  const section = document.getElementById("recent-projects");
+  const toggle = document.getElementById("recent-toggle");
+  if (!section) return;
+  const collapsed = recentProjectsCollapsed();
+  section.classList.toggle("collapsed", collapsed);
+  if (toggle) {
+    toggle.textContent = collapsed ? "▶" : "▼";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+  }
+}
+
+document.getElementById("recent-header")?.addEventListener("click", () => {
+  localStorage.setItem(RECENT_COLLAPSED_KEY, String(!recentProjectsCollapsed()));
+  applyRecentProjectsCollapsed();
+});
 
 function getRecentProjects() {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
@@ -1315,10 +1341,17 @@ function removeRecentProject(path) {
   renderRecentProjects();
 }
 
+function renameRecentProject(path, title) {
+  const recent = getRecentProjects().map(r => (r.path === path ? { ...r, title } : r));
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  renderRecentProjects();
+}
+
 function renderRecentProjects() {
   const section = document.getElementById("recent-projects");
   const list = document.getElementById("recent-list");
   if (!section || !list) return;
+  applyRecentProjectsCollapsed();
   const recent = getRecentProjects();
   if (recent.length === 0) { section.hidden = true; return; }
   section.hidden = false;
@@ -1328,9 +1361,19 @@ function renderRecentProjects() {
         <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
         <span class="recent-path">${r.path}</span>
       </div>
+      <button class="recent-retitle" data-path="${r.path}" title="Rename this entry in the list">✎</button>
       <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
     </div>
   `).join('');
+  list.querySelectorAll('.recent-retitle').forEach(el => {
+    el.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const dir = el.dataset.path;
+      const name = prompt("Name for this entry:", dir.split(/[/\\]/).pop());
+      if (!name?.trim()) return;
+      renameRecentProject(dir, name.trim());
+    });
+  });
   list.querySelectorAll('.recent-delete').forEach(el => {
     el.addEventListener('click', async (event) => {
       event.stopPropagation();
@@ -1352,14 +1395,7 @@ function renderRecentProjects() {
     });
   });
   list.querySelectorAll('.recent-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const dir = el.dataset.path;
-      const name = dir.split(/[/\\]/).pop();
-      document.getElementById("project-name").textContent = name;
-      project.title = name;
-      document.getElementById("prop-title").value = name;
-      setStatus(`Opened: ${dir}`);
-    });
+    el.addEventListener('click', () => openImp(el.dataset.path));
   });
 }
 
