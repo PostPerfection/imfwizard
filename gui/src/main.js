@@ -1341,12 +1341,6 @@ function removeRecentProject(path) {
   renderRecentProjects();
 }
 
-function renameRecentProject(path, title) {
-  const recent = getRecentProjects().map(r => (r.path === path ? { ...r, title } : r));
-  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-  renderRecentProjects();
-}
-
 function renderRecentProjects() {
   const section = document.getElementById("recent-projects");
   const list = document.getElementById("recent-list");
@@ -1361,17 +1355,31 @@ function renderRecentProjects() {
         <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
         <span class="recent-path">${r.path}</span>
       </div>
-      <button class="recent-retitle" data-path="${r.path}" title="Rename this entry in the list">✎</button>
+      <button class="recent-retitle" data-path="${r.path}" title="Give this IMP a new content title">✎</button>
       <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
     </div>
   `).join('');
   list.querySelectorAll('.recent-retitle').forEach(el => {
-    el.addEventListener('click', (event) => {
+    el.addEventListener('click', async (event) => {
       event.stopPropagation();
       const dir = el.dataset.path;
-      const name = prompt("Name for this entry:", dir.split(/[/\\]/).pop());
-      if (!name?.trim()) return;
-      renameRecentProject(dir, name.trim());
+      const title = prompt("New content title:", dir.split(/[/\\]/).pop());
+      if (!title?.trim()) return;
+      const ok = await tauriConfirm(
+        `Retitle to ${title}? The CPL gets a new composition id, so any KDM, supplemental IMP or delivery made from the old one no longer matches. A signed package loses its signature.`,
+        { title: "Retitle IMP", kind: "warning" },
+      );
+      if (!ok) return;
+      let newPath;
+      try {
+        newPath = await invoke("retitle_imp", { path: dir, title });
+      } catch (e) {
+        tauriMessage(String(e), { title: "Retitle failed", kind: "error" });
+        return;
+      }
+      removeRecentProject(dir);
+      addRecentProject(newPath, title.trim());
+      setStatus(`Retitled to ${title.trim()}`);
     });
   });
   list.querySelectorAll('.recent-delete').forEach(el => {

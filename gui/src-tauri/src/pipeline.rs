@@ -630,6 +630,48 @@ pub async fn disk_space(path: String) -> Result<DiskSpace, String> {
     })
 }
 
+/// Give a built IMP a new content title without re-wrapping essence: the CPL is
+/// rewritten with a new composition id and the track files are left alone. The
+/// folder is renamed too when it is still named after the old title. Returns the
+/// package path, which changes when the folder is renamed.
+#[tauri::command]
+pub async fn retitle_imp(path: String, title: String) -> Result<String, String> {
+    let dir = PathBuf::from(&path);
+    if !holds_imp(&dir) {
+        return Err(format!("{path} does not hold an IMP"));
+    }
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("Enter a new title".into());
+    }
+    let old_title = imfwizard_core::timeline::list_cpls(&dir)
+        .first()
+        .map(|cpl| cpl.title.clone())
+        .ok_or_else(|| format!("No CPL found in {path}"))?;
+
+    postkit::package_edit::edit_package(&postkit::package_edit::PackageEdit {
+        input: dir.clone(),
+        title: Some(title.clone()),
+        ..Default::default()
+    })
+    .map_err(|e| format!("Could not retitle {path}: {e}"))?;
+
+    let folder_is_named_after_the_title =
+        dir.file_name().and_then(|name| name.to_str()) == Some(&old_title);
+    let title_works_as_a_folder_name =
+        !title.contains(std::path::MAIN_SEPARATOR) && !title.contains('/');
+    if !folder_is_named_after_the_title || !title_works_as_a_folder_name {
+        return Ok(path);
+    }
+    let renamed = dir.with_file_name(&title);
+    if renamed.exists() {
+        return Ok(path);
+    }
+    std::fs::rename(&dir, &renamed)
+        .map_err(|e| format!("Retitled, but could not rename the folder: {e}"))?;
+    Ok(renamed.to_string_lossy().into_owned())
+}
+
 /// Delete a built IMP folder and everything in it. Refuses any folder that is
 /// not an IMP, so a stale recent entry cannot take out a folder of source media.
 #[tauri::command]

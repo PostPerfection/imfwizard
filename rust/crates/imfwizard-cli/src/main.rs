@@ -803,14 +803,16 @@ enum Commands {
         shell: String,
     },
 
-    /// Edit CPL metadata
+    /// Add a revision annotation to a CPL. To change the ContentTitle, use
+    /// `retitle`
     #[command(name = "metadata-edit")]
     MetadataEdit {
         /// IMP directory
         #[arg(short, long)]
         imp: String,
 
-        /// Title to set
+        /// Annotation text (an alias of --annotation; this does not touch the
+        /// CPL ContentTitle)
         #[arg(short, long)]
         title: Option<String>,
 
@@ -818,9 +820,23 @@ enum Commands {
         #[arg(short, long)]
         annotation: Option<String>,
 
-        /// Issuer
+        /// Annotation author
         #[arg(long)]
         issuer: Option<String>,
+    },
+
+    /// Give a written IMP a new ContentTitle, without re-wrapping essence. The
+    /// CPL gets a new composition id, and the PKL and ASSETMAP are repointed at
+    /// it, so any KDM or supplemental IMP made from the old id stops matching.
+    /// A signed document is rewritten unsigned
+    Retitle {
+        /// IMP directory
+        #[arg(short, long)]
+        imp: String,
+
+        /// New CPL ContentTitle
+        #[arg(short, long)]
+        title: String,
     },
 
     /// Create DCDM (Digital Cinema Distribution Master) X'Y'Z' sequence
@@ -2501,6 +2517,33 @@ fn run() {
             };
             match imfwizard_core::cpl_annotation::annotate_cpl(&cpl_path, &ann) {
                 Ok(()) => println!("Metadata updated for {}", cpl_path.display()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Retitle { imp, title } => {
+            let edit = postkit::package_edit::PackageEdit {
+                input: PathBuf::from(&imp),
+                title: Some(title),
+                ..Default::default()
+            };
+            match postkit::package_edit::edit_package(&edit) {
+                Ok(edited) => {
+                    println!(
+                        "Retitled {imp}: {} now carries composition id {}",
+                        edited.cpl_path.display(),
+                        edited.composition_id
+                    );
+                    if !edited.unsigned_documents.is_empty() {
+                        println!(
+                            "Wrote unsigned, the rewrite changed the bytes their signature covered: {}. Re-sign the package if it has to stay signed",
+                            edited.unsigned_documents.join(", ")
+                        );
+                    }
+                }
                 Err(e) => {
                     eprintln!("Error: {e}");
                     std::process::exit(1);

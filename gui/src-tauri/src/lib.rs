@@ -120,6 +120,7 @@ pub fn run() {
             pipeline::pause_job,
             pipeline::resume_job,
             pipeline::list_jobs,
+            pipeline::retitle_imp,
             pipeline::delete_imp,
             pipeline::disk_space,
             pipeline::detect_source_crop,
