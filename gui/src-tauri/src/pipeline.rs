@@ -531,23 +531,32 @@ const PREVIEW_SUBTITLE_DIRECTORY: &str = "preview-subtitles";
 
 /// A subtitle file the preview player can render, converting the composition's
 /// timed text to SRT when mpv cannot read it as it stands.
+///
+/// `subtitle_path` is either that timed text or a built IMP directory, whose
+/// packaged timed text is unwrapped out of its AS-02 track file first. A package
+/// carrying no timed text gives back nothing to show.
 #[tauri::command]
 pub async fn subtitle_file_for_preview(
     app: AppHandle,
     subtitle_path: String,
     framerate: String,
-) -> Result<String, String> {
+) -> Result<Option<String>, String> {
     let work_dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| format!("no cache folder to write the preview subtitles into: {e}"))?
         .join(PREVIEW_SUBTITLE_DIRECTORY);
-    let playable = imfwizard_core::subtitle_preview::playable_subtitle_file(
-        &PathBuf::from(&subtitle_path),
-        parse_framerate(&framerate)?,
-        &work_dir,
-    )?;
-    Ok(playable.to_string_lossy().into_owned())
+    let input = PathBuf::from(&subtitle_path);
+    let playable = if input.is_dir() {
+        imfwizard_core::subtitle_preview::packaged_subtitle_file(&input, &work_dir)?
+    } else {
+        Some(imfwizard_core::subtitle_preview::playable_subtitle_file(
+            &input,
+            parse_framerate(&framerate)?,
+            &work_dir,
+        )?)
+    };
+    Ok(playable.map(|path| path.to_string_lossy().into_owned()))
 }
 
 /// The Frame Rate menu's `num/den` spelling as frames per second.

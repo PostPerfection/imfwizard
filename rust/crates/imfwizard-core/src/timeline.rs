@@ -186,7 +186,8 @@ pub fn list_cpls(imp_dir: &Path) -> Vec<CplInfo> {
         .collect()
 }
 
-fn parse_assetmap(imp_dir: &Path) -> HashMap<String, String> {
+/// Asset id to the path it names, relative to the IMP directory.
+pub(crate) fn parse_assetmap(imp_dir: &Path) -> HashMap<String, String> {
     read_assetmap_assets(imp_dir).into_iter().collect()
 }
 

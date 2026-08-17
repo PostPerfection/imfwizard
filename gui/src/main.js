@@ -552,13 +552,15 @@ function previewProjectFile(path) {
   if (segment?.subtitle?.path) showPreviewSubtitle(segment.subtitle.path, generation);
 }
 
-// The built IMP carries the crop in its pictures already, and nothing here
-// unwraps its timed text track back to cues.
+// The built IMP carries the crop in its pictures already, so only its packaged
+// timed text is loaded on top.
 function previewBuiltPackage(outputDir) {
   previewGeneration += 1;
+  const generation = previewGeneration;
   previewShowsJobPicture = false;
   previewDcp(outputDir);
   setPreviewCrop(null);
+  showPreviewSubtitle(outputDir, generation);
 }
 
 function currentCrop() {
@@ -587,6 +589,7 @@ async function showPreviewSubtitle(subtitlePath, generation) {
     setStatus(`Preview subtitles: ${e}`);
     return;
   }
+  if (!playable) return;
   const loaded = await previewClipLoaded();
   if (loaded && generation === previewGeneration) setPreviewSubtitleFile(playable);
 }

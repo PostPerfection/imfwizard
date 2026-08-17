@@ -147,10 +147,9 @@ order `create` builds its sources in.
   encode itself: postkit's `PipelineProgress` carries a stage name, a frame
   count and an elapsed clock, and nothing that separates the three, so it would
   take a wider progress payload from postkit first.
-  Preview subtitles stop at the source picture: the Sub button carries the
-  composition's timed text written out as SRT, and after a build nothing unwraps
-  the packaged AS-02 timed text track back to cues, so a built IMP plays with
-  no subtitles.
+  Preview subtitles are done on both sides: the Sub button carries the
+  composition's timed text written out as SRT before a build, and the timed text
+  unwrapped out of the packaged AS-02 track file after one.
 
 ## Open: DCP-o-matic hints not ported (2026-08-16)
 

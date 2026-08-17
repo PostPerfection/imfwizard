@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use postkit::packaging::ImfTrackKind;
+
 use crate::source_edits::{TimedTextCue, read_timed_text_cues};
 
 /// What libass reads as it stands, so the preview opens the file the job
@@ -57,6 +59,70 @@ pub fn playable_subtitle_file(input: &Path, fps: f64, work_dir: &Path) -> Result
     Ok(output)
 }
 
+/// A subtitle file the preview player can render for a built IMP, unwrapping the
+/// timed text of its first CPL out of the AS-02 track file and writing it out as
+/// SRT under `work_dir`. `Ok(None)` when the package carries no timed text.
+///
+/// The cue times are the document's own, which is what the package plays at.
+pub fn packaged_subtitle_file(imp_dir: &Path, work_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let cpl = crate::timeline::list_cpls(imp_dir)
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("no CPL in {}", imp_dir.display()))?;
+    let composition = crate::supplement::parse_cpl_resources(&imp_dir.join(&cpl.file_path))?;
+    let Some(subtitles) = composition
+        .resources
+        .iter()
+        .find(|resource| resource.kind == ImfTrackKind::Subtitle)
+    else {
+        return Ok(None);
+    };
+    let relative_path = crate::timeline::parse_assetmap(imp_dir)
+        .remove(&subtitles.uuid)
+        .ok_or_else(|| {
+            format!(
+                "{} lists no asset for the timed text track {}",
+                imp_dir.display(),
+                subtitles.uuid
+            )
+        })?;
+    let track_file = imp_dir.join(relative_path);
+
+    let stem = track_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("{} has no readable file name", track_file.display()))?;
+    std::fs::create_dir_all(work_dir)
+        .map_err(|e| format!("cannot create {}: {e}", work_dir.display()))?;
+    let document_path = work_dir.join(format!("{stem}.ttml"));
+    std::fs::write(&document_path, timed_text_document(&track_file)?)
+        .map_err(|e| format!("cannot write {}: {e}", document_path.display()))?;
+
+    let fps = f64::from(composition.fps_num) / f64::from(composition.fps_den);
+    playable_subtitle_file(&document_path, fps, work_dir).map(Some)
+}
+
+/// The timed text document inside an AS-02 track file. The ancillary resources a
+/// subtitle can carry, its fonts and PNGs, are left alone: the preview renders
+/// the text on its own.
+fn timed_text_document(track_file: &Path) -> Result<Vec<u8>, String> {
+    let path = track_file.to_string_lossy().into_owned();
+    let mut reader = asdcplib::as02::timed_text::MxfReader::new();
+    reader
+        .open_read(&path)
+        .map_err(|e| format!("cannot open the timed text track {path}: {e}"))?;
+    // the document cannot be bigger than the MXF wrapping it, so one read is enough
+    let wrapped_bytes = std::fs::metadata(track_file)
+        .map_err(|e| format!("cannot read {path}: {e}"))?
+        .len() as usize;
+    let mut document = vec![0u8; wrapped_bytes];
+    let read = reader
+        .read_timed_text_resource(&mut document, None, None)
+        .map_err(|e| format!("cannot read the timed text of {path}: {e}"))?;
+    document.truncate(read);
+    Ok(document)
+}
+
 /// The cues as a SubRip document, numbered from one.
 fn srt_document(cues: &[TimedTextCue]) -> String {
     let mut document = String::new();
@@ -90,6 +156,9 @@ mod tests {
 
     const FPS: f64 = 24.0;
 
+    const EXPECTED_SRT: &str = "1\n00:00:01,500 --> 00:00:03,000\nFirst line\nsecond line\n\n\
+         2\n00:00:04,000 --> 00:00:06,250\nA later cue\n\n";
+
     fn timed_text(dir: &Path) -> PathBuf {
         let path = dir.join("subs.ttml");
         std::fs::write(
@@ -115,11 +184,69 @@ mod tests {
         let output = playable_subtitle_file(&timed_text(dir.path()), FPS, &work).unwrap();
 
         assert_eq!(output, work.join("subs.srt"));
-        assert_eq!(
-            std::fs::read_to_string(&output).unwrap(),
-            "1\n00:00:01,500 --> 00:00:03,000\nFirst line\nsecond line\n\n\
-             2\n00:00:04,000 --> 00:00:06,250\nA later cue\n\n"
-        );
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), EXPECTED_SRT);
+    }
+
+    /// Build a one-frame IMP into `dir`, with the timed text as its subtitle
+    /// track when one is given, and return the package directory.
+    fn built_package(dir: &Path, subtitle: Option<PathBuf>) -> PathBuf {
+        let j2k_dir = dir.join("j2k");
+        std::fs::create_dir_all(&j2k_dir).unwrap();
+        std::fs::write(
+            j2k_dir.join("0001.j2c"),
+            crate::mxf_wrap::synthetic_j2k_codestream(2048, 1080, 12),
+        )
+        .unwrap();
+        let output_dir = dir.join("imp");
+        let result = crate::imp::create_imp(&crate::imp::ImpOptions {
+            output_dir: output_dir.clone(),
+            compositions: vec![crate::imp::Composition {
+                title: "Subtitled".into(),
+                content_kind: "feature".into(),
+                j2k_dir: Some(j2k_dir),
+                timed_text_files: subtitle.into_iter().collect(),
+                ..Default::default()
+            }],
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        });
+        assert!(result.success, "create failed: {}", result.error);
+        output_dir
+    }
+
+    #[test]
+    fn a_built_package_gives_back_the_cues_it_wrapped() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = built_package(dir.path(), Some(timed_text(dir.path())));
+        let work = dir.path().join("preview-subtitles");
+
+        let output = packaged_subtitle_file(&package, &work)
+            .unwrap()
+            .expect("a timed text track");
+
+        assert_eq!(output.parent(), Some(work.as_path()));
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), EXPECTED_SRT);
+    }
+
+    #[test]
+    fn a_package_with_no_timed_text_track_has_no_subtitle_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = built_package(dir.path(), None);
+
+        let output = packaged_subtitle_file(&package, &dir.path().join("work")).unwrap();
+
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn a_directory_that_is_no_package_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let error = packaged_subtitle_file(dir.path(), &dir.path().join("work"))
+            .expect_err("no CPL to read");
+
+        assert!(error.contains("no CPL"), "got: {error}");
     }
 
     #[test]

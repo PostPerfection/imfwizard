@@ -94,18 +94,18 @@ fn prefix_for(kind: ImfTrackKind) -> &'static str {
     }
 }
 
-/// One resource read from the OV CPL.
-struct OvResource {
-    kind: ImfTrackKind,
-    uuid: String,
-    duration: u64,
+/// One resource read from a CPL.
+pub(crate) struct CplResource {
+    pub(crate) kind: ImfTrackKind,
+    pub(crate) uuid: String,
+    pub(crate) duration: u64,
 }
 
-struct OvCpl {
-    fps_num: u32,
-    fps_den: u32,
-    content_kind: String,
-    resources: Vec<OvResource>,
+pub(crate) struct CplResources {
+    pub(crate) fps_num: u32,
+    pub(crate) fps_den: u32,
+    pub(crate) content_kind: String,
+    pub(crate) resources: Vec<CplResource>,
 }
 
 fn local_name(qname: QName) -> String {
@@ -116,10 +116,10 @@ fn strip_urn(s: &str) -> String {
     s.replace("urn:uuid:", "")
 }
 
-/// Parse an OV IMF CPL into its composition edit rate and per-kind resources.
-fn parse_ov_cpl(cpl_path: &Path) -> Result<OvCpl, String> {
+/// Parse an IMF CPL into its composition edit rate and per-kind resources.
+pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, String> {
     let content = std::fs::read_to_string(cpl_path)
-        .map_err(|e| format!("cannot read OV CPL {}: {e}", cpl_path.display()))?;
+        .map_err(|e| format!("cannot read CPL {}: {e}", cpl_path.display()))?;
 
     let mut reader = Reader::from_str(&content);
     reader.config_mut().trim_text(true);
@@ -129,7 +129,7 @@ fn parse_ov_cpl(cpl_path: &Path) -> Result<OvCpl, String> {
     let mut in_resource = false;
     let mut edit_rate: Option<(u32, u32)> = None;
     let mut content_kind = String::new();
-    let mut resources: Vec<OvResource> = Vec::new();
+    let mut resources: Vec<CplResource> = Vec::new();
     let mut cur_uuid = String::new();
     let mut cur_dur = 0u64;
 
@@ -161,6 +161,7 @@ fn parse_ov_cpl(cpl_path: &Path) -> Result<OvCpl, String> {
                         let mut it = text.split_whitespace();
                         if let (Some(n), Some(d)) = (it.next(), it.next())
                             && let (Ok(n), Ok(d)) = (n.parse::<u32>(), d.parse::<u32>())
+                            && d > 0
                         {
                             edit_rate = Some((n, d));
                         }
@@ -184,7 +185,7 @@ fn parse_ov_cpl(cpl_path: &Path) -> Result<OvCpl, String> {
                         if let Some(kind) = seq_kind
                             && !cur_uuid.is_empty()
                         {
-                            resources.push(OvResource {
+                            resources.push(CplResource {
                                 kind,
                                 uuid: std::mem::take(&mut cur_uuid),
                                 duration: cur_dur,
@@ -198,16 +199,20 @@ fn parse_ov_cpl(cpl_path: &Path) -> Result<OvCpl, String> {
                 }
             }
             Ok(Event::Eof) => break,
-            Err(e) => return Err(format!("OV CPL parse error: {e}")),
+            Err(e) => return Err(format!("CPL parse error in {}: {e}", cpl_path.display())),
             _ => {}
         }
     }
 
-    let (fps_num, fps_den) = edit_rate.ok_or("OV CPL has no composition EditRate")?;
+    let (fps_num, fps_den) =
+        edit_rate.ok_or_else(|| format!("{} has no composition EditRate", cpl_path.display()))?;
     if resources.is_empty() {
-        return Err("OV CPL has no track-file resources".into());
+        return Err(format!(
+            "{} has no track-file resources",
+            cpl_path.display()
+        ));
     }
-    Ok(OvCpl {
+    Ok(CplResources {
         fps_num,
         fps_den,
         content_kind,
@@ -269,7 +274,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
     let Some(cpl) = cpls.first() else {
         return SupplementResult::fail(out, "no CPL found in OV IMP");
     };
-    let ov = match parse_ov_cpl(&opts.ov_dir.join(&cpl.file_path)) {
+    let ov = match parse_cpl_resources(&opts.ov_dir.join(&cpl.file_path)) {
         Ok(v) => v,
         Err(e) => return SupplementResult::fail(out, e),
     };
@@ -458,7 +463,7 @@ mod tests {
     fn parse_ov_reads_edit_rate_and_resources() {
         let dir = tempfile::tempdir().unwrap();
         write_ov(dir.path());
-        let ov = parse_ov_cpl(&dir.path().join("CPL_ov.xml")).unwrap();
+        let ov = parse_cpl_resources(&dir.path().join("CPL_ov.xml")).unwrap();
         assert_eq!((ov.fps_num, ov.fps_den), (24, 1));
         assert_eq!(ov.content_kind, "feature");
         assert_eq!(ov.resources.len(), 2);
