@@ -918,6 +918,10 @@ function finishedOutputDir() {
   return document.getElementById("post-build-actions")?.dataset.output;
 }
 
+function recentTitleFor(path) {
+  return getRecentProjects().find((r) => r.path === path)?.title;
+}
+
 function showPostBuildActions(outputDir) {
   const row = document.getElementById("post-build-actions");
   if (!row) return;
@@ -937,7 +941,7 @@ document.getElementById("post-build-play")?.addEventListener("click", () => {
 
 document.getElementById("post-build-queue")?.addEventListener("click", () => {
   const output = finishedOutputDir();
-  if (output) addToPlaylist(output);
+  if (output) addToPlaylist(output, recentTitleFor(output));
 });
 
 document.getElementById("post-build-inspect")?.addEventListener("click", () => {
@@ -1369,7 +1373,7 @@ function renderRecentProjects() {
   list.querySelectorAll('.recent-queue').forEach(el => {
     el.addEventListener('click', (event) => {
       event.stopPropagation();
-      addToPlaylist(el.dataset.path);
+      addToPlaylist(el.dataset.path, recentTitleFor(el.dataset.path));
       setStatus(`Queued: ${el.dataset.path}`);
     });
   });
