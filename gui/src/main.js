@@ -5,6 +5,7 @@ import { open as _open, confirm as tauriConfirm, message as tauriMessage } from 
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
+import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
 
@@ -934,6 +935,11 @@ document.getElementById("post-build-play")?.addEventListener("click", () => {
   if (output) previewBuiltPackage(output);
 });
 
+document.getElementById("post-build-queue")?.addEventListener("click", () => {
+  const output = finishedOutputDir();
+  if (output) addToPlaylist(output);
+});
+
 document.getElementById("post-build-inspect")?.addEventListener("click", () => {
   const output = finishedOutputDir();
   if (!output) return;
@@ -1355,10 +1361,18 @@ function renderRecentProjects() {
         <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
         <span class="recent-path">${r.path}</span>
       </div>
+      <button class="recent-queue" data-path="${r.path}" title="Add this IMP to the playlist">+</button>
       <button class="recent-retitle" data-path="${r.path}" title="Give this IMP a new content title">✎</button>
       <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
     </div>
   `).join('');
+  list.querySelectorAll('.recent-queue').forEach(el => {
+    el.addEventListener('click', (event) => {
+      event.stopPropagation();
+      addToPlaylist(el.dataset.path);
+      setStatus(`Queued: ${el.dataset.path}`);
+    });
+  });
   list.querySelectorAll('.recent-retitle').forEach(el => {
     el.addEventListener('click', async (event) => {
       event.stopPropagation();
@@ -1587,6 +1601,7 @@ renderRecentProjects();
 updateStatusStats();
 initPreview();
 initTimeline();
+initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 setStatus("Ready");
 
 // === Target Conversion (Scale/Crop/Letterbox) ===
