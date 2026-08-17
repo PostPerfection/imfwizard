@@ -9,20 +9,11 @@
 
 use std::path::{Path, PathBuf};
 
-use postkit::encode::{DecodeSource, InputType, detect_input_type, find_source_frames};
+use postkit::encode::{InputType, detect_input_type, find_source_frames};
 use postkit::picture_processing::{
-    Crop, Fit, PicturePlan, PictureProcessing, Rotation, detect_black_borders,
+    Crop, DEFAULT_AUTO_CROP_THRESHOLD, Fit, PicturePlan, PictureProcessing, Rotation, detect_crop,
+    fill_crop, require_one_crop_decider,
 };
-
-/// Frames `--auto-crop` measures before it unions their content rectangles.
-const AUTO_CROP_SAMPLE_COUNT: u32 = 8;
-
-/// Fraction of full scale a pixel stays under to count as border.
-pub const DEFAULT_AUTO_CROP_THRESHOLD: f32 = 0.1;
-
-/// Edit rate the auto-crop concat list holds each still at. Only the total
-/// duration it implies matters, since detection seeks through the list.
-const AUTO_CROP_LIST_FPS: u32 = 24;
 
 /// Every raster App 2E allows, as `--raster` spells them.
 const RASTER_SPELLINGS: &str = "1920x1080, 2048x1080, 3840x2160 or 4096x2160";
@@ -73,24 +64,7 @@ impl SourcePictureOptions {
     /// Refuse flags that contradict each other. Callers run this as they read
     /// the flags, so a contradiction is named before anything opens the source.
     pub fn check(&self) -> Result<(), String> {
-        let deciders: Vec<&str> = [
-            (
-                !self.crop.is_none(),
-                "--crop-left/--crop-right/--crop-top/--crop-bottom",
-            ),
-            (self.auto_crop, "--auto-crop"),
-            (self.fill_crop, "--fill-crop"),
-        ]
-        .into_iter()
-        .filter(|(given, _)| *given)
-        .map(|(_, name)| name)
-        .collect();
-        if deciders.len() > 1 {
-            return Err(format!(
-                "{} each decide the crop, so give only one of them",
-                deciders.join(" and ")
-            ));
-        }
+        require_one_crop_decider(!self.crop.is_none(), self.auto_crop, self.fill_crop)?;
         match self.raster {
             Some((width, height)) => require_app2e_raster(width, height),
             None => Ok(()),
@@ -142,13 +116,12 @@ pub fn resolve_picture(
             source_height,
         )?
     } else if options.fill_crop {
-        // the crop runs before the turn, so a quarter turn means filling the
-        // target's aspect the other way up
-        let (aspect_width, aspect_height) = match options.rotation {
-            Rotation::Clockwise90 | Rotation::CounterClockwise90 => (target_height, target_width),
-            Rotation::None | Rotation::Half => (target_width, target_height),
-        };
-        Crop::to_aspect(source_width, source_height, aspect_width, aspect_height)
+        fill_crop(
+            source_width,
+            source_height,
+            (target_width, target_height),
+            options.rotation,
+        )
     } else {
         options.crop
     };
@@ -212,31 +185,6 @@ pub fn source_raster(picture: &Path) -> Result<(u32, u32), String> {
     Ok((info.width, info.height))
 }
 
-/// Read a `--rotate` value: whole clockwise quarter turns.
-pub fn parse_rotation(value: &str) -> Result<Rotation, String> {
-    match value.trim() {
-        "0" => Ok(Rotation::None),
-        "90" => Ok(Rotation::Clockwise90),
-        "180" => Ok(Rotation::Half),
-        "270" => Ok(Rotation::CounterClockwise90),
-        _ => Err(format!(
-            "unknown rotation '{value}' (expected 90, 180 or 270, clockwise)"
-        )),
-    }
-}
-
-/// Read a `--flip` value into (horizontal, vertical).
-pub fn parse_flip(value: &str) -> Result<(bool, bool), String> {
-    match value.trim().to_lowercase().as_str() {
-        "horizontal" => Ok((true, false)),
-        "vertical" => Ok((false, true)),
-        "both" => Ok((true, true)),
-        _ => Err(format!(
-            "unknown flip '{value}' (expected horizontal, vertical or both)"
-        )),
-    }
-}
-
 /// Read a `--raster` value, which has to be one of the App 2E rasters.
 pub fn parse_raster(value: &str) -> Result<(u32, u32), String> {
     let unreadable = || {
@@ -259,67 +207,6 @@ fn require_app2e_raster(width: u32, height: u32) -> Result<(), String> {
     Err(format!(
         "raster {width}x{height} is not one App 2E allows: pick {RASTER_SPELLINGS}"
     ))
-}
-
-/// Measure the black borders of a source, taking an image sequence through a
-/// concat list so cropdetect sees the same stream the encode will.
-fn detect_crop(
-    source: &Path,
-    threshold: f32,
-    is_image_sequence: bool,
-    source_width: u32,
-    source_height: u32,
-) -> Result<Crop, String> {
-    if !(0.0..=1.0).contains(&threshold) {
-        return Err(format!(
-            "black threshold {threshold} is outside 0..1, where 0.1 is the usual value"
-        ));
-    }
-    let detected = if is_image_sequence {
-        let directory = if source.is_dir() {
-            source.to_path_buf()
-        } else {
-            source.parent().unwrap_or(source).to_path_buf()
-        };
-        let frames = find_source_frames(&directory)
-            .map_err(|error| format!("cannot list {}: {error}", directory.display()))?;
-        if frames.is_empty() {
-            return Err(format!("no images in {}", directory.display()));
-        }
-        let list = std::env::temp_dir().join(format!(
-            "imfwizard-auto-crop-{}.ffconcat",
-            std::process::id()
-        ));
-        postkit::encode::write_image_concat_list(
-            &frames,
-            postkit::encode::FrameRate::whole(AUTO_CROP_LIST_FPS),
-            &list,
-        )?;
-        let detected = detect_black_borders(
-            &list,
-            DecodeSource::ImageList,
-            threshold,
-            AUTO_CROP_SAMPLE_COUNT,
-        );
-        let _ = std::fs::remove_file(&list);
-        detected?
-    } else {
-        detect_black_borders(
-            source,
-            DecodeSource::Video,
-            threshold,
-            AUTO_CROP_SAMPLE_COUNT,
-        )?
-    };
-    if detected.left + detected.right >= source_width
-        || detected.top + detected.bottom >= source_height
-    {
-        return Err(format!(
-            "black border detection found no picture in {}: it is black at a threshold of {threshold}",
-            source.display()
-        ));
-    }
-    Ok(detected)
 }
 
 fn first_frame(directory: &Path) -> Result<PathBuf, String> {
@@ -494,19 +381,6 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.contains("leaves nothing"), "{error}");
-    }
-
-    #[test]
-    fn the_rotation_and_flip_spellings_are_the_ones_the_help_names() {
-        assert_eq!(parse_rotation("90"), Ok(Rotation::Clockwise90));
-        assert_eq!(parse_rotation("180"), Ok(Rotation::Half));
-        assert_eq!(parse_rotation("270"), Ok(Rotation::CounterClockwise90));
-        assert!(parse_rotation("45").unwrap_err().contains("45"));
-
-        assert_eq!(parse_flip("horizontal"), Ok((true, false)));
-        assert_eq!(parse_flip("Vertical"), Ok((false, true)));
-        assert_eq!(parse_flip("both"), Ok((true, true)));
-        assert!(parse_flip("sideways").unwrap_err().contains("sideways"));
     }
 
     #[test]

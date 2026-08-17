@@ -773,7 +773,7 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
 
     // 3 seconds of hold over cues at 0-1s and 2-3s: the picture changes at
     // frames 24, 48 and 72, so four distinct frames are encoded.
-    let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
+    let held = output.join(postkit::still::HELD_PICTURE_DIR);
     let frame = |index: u64| std::fs::read(held.join(format!("frame_{index:08}.j2c"))).unwrap();
     assert_eq!(
         (0..72u64)

@@ -185,15 +185,13 @@ impl PictureArguments {
             .rotate
             .as_deref()
             .map(|value| {
-                imfwizard_core::source_picture::parse_rotation(value).unwrap_or_else(|e| fail(e))
+                postkit::picture_processing::parse_rotation(value).unwrap_or_else(|e| fail(e))
             })
             .unwrap_or_default();
         let (flip_horizontal, flip_vertical) = self
             .flip
             .as_deref()
-            .map(|value| {
-                imfwizard_core::source_picture::parse_flip(value).unwrap_or_else(|e| fail(e))
-            })
+            .map(|value| postkit::picture_processing::parse_flip(value).unwrap_or_else(|e| fail(e)))
             .unwrap_or((false, false));
         let options = imfwizard_core::source_picture::SourcePictureOptions {
             crop: postkit::picture_processing::Crop {
@@ -205,7 +203,7 @@ impl PictureArguments {
             auto_crop: self.auto_crop,
             auto_crop_threshold: self
                 .auto_crop_threshold
-                .unwrap_or(imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD),
+                .unwrap_or(postkit::picture_processing::DEFAULT_AUTO_CROP_THRESHOLD),
             fill_crop: self.fill_crop,
             deinterlace: self.deinterlace,
             denoise: self.denoise,
@@ -1582,7 +1580,7 @@ fn run() {
             let still_input = video
                 .as_deref()
                 .map(PathBuf::from)
-                .filter(|p| imfwizard_core::still::is_still_image(p));
+                .filter(|p| postkit::still::is_still_image(p));
             match (&still_input, still_frames) {
                 (None, Some(_)) => fail(
                     "--still-length needs --video to name a single image file (dpx, tif, exr, png or bmp)",
@@ -1685,15 +1683,16 @@ fn run() {
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
                 let fps = imfwizard_core::encode::FrameRate::new(fps_num, fps_den);
-                let held = output.join(imfwizard_core::still::HELD_PICTURE_DIR);
-                imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
+                let held = output.join(postkit::still::HELD_PICTURE_DIR);
+                postkit::still::build_still_frames(&postkit::still::StillHold {
                     image,
                     frames: hold_for,
                     fps,
                     width: picture.encode_width,
                     height: picture.encode_height,
                     filters: &picture.plan.filters,
-                    source_colour: &source_colour,
+                    apply_xyz_transform: source_colour.applies_xyz_transform(),
+                    colour_transform: None,
                     burn: build_subtitle_burn(fps),
                     out_dir: &held,
                 })

@@ -125,12 +125,12 @@ impl SourceSettings {
     /// Read the picture fields into the shared options.
     fn picture(&self) -> Result<imfwizard_core::source_picture::SourcePictureOptions, String> {
         let rotation = match self.rotate.as_deref().filter(|value| !value.is_empty()) {
-            Some(value) => imfwizard_core::source_picture::parse_rotation(value)?,
+            Some(value) => postkit::picture_processing::parse_rotation(value)?,
             None => postkit::picture_processing::Rotation::None,
         };
         let (flip_horizontal, flip_vertical) =
             match self.flip.as_deref().filter(|value| !value.is_empty()) {
-                Some(value) => imfwizard_core::source_picture::parse_flip(value)?,
+                Some(value) => postkit::picture_processing::parse_flip(value)?,
                 None => (false, false),
             };
         let raster = match self.raster.as_deref().filter(|value| !value.is_empty()) {
@@ -145,7 +145,7 @@ impl SourceSettings {
                 bottom: self.crop_bottom,
             },
             auto_crop: false,
-            auto_crop_threshold: imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD,
+            auto_crop_threshold: postkit::picture_processing::DEFAULT_AUTO_CROP_THRESHOLD,
             fill_crop: self.fill_crop,
             deinterlace: self.deinterlace,
             denoise: self.denoise,
@@ -382,10 +382,7 @@ pub async fn submit_job(
                 composition.title
             ));
         }
-        match (
-            imfwizard_core::still::is_still_image(&picture),
-            still_frames,
-        ) {
+        match (postkit::still::is_still_image(&picture), still_frames) {
             (false, Some(_)) => {
                 return Err(format!(
                     "{} is a video or a frame directory, so a still length has nothing to hold",
@@ -506,7 +503,7 @@ pub async fn detect_source_crop(
     let options = imfwizard_core::source_picture::SourcePictureOptions {
         auto_crop: true,
         auto_crop_threshold: threshold
-            .unwrap_or(imfwizard_core::source_picture::DEFAULT_AUTO_CROP_THRESHOLD),
+            .unwrap_or(postkit::picture_processing::DEFAULT_AUTO_CROP_THRESHOLD),
         ..Default::default()
     };
     let resolved = imfwizard_core::source_picture::resolve_picture(
@@ -617,8 +614,8 @@ pub async fn disk_space(path: String) -> Result<DiskSpace, String> {
             None => return Err(format!("no existing folder above {path}")),
         }
     }
-    let stats = fs4::statvfs(&dir).map_err(|e| format!("Could not read free space: {e}"))?;
-    let (free, total) = (stats.available_space(), stats.total_space());
+    let (free, total) = postkit::free_space::volume_bytes(&dir)
+        .map_err(|e| format!("Could not read free space: {e}"))?;
     Ok(DiskSpace {
         free_bytes: free,
         total_bytes: total,
@@ -1002,15 +999,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 let plan = picture
                     .as_ref()
                     .ok_or_else(|| format!("cannot read the size of {}", video_path.display()))?;
-                let held = enc_dir.join(imfwizard_core::still::HELD_PICTURE_DIR);
-                imfwizard_core::still::build_still_frames(&imfwizard_core::still::StillHold {
+                let held = enc_dir.join(postkit::still::HELD_PICTURE_DIR);
+                postkit::still::build_still_frames(&postkit::still::StillHold {
                     image: &video_path,
                     frames: hold_for,
                     fps: encode_fps,
                     width: plan.encode_width,
                     height: plan.encode_height,
                     filters: &plan.plan.filters,
-                    source_colour: &job.source_colour,
+                    apply_xyz_transform: job.source_colour.applies_xyz_transform(),
+                    colour_transform: None,
                     burn: subtitle_burn.clone(),
                     out_dir: &held,
                 })?;
