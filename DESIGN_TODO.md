@@ -130,10 +130,9 @@ order `create` builds its sources in.
 - From the Storm DCP Studio survey (2026-08-16, full write-up and the DCP-only
   items in dcpwizard's DESIGN_TODO): a codestream forensics section in the QC
   report (decomp levels, precincts, tile-parts, POC, MCT, worst frame vs cap).
-  `report` asks dcpdoctor for it with `scan_every_frame`, which the DCP verify
-  path reads and the IMF one does not, so an IMP's report carries the measured
-  picture bitrate `check_picture_details` gives and no forensics line until
-  dcpdoctor's IMF path runs the codestream scan too. The playback overlays (safe
+  `report` asks dcpdoctor for it with `scan_every_frame`, and since dcpdoctor
+  d13e0cd the IMF path scans AS-02 picture tracks too, so the
+  `j2k_codestream_summary` line reaches an IMP's report. The playback overlays (safe
   area, aspect mask, centre cross, thirds grid), the decode resolution control
   (full/half/quarter through the J2K decoder's `lowres`), the player HUD
   (frame, fps, buffer depth, dropped frames), the crop overlay and the
