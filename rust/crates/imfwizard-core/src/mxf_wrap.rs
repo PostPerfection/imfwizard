@@ -114,6 +114,7 @@ fn delegate(
         resource_ids: vec![],
         hdr: opts.hdr.clone(),
         asset_uuid: opts.asset_uuid,
+        timed_text_duration_frames: None,
     });
 
     if !pk.success {

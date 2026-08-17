@@ -132,6 +132,7 @@ fn build_dcp(
         resource_ids: vec![],
         hdr: None,
         asset_uuid: None,
+        timed_text_duration_frames: None,
     });
     if !wrapped.success {
         return Err(format!(
@@ -169,6 +170,7 @@ fn build_dcp(
             resource_ids: vec![],
             hdr: None,
             asset_uuid: None,
+            timed_text_duration_frames: None,
         });
         if !wrapped.success {
             return Err(format!(
