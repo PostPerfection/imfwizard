@@ -141,11 +141,9 @@ order `create` builds its sources in.
   in the running window. The CLI did
   have dcpwizard's missing-bitrate-flag hole and `create --bitrate <Mbps>`
   closes it. The post-build Play/Inspect/Reveal buttons and the per-stage
-  `[TIMING]` lines in the job log are done. What the timings do not give is the
-  breakdown inside an encode, colour convert against frame prep against the J2K
-  encode itself: postkit's `PipelineProgress` carries a stage name, a frame
-  count and an elapsed clock, and nothing that separates the three, so it would
-  take a wider progress payload from postkit first.
+  `[TIMING]` lines in the job log are done, and each composition's encode line
+  is followed by a breakdown of decoder wait, frame prep, J2K and write off the
+  phase clocks postkit's `PipelineProgress` now carries.
   Preview subtitles are done on both sides: the Sub button carries the
   composition's timed text written out as SRT before a build, and the timed text
   unwrapped out of the packaged AS-02 track file after one.

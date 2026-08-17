@@ -50,14 +50,15 @@ fn encode_picture(
     output_dir: &std::path::Path,
     options: &postkit::pipeline::EncodeRunOptions,
 ) -> Result<postkit::pipeline::EncodeResult, String> {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
     let cancel = Arc::new(AtomicBool::new(false));
     let pause = Arc::new(AtomicBool::new(false));
     let on_interrupt = cancel.clone();
     let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
 
+    let phase_breakdown: Mutex<Option<String>> = Mutex::new(None);
     let result = postkit::pipeline::run_encode_with_options(
         input,
         output_dir,
@@ -69,11 +70,26 @@ fn encode_picture(
                 "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
                 p.frame, p.total_frames, p.percent, p.fps
             );
+            if measured_any_phase(p) {
+                *phase_breakdown.lock().unwrap() = Some(p.phase_breakdown());
+            }
         },
         |msg: &str| tracing::info!("{msg}"),
     );
     eprintln!();
+    if let Some(breakdown) = phase_breakdown.lock().unwrap().as_deref() {
+        tracing::info!("Encode breakdown: {breakdown}");
+    }
     result
+}
+
+/// Whether an encode timed anything. A still or an image sequence handed
+/// straight to grk_compress reports four zeros.
+fn measured_any_phase(progress: &postkit::pipeline::PipelineProgress) -> bool {
+    progress.decode_wait_secs > 0.0
+        || progress.prepare_secs > 0.0
+        || progress.encode_secs > 0.0
+        || progress.write_secs > 0.0
 }
 
 /// What `create` does to the source picture before it is compressed. Boxed
