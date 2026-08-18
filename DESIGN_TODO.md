@@ -49,6 +49,17 @@ is nothing imf-specific beyond bumping the pin.
   host yet, so the preview is unavailable there rather than opening a separate
   mpv window.
 
+## Open: a full GUI pass has never been done (2026-08-17)
+
+Every imfwizard GUI feature so far was verified through tests and dcpwizard's
+click-throughs; nobody has walked this app's own GUI end to end by hand. Owed
+alongside the shared re-verification: the QC overlays drawn at and across end
+of file without freezing and without a frame-rate hit (watch the HUD decoder
+fps), the playlist fixes live (clearing rows stops or clears the preview when
+the queue owns it, one advance per end of file), and the transport bar tracking
+live during playback after postkit's non-blocking render fix (its DESIGN_TODO
+has the entry).
+
 ## Open: preview transport controls beyond play/pause (2026-08-17)
 
 The transport bar has only play/pause, a scrubber and the timecodes. Wanted: a
