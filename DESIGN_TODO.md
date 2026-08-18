@@ -49,6 +49,18 @@ is nothing imf-specific beyond bumping the pin.
   host yet, so the preview is unavailable there rather than opening a separate
   mpv window.
 
+## Open: preview transport controls beyond play/pause (2026-08-17)
+
+The transport bar has only play/pause, a scrubber and the timecodes. Wanted: a
+to-start button, skip back/forward buttons (the seconds ArrowLeft/ArrowRight
+already seek), and single-frame stepping. Frame stepping is mpv's `frame-step`
+and `frame-back-step` commands, which need two new guikit preview commands each
+wizard registers in its src-tauri handler list. The buttons go in
+`#global-transport` in `gui/index.html` beside the play button and are wired by
+id in guikit's `preview.js`; the shortcut list in `gui/src/main.js` gains `,`
+and `.` for the frame steps. Shared with dcpwizard through guikit; the markup
+and shortcut registrations are per wizard.
+
 ## Open: five source colour spaces have no transform (2026-08-16)
 
 `create --source-colourspace` takes all seven of postkit's `ColourSpace` values,
