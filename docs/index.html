@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IMF Wizard: IMF Packages for Streaming Deliveries</title>
-    <meta name="description" content="Build validated IMF packages for streaming deliveries to Netflix, Disney+, Amazon, and Apple. Free, open-source desktop app and command-line tool.">
+    <meta name="description" content="Build validated IMF App 2E packages for streaming deliveries to Netflix, Disney+, Amazon, and Apple. Crop, burn subtitles, preview, and QC. Free, open-source desktop app and command-line tool.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -380,6 +380,7 @@
             IMF Wizard
         </a>
         <ul class="nav-links">
+            <li><a href="https://postperfection.github.io/">Suite</a></li>
             <li><a href="#download">Download</a></li>
             <li><a href="#features">Features</a></li>
             <li><a href="#compare">Compare</a></li>
@@ -440,12 +441,12 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">📦</div>
             <h3>Create IMF App 2E packages</h3>
-            <p>Turn a finished master, ProRes file, image sequence, or J2K frames into a standards-compliant IMF App 2E package. Incompatible picture sizes are caught before packaging, not after upload.</p>
+            <p>Turn a finished master, ProRes file, image sequence, or J2K frames into a standards-compliant IMF App 2E package. Illegal rasters and other refusals fail before the encode, not after an hour of JPEG 2000.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">⚡</div>
             <h3>Delivery presets</h3>
-            <p>One choice sets the right bitrate and constraints for Netflix, Disney+, Amazon, Apple, HBO, broadcast, and archival, so you're not cross-checking spec sheets by hand.</p>
+            <p>One choice sets the right bitrate and constraints for Netflix, Disney+, Amazon, Apple, HBO, broadcast, and archival, so you're not cross-checking spec sheets by hand. Or name a bitrate directly.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
@@ -457,6 +458,16 @@
             <h3>IMF to DCP</h3>
             <p>Rewrap a single-composition package into a Digital Cinema Package for theatrical, without re-encoding the picture from scratch.</p>
         </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(74,222,128,0.15);">✅</div>
+            <h3>Pre-build check</h3>
+            <p>Every refusal create can make, plus advisory hints (true peak, first cue too early, line length), runs before anything encodes. The CLI stops without writing. The GUI shows a dialog you can build through.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(251,113,133,0.15);">✂️</div>
+            <h3>Crop, trim, and stills</h3>
+            <p>Crop, auto-crop, fill, deinterlace, denoise, rotate, and flip on the way in, then fit the result into an App 2E raster. Trim head and tail, hold a still for a duration, or shift the sound against the picture.</p>
+        </div>
     </div>
 
     <h3 class="group-title">Subtitles and accessibility</h3>
@@ -464,12 +475,26 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">📝</div>
             <h3>TTML and IMSC subtitles</h3>
-            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS, FCPXML, and MKS keep their styling and placement in the output.</p>
+            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS, FCPXML, and MKS keep their styling and placement. Burn the same cues into the picture as it encodes when you need a burnt master.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,164,175,0.15);">🗣️</div>
             <h3>Audio description tracks</h3>
-            <p>Mix an AD narration track against the main mix with automatic ducking, so dialogue and description stay balanced for accessibility deliveries.</p>
+            <p>Mix an AD narration track against the main mix with automatic ducking, or package an AD or HI track with the MCA labels streamers expect. Map and mix source channels into named lanes before they are labelled.</p>
+        </div>
+    </div>
+
+    <h3 class="group-title">Preview before it ships</h3>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(167,139,250,0.15);">▶️</div>
+            <h3>Source and package preview</h3>
+            <p>Play the source or the finished IMP in the app. Crop bands follow the Picture panel, Sub loads the packaged timed text, and the header carries a safe-area box, an aspect mask, a centre cross, a thirds grid, decode scale, and a HUD.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(34,211,238,0.15);">📋</div>
+            <h3>Play, inspect, queue</h3>
+            <p>A finished build offers Play, Inspect (the Validate view, already running), and Reveal. Queue packages from Recent Projects or a finished build and they play one after another. Retitle a written IMP without re-wrapping essence.</p>
         </div>
     </div>
 
@@ -502,7 +527,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(129,140,248,0.15);">✅</div>
             <h3>Validation and QC reports</h3>
-            <p>Check package structure, signatures, and XML schemas, run Netflix Photon checks, and export a QC report as text, JSON, or HTML to send with the delivery.</p>
+            <p>Check package structure, signatures, and XML schemas, run Netflix Photon checks, and export a QC report as text, JSON, or HTML. The report reads the picture essence, including JPEG 2000 forensics and measured bitrate.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">🔐</div>
@@ -512,7 +537,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">📂</div>
             <h3>Watch folders</h3>
-            <p>Point it at an incoming folder and let deliveries build themselves as files land.</p>
+            <p>Point it at an incoming folder and print a line for every filesystem event, so a script or farm can kick off the next step.</p>
         </div>
     </div>
 </section>
@@ -543,7 +568,8 @@
             <tr><td>Dolby Vision packaging</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>TTML / IMSC subtitles</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Subtitle burn-in</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Subtitle burn-in during encode</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Preview playback with QC overlays</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard advantages</td></tr>
             <tr><td>HDR10+ metadata packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
@@ -552,11 +578,11 @@
             <tr><td>Supplemental packages for re-deliveries</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Watch folders</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>IMF-to-DCP conversion</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>Pre-build check and delivery hints</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Linux support</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Free and open source (AGPL)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td colspan="3" style="color:var(--text-tertiary);font-weight:700;padding-top:20px;">easyDCP exclusives</td></tr>
             <tr><td>GPU acceleration</td><td class="no">Planned</td><td class="yes">&#10003; (Windows)</td></tr>
-            <tr><td>Real-time IMF playback</td><td class="no">Planned</td><td class="yes">&#10003;</td></tr>
         </tbody>
     </table>
     </div>
@@ -568,17 +594,20 @@
 
     <div class="code-block">
         <code>
+<span class="comment"># Raise every refusal and hint before committing to the encode</span><br>
+<span class="cmd">$</span> imfwizard create <span class="flag">--title</span> <span class="val">"My Feature"</span> <span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--check</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
+<br>
 <span class="comment"># Build a Netflix delivery from a finished master</span><br>
 <span class="cmd">$</span> imfwizard create \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--title</span> <span class="val">"My Feature"</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--audio</span> <span class="val">mix.wav</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--profile</span> <span class="val">netflix</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
 <br>
-<span class="comment"># Auto-build packages as files land in an incoming folder</span><br>
+<span class="comment"># Print filesystem events as files land in an incoming folder</span><br>
 <span class="cmd">$</span> imfwizard watch <span class="val">/incoming/</span><br>
 <br>
 <span class="comment"># Serve the REST API for a render farm or pipeline</span><br>
-<span class="cmd">$</span> imfwizard rest-api <span class="flag">--bind</span> <span class="val">0.0.0.0:9090</span>
+<span class="cmd">$</span> imfwizard serve <span class="flag">--bind</span> <span class="val">0.0.0.0:9090</span>
         </code>
     </div>
 </section>
@@ -612,7 +641,7 @@
 </section>
 
 <footer>
-    <p>&copy; 2026 Grok Image Compression Inc. &middot; Licensed under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL-3.0</a>. Built by <a href="https://github.com/PostPerfection">PostPerfection</a>.</p>
+    <p>&copy; 2026 Grok Image Compression Inc. &middot; Licensed under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL-3.0</a>. Part of the <a href="https://postperfection.github.io/">PostPerfection</a> suite.</p>
 </footer>
 
 </body>
