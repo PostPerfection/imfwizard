@@ -169,7 +169,7 @@ fn base64_digest_from_hex(hex: &str) -> Result<String, String> {
         ));
     }
     let mut digest = [0u8; SHA1_DIGEST_BYTES];
-    for (byte, pair) in digest.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+    for (byte, pair) in digest.iter_mut().zip(hex.as_bytes().as_chunks::<2>().0) {
         let (Some(high), Some(low)) = (hex_nibble(pair[0]), hex_nibble(pair[1])) else {
             return Err(format!("not hexadecimal: {hex}"));
         };
