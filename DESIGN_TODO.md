@@ -60,18 +60,6 @@ the queue owns it, one advance per end of file), and the transport bar tracking
 live during playback after postkit's non-blocking render fix (its DESIGN_TODO
 has the entry).
 
-## Open: preview transport controls beyond play/pause (2026-08-17)
-
-The transport bar has only play/pause, a scrubber and the timecodes. Wanted: a
-to-start button, skip back/forward buttons (the seconds ArrowLeft/ArrowRight
-already seek), and single-frame stepping. Frame stepping is mpv's `frame-step`
-and `frame-back-step` commands, which need two new guikit preview commands each
-wizard registers in its src-tauri handler list. The buttons go in
-`#global-transport` in `gui/index.html` beside the play button and are wired by
-id in guikit's `preview.js`; the shortcut list in `gui/src/main.js` gains `,`
-and `.` for the frame steps. Shared with dcpwizard through guikit; the markup
-and shortcut registrations are per wizard.
-
 ## Open: five source colour spaces have no transform (2026-08-16)
 
 `create --source-colourspace` takes all seven of postkit's `ColourSpace` values,
@@ -188,6 +176,19 @@ the 32-character caption rules have nothing to run on.
 # Done
 
 ## 2026-08-26
+
+### Preview transport controls beyond play/pause
+
+Shared with dcpwizard through guikit. The transport bar gained a to-start button, skip back and skip forward
+buttons and single-frame step buttons either side of play, with `,` and `.` as
+the frame-step shortcuts. Frame stepping is mpv's `frame-step` and
+`frame-back-step`, sent by guikit's `preview_frame_step` and
+`preview_frame_back_step` commands, which each wizard registers. guikit's
+`preview.js` wires the buttons by id and owns `PREVIEW_SEEK_SECONDS`, so the
+skip buttons and the ArrowLeft/ArrowRight shortcuts move by the same amount.
+guikit tests the buttons against a stubbed tauri bridge and the two frame steps
+on a real libmpv player. Not yet clicked through in a running window, which
+belongs to the GUI pass already owed.
 
 ### --audio-map reaches the track demuxed from --video
 
