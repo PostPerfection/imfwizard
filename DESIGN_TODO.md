@@ -98,11 +98,6 @@ repos plus postkit, not an imfwizard-only fix.
 
 ## Open: smaller gaps in the source edits (2026-08-16)
 
-- PK wav_io round-trips samples through normalised f32, so 32-bit int PCM is not
-  bit-exact through audio delay or trim; 16-bit, 24-bit and float are. The fix is
-  postkit's WAV read/write path, queued to land with the next postkit pass so both
-  wizards bump pins once.
-
 - Trim happens after the encode, since `postkit::pipeline` takes no frame range.
   Trimming five minutes out of a two-hour source still encodes the two hours.
   A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
@@ -210,6 +205,16 @@ file, or the source carrying no audio stream, where before it packaged silently
 with the map applied to nothing. Without `--audio-map` a soundless video still
 packages picture-only. The GUI never demuxes from `--video`, so its own guard is
 correct and stays.
+
+### 32-bit int PCM is bit-exact through delay and trim
+
+Also stale. `apply_audio_delay` and `trim_wav` read and write through
+`postkit::wav_io::read_interleaved_exact` / `write_interleaved_exact`, which keep
+the file's own sample type instead of the normalised f32 the note described, and
+both copy the kept window untouched.
+`a_delay_and_a_trim_together_are_bit_exact_for_32_bit_int_pcm` runs a 32-bit int
+WAV through both edits at once and asserts every surviving sample against the
+source, beside the delay-only test that was already there.
 
 ## Fixed 2026-08-17 (the picture MXF is written while the encode runs)
 

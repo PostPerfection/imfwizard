@@ -859,6 +859,42 @@ mod tests {
         );
     }
 
+    /// Both edits run over the same file when a composition carries a delay and
+    /// a trim, so the pair has to be bit-exact where the delay alone is.
+    #[test]
+    fn a_delay_and_a_trim_together_are_bit_exact_for_32_bit_int_pcm() {
+        use postkit::wav_io::Samples;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i32.wav");
+        let samples: Vec<i32> = (0..96_000i32)
+            .map(|i| i.wrapping_mul(2_654_435_761u32 as i32))
+            .collect();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Int,
+        };
+        postkit::wav_io::write_interleaved_exact(&path, spec, &Samples::Int(samples.clone()))
+            .unwrap();
+
+        let edits = SourceEdits {
+            audio_delay_ms: 100,
+            trim_start_frames: 24,
+            trim_end_frames: 12,
+        };
+        let edited = edit_one_wav(&path, 0, &edits, dir.path(), 24.0).unwrap();
+
+        let (edited_spec, edited_samples) =
+            postkit::wav_io::read_interleaved_exact(&edited).unwrap();
+        let Samples::Int(edited_samples) = edited_samples else {
+            panic!("32-bit int in must come back out as int");
+        };
+        assert_eq!(edited_spec.bits_per_sample, 32);
+        // 100 ms later then a second off the head and half a second off the tail
+        assert_eq!(edited_samples, samples[43_200..67_200]);
+    }
+
     #[test]
     fn a_delay_keeps_the_sample_count_identical() {
         let dir = tempfile::tempdir().unwrap();
