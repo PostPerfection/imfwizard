@@ -1230,23 +1230,43 @@ document.getElementById("del-start")?.addEventListener("click", async () => {
 // === Jobs ===
 let jobsPollInterval = null;
 
+const JOBS_TABLE_COLUMNS = 5;
+const CANCELLABLE_JOB_STATES = ["running", "queued"];
+
+function escapeHtml(text) {
+  const replacements = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+  return String(text).replace(/[&<>"]/g, ch => replacements[ch]);
+}
+
+function jobRow({ id, title, state, progress, message }) {
+  const cancel = CANCELLABLE_JOB_STATES.includes(state)
+    ? `<button class="btn-sm btn-cancel" data-job-id="${id}">✕</button>`
+    : "";
+  const rowTitle = message ? ` title="${escapeHtml(message)}"` : "";
+  return `<tr${rowTitle}><td>${id}</td><td>${escapeHtml(title)}</td>` +
+    `<td>${state}</td><td>${progress}</td><td>${cancel}</td></tr>`;
+}
+
 async function refreshJobs() {
   const badge = document.getElementById("jobs-status");
+  const tbody = document.getElementById("jobs-tbody");
+  if (!tbody) return;
   try {
     const jobs = await invoke("list_jobs");
     badge.textContent = "Active";
-    const tbody = document.getElementById("jobs-tbody");
-    if (!jobs || jobs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">No jobs</td></tr>';
-      return;
-    }
-    tbody.innerHTML = jobs.map(j => {
-      return `<tr><td>${j.id}</td><td>${j.title}</td><td>${j.status}</td><td>${j.percent.toFixed(0)}%</td>
-        <td>${(j.status === "running" || j.status === "queued") ? `<button class="btn-sm btn-cancel" data-job-id="${j.id}">✕</button>` : ''}</td></tr>`;
-    }).join('');
+    const rows = jobs.map(job => jobRow({
+      id: job.id,
+      title: job.title,
+      state: job.status,
+      progress: job.percent > 0 ? `${Math.round(job.percent)}%` : "",
+      message: job.message,
+    }));
+    tbody.innerHTML = rows.length
+      ? rows.join("")
+      : `<tr><td colspan="${JOBS_TABLE_COLUMNS}" style="text-align:center">No jobs</td></tr>`;
     tbody.querySelectorAll(".btn-cancel").forEach(btn => {
       btn.addEventListener("click", async () => {
-        await invoke("cancel_job", { jobId: parseInt(btn.dataset.jobId) });
+        await invoke("cancel_job", { jobId: Number(btn.dataset.jobId) });
         refreshJobs();
       });
     });

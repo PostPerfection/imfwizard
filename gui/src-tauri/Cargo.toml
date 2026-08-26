@@ -28,6 +28,9 @@ postkit = { path = "../../extern/postkit" }
 imfwizard-core = { path = "../../rust/crates/imfwizard-core" }
 guikit = { path = "../../extern/guikit/rust" }
 
+[dev-dependencies]
+tempfile = "3"
+
 # imfwizard-core pulls dcpdoctor-core, which depends on postkit by git. pointing
 # that at the submodule this build already compiles keeps postkit to one compile.
 [patch."https://github.com/PostPerfection/postkit.git"]

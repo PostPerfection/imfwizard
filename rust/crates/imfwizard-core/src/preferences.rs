@@ -106,42 +106,7 @@ impl Default for Preferences {
 
 /// Get the platform-specific preferences file path.
 pub fn preferences_path() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            return PathBuf::from(appdata)
-                .join("imfwizard")
-                .join("preferences.json");
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("imfwizard")
-                .join("preferences.json");
-        }
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            return PathBuf::from(xdg)
-                .join("imfwizard")
-                .join("preferences.json");
-        }
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home)
-                .join(".config")
-                .join("imfwizard")
-                .join("preferences.json");
-        }
-    }
-
-    PathBuf::from("preferences.json")
+    crate::store::data_dir().join("preferences.json")
 }
 
 /// Load preferences from disk. Returns defaults if file doesn't exist.

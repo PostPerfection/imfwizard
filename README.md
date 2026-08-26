@@ -109,7 +109,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
 - **Post-build actions**, a finished build offers Play (the new IMP in the embedded preview), Inspect (the Validate view, already pointed at the output and running) and Reveal (the output folder in the file manager), beside the progress bar. Starting another build clears the row
 - **Per-stage timings in the job log**, `[TIMING]` lines next to the stage's own log lines giving probe, encode, audio map, source edits and packaging time per composition, plus the total
-- **Job queue manager**, submit, monitor, cancel background jobs
+- **Job queue manager**, submit, monitor, cancel background jobs. The queue is written to `~/.config/imfwizard/gui-jobs.jsonl`, one JSON line per job on submit and on every state change, and read back on start, so closing the window does not lose queued jobs. A job left running when the app closed is listed failed. `$IMFWIZARD_JOBS_FILE` points a second app at another file
 - **Progress notifications**, system notifications when jobs complete
 - **Recent projects**, quick access to previously created IMPs
 
