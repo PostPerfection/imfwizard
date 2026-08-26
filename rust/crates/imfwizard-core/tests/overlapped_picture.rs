@@ -80,7 +80,6 @@ fn a_video_create_wraps_its_picture_during_the_encode() {
         overlap_refusal(&PictureJob {
             input_type: postkit::encode::detect_input_type(&video),
             still_hold: false,
-            trims_picture: false,
         }),
         None
     );

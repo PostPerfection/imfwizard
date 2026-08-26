@@ -975,7 +975,6 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             &imfwizard_core::overlapped_picture::PictureJob {
                 input_type,
                 still_hold: job.still_frames.is_some(),
-                trims_picture: job.edits.trims(),
             },
         );
         let wrap_target = match overlap_refusal {
@@ -993,6 +992,25 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 hdr: None,
             }),
         };
+        // a trimmed video encodes the kept window only, so the frames the trim
+        // drops are never compressed
+        let encode_window = imfwizard_core::source_edits::trimmed_encode_window(
+            &job.edits,
+            &video_path,
+            input_type,
+            job.fps_num,
+            job.fps_den,
+        )?;
+        if let Some(window) = encode_window {
+            log_to(
+                &log_file,
+                &format!(
+                    "[ENCODE] Encoding frames {}..{} only",
+                    window.first_frame,
+                    window.end_frame()
+                ),
+            );
+        }
         let mut picture_mxf = None;
         let picture_dir = match job.still_frames {
             Some(hold_for) => {
@@ -1025,6 +1043,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 let encode_options = postkit::pipeline::EncodeRunOptions {
                     compression_ratio,
                     fps: encode_fps,
+                    frame_range: encode_window,
                     source_colour: job.source_colour.clone(),
                     subtitle_burn: subtitle_burn.clone(),
                     picture: picture
@@ -1137,6 +1156,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             &enc_dir,
             job.fps_num,
             job.fps_den,
+            encode_window,
         )?;
         log_to(
             &log_file,

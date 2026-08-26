@@ -62,10 +62,6 @@ same gap, so that half is a coordinated change with postkit.
 
 ## Open: smaller gaps in the source edits (2026-08-16)
 
-- Trim happens after the encode, since `postkit::pipeline` takes no frame range.
-  Trimming five minutes out of a two-hour source still encodes the two hours.
-  A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
-  postkit.
 - GPU J2K encoding. easyDCP and DCP-o-matic both offer GPU/CUDA acceleration;
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok

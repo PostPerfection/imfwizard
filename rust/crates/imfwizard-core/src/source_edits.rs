@@ -1,10 +1,15 @@
-//! Head/tail trim and audio delay, applied to a composition's source between
-//! the J2K encode and packaging.
+//! Head/tail trim and audio delay, applied to a composition's source.
+//!
+//! A video's picture trim is a window on the encode itself, so only the kept
+//! frames are ever compressed. Every other source encodes whole and has its kept
+//! codestreams linked into a new directory afterwards. Sound and timed text are
+//! always edited after the encode.
 //!
 //! The delay lands before the trim: it says how the sound lines up with the
 //! picture, and the trim then cuts a range out of the aligned programme. Running
 //! them the other way round would cut a range that had not been aligned yet.
 
+use postkit::encode::{FrameRange, InputType};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -186,6 +191,37 @@ pub fn probe_source_facts(
     })
 }
 
+/// The window of frames a trimmed encode should produce, so the encoder never
+/// compresses a frame the trim throws away.
+///
+/// None means the whole source is encoded and [`apply_source_edits`] links the
+/// kept codestreams afterwards: that is an untrimmed job, and every picture but
+/// a video, since postkit narrows only what it decodes frame by frame.
+pub fn trimmed_encode_window(
+    edits: &SourceEdits,
+    picture: &Path,
+    input_type: InputType,
+    fps_num: u32,
+    fps_den: u32,
+) -> Result<Option<FrameRange>, String> {
+    if !edits.trims() || input_type != InputType::Video {
+        return Ok(None);
+    }
+    let fps = fps_num.max(1) as f64 / fps_den.max(1) as f64;
+    let frames = source_frame_count(picture, fps)?;
+    check_picture_trim(
+        edits,
+        &PictureFacts {
+            path: picture.to_path_buf(),
+            frames,
+        },
+    )?;
+    Ok(Some(FrameRange {
+        first_frame: edits.trim_start_frames,
+        frame_count: frames - edits.trim_start_frames - edits.trim_end_frames,
+    }))
+}
+
 fn audio_facts(path: &Path) -> Result<AudioFacts, String> {
     let reader =
         hound::WavReader::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -265,12 +301,19 @@ pub struct CompositionSource {
 
 /// Apply the edits, writing intermediates under `work_dir`, and return the
 /// paths to package.
+///
+/// `encode_window` is what [`trimmed_encode_window`] gave the encode. Some means
+/// the codestreams in `source` are the kept frames already and the picture is
+/// left where it is, None means the whole source was encoded and the kept frames
+/// are linked into a new directory here. Sound and timed text are edited either
+/// way.
 pub fn apply_source_edits(
     edits: &SourceEdits,
     source: &CompositionSource,
     work_dir: &Path,
     fps_num: u32,
     fps_den: u32,
+    encode_window: Option<FrameRange>,
 ) -> Result<CompositionSource, String> {
     if *edits == SourceEdits::default() {
         return Ok(source.clone());
@@ -282,26 +325,30 @@ pub fn apply_source_edits(
     let mut edited = source.clone();
 
     if edits.trims() {
-        let Some(picture_dir) = &source.j2k_dir else {
-            return Err(NO_PICTURE_TO_TRIM.to_string());
+        let kept_frames = match encode_window {
+            Some(window) => window.frame_count,
+            None => {
+                let Some(picture_dir) = &source.j2k_dir else {
+                    return Err(NO_PICTURE_TO_TRIM.to_string());
+                };
+                let frames = picture_frames(picture_dir)?;
+                check_picture_trim(
+                    edits,
+                    &PictureFacts {
+                        path: picture_dir.clone(),
+                        frames: frames.len() as u64,
+                    },
+                )?;
+                let head = edits.trim_start_frames as usize;
+                let tail = edits.trim_end_frames as usize;
+                let kept = &frames[head..frames.len() - tail];
+                edited.j2k_dir = Some(write_frame_dir(kept, &work_dir.join(TRIMMED_PICTURE_DIR))?);
+                kept.len() as u64
+            }
         };
-        let frames = picture_frames(picture_dir)?;
-        check_picture_trim(
-            edits,
-            &PictureFacts {
-                path: picture_dir.clone(),
-                frames: frames.len() as u64,
-            },
-        )?;
-        let head = edits.trim_start_frames as usize;
-        let tail = edits.trim_end_frames as usize;
-        edited.j2k_dir = Some(write_frame_dir(
-            &frames[head..frames.len() - tail],
-            &work_dir.join(TRIMMED_PICTURE_DIR),
-        )?);
 
-        let kept_start = head as f64 / fps;
-        let kept_end = (frames.len() - tail) as f64 / fps;
+        let kept_start = edits.trim_start_frames as f64 / fps;
+        let kept_end = (edits.trim_start_frames + kept_frames) as f64 / fps;
         edited.timed_text_files = source
             .timed_text_files
             .iter()
@@ -1174,7 +1221,7 @@ mod tests {
             audio_files: vec![audio],
             timed_text_files: vec![],
         };
-        let edited = apply_source_edits(&edits, &source, &work, 24, 1).unwrap();
+        let edited = apply_source_edits(&edits, &source, &work, 24, 1, None).unwrap();
 
         assert_eq!(picture_frames(&edited.j2k_dir.unwrap()).unwrap().len(), 24);
         // half a second off each end of two seconds leaves one second of sound
@@ -1198,7 +1245,7 @@ mod tests {
             j2k_dir: Some(picture),
             ..Default::default()
         };
-        let error = apply_source_edits(&edits, &source, dir.path(), 24, 1).unwrap_err();
+        let error = apply_source_edits(&edits, &source, dir.path(), 24, 1, None).unwrap_err();
         assert!(error.contains("10 picture frames"), "{error}");
     }
 
@@ -1214,7 +1261,7 @@ mod tests {
             j2k_dir: Some(dir.path().to_path_buf()),
             ..Default::default()
         };
-        let error = apply_source_edits(&edits, &source, dir.path(), 24, 1).unwrap_err();
+        let error = apply_source_edits(&edits, &source, dir.path(), 24, 1, None).unwrap_err();
         assert!(error.contains("sound track"), "{error}");
     }
 
@@ -1384,9 +1431,15 @@ mod tests {
             audio_files: vec![PathBuf::from("/sound.wav")],
             timed_text_files: vec![PathBuf::from("/subs.xml")],
         };
-        let edited =
-            apply_source_edits(&SourceEdits::default(), &source, Path::new("/work"), 24, 1)
-                .unwrap();
+        let edited = apply_source_edits(
+            &SourceEdits::default(),
+            &source,
+            Path::new("/work"),
+            24,
+            1,
+            None,
+        )
+        .unwrap();
         assert_eq!(edited, source);
     }
 }

@@ -1692,6 +1692,8 @@ fn run() {
             let _ = std::fs::create_dir_all(&output);
 
             // If video is a file, run encode pipeline
+            // set by the video branch when the encode narrows to the trim window
+            let mut encode_window = None;
             let (j2k_dir, picture_mxf, audio_files) = if let (Some(image), Some(hold_for)) =
                 (&still_input, still_frames)
             {
@@ -1830,7 +1832,6 @@ fn run() {
                             &imfwizard_core::overlapped_picture::PictureJob {
                                 input_type,
                                 still_hold: false,
-                                trims_picture: edits.trims(),
                             },
                         );
                         let wrap_target = match overlap_refusal {
@@ -1848,6 +1849,24 @@ fn run() {
                             }),
                         };
 
+                        // a trimmed video encodes the kept window only, so the
+                        // frames the trim drops are never compressed
+                        encode_window = imfwizard_core::source_edits::trimmed_encode_window(
+                            &edits,
+                            &video_path,
+                            input_type,
+                            rate_num,
+                            rate_den,
+                        )
+                        .unwrap_or_else(|e| fail(e));
+                        if let Some(window) = encode_window {
+                            tracing::info!(
+                                "Encoding frames {}..{} only",
+                                window.first_frame,
+                                window.end_frame()
+                            );
+                        }
+
                         // encode via the shared grok pipeline (grk_compress); no fallback
                         let encoded = encode_picture(
                             &video_path,
@@ -1855,6 +1874,7 @@ fn run() {
                             &postkit::pipeline::EncodeRunOptions {
                                 compression_ratio,
                                 fps: encode_fps,
+                                frame_range: encode_window,
                                 source_colour: source_colour.clone(),
                                 subtitle_burn: build_subtitle_burn(encode_fps),
                                 picture: picture.processing.clone(),
@@ -1956,6 +1976,7 @@ fn run() {
                 &output,
                 fps_num,
                 fps_den,
+                encode_window,
             )
             .unwrap_or_else(|e| fail(e));
 

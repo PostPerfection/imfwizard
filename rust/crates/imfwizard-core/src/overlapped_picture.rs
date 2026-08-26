@@ -12,8 +12,6 @@ pub struct PictureJob {
     pub input_type: postkit::encode::InputType,
     /// The source is one image held for a run of frames.
     pub still_hold: bool,
-    /// A head or tail trim drops picture frames after the encode.
-    pub trims_picture: bool,
 }
 
 /// Why this picture cannot be wrapped as it encodes, or None when it can.
@@ -32,12 +30,6 @@ pub fn overlap_refusal(job: &PictureJob) -> Option<&'static str> {
         return Some(
             "only a video source is decoded frame by frame: a J2K sequence is never encoded, and \
              an image sequence can go straight to grk_compress",
-        );
-    }
-    if job.trims_picture {
-        return Some(
-            "a head or tail trim drops frames after the encode, so the MXF would carry frames the \
-             composition does not",
         );
     }
     None
@@ -105,7 +97,6 @@ mod tests {
         PictureJob {
             input_type: postkit::encode::InputType::Video,
             still_hold: false,
-            trims_picture: false,
         }
     }
 
@@ -127,10 +118,6 @@ mod tests {
             },
             PictureJob {
                 input_type: postkit::encode::InputType::ImageSequence,
-                ..video()
-            },
-            PictureJob {
-                trims_picture: true,
                 ..video()
             },
         ] {

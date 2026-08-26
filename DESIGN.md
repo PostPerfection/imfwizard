@@ -78,9 +78,14 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
   The delay says how sound lines up with picture; the trim then cuts a range out of
   the aligned programme. The other order would cut a range that had not been
   aligned yet, so the same flags would give a different result.
-- Trim runs after the encode, not before it: `postkit::pipeline` has no hook for a
-  frame range, so the trimmed picture is a directory of hard links to the kept
-  codestreams. That costs no disk but does encode frames it then discards.
+- A video's picture trim is a window on the encode: `trimmed_encode_window` turns
+  the head and tail counts into the `frame_range` on `EncodeRunOptions`, so only
+  the kept frames are compressed and `apply_source_edits` leaves the codestreams
+  where the encode wrote them. Every other picture encodes whole and has its kept
+  codestreams hard-linked into `j2k_trimmed`, since postkit narrows only what it
+  decodes frame by frame and refuses a range on a J2K sequence outright. The same
+  window is what `apply_source_edits` is given, so the two cannot disagree about
+  what the encode produced.
 - A still (`create --still-length`) is staged alone in a directory so the
   image-sequence encoder sees one frame rather than everything beside it, encoded
   once, then hard-linked once per held frame. Its ffmpeg decode carries the
