@@ -102,11 +102,6 @@ repos plus postkit, not an imfwizard-only fix.
   Trimming five minutes out of a two-hour source still encodes the two hours.
   A `first_frame`/`frame_count` pair on `EncodeRunOptions` would fix it, again in
   postkit.
-- A jpeg image sequence into `encode`/`create` is refused: those frames go to
-  grok's own loader through `postkit::encode::detect_image_format`, which has no
-  jpeg arm, even though the README's encoder bullet claims JPEG. A lone jpeg still
-  is fine, since a held still is decoded by ffmpeg. easyDCP advertises JPEG and BMP
-  input (surveyed 2026-08-16, dcpwizard DESIGN_TODO batch E has the full survey).
 - GPU J2K encoding. easyDCP and DCP-o-matic both offer GPU/CUDA acceleration;
   nothing here touches it. postkit grok_encoder names no device, and the concept
   exists only on the decode side (preview's gpu_device). Check what the pinned grok
@@ -215,6 +210,17 @@ both copy the kept window untouched.
 `a_delay_and_a_trim_together_are_bit_exact_for_32_bit_int_pcm` runs a 32-bit int
 WAV through both edits at once and asserts every surviving sample against the
 source, beside the delay-only test that was already there.
+
+### A jpeg image sequence packages
+
+Stale on the postkit side too: `detect_image_format` has had its
+`ImageFormat::Jpeg` arm since postkit 5f5b066, and `pipeline` routes jpeg and png
+sequences through the ffmpeg decode rather than grok's own loader, which reads
+them only when grok was built with them.
+`an_image_sequence_directory_encodes_and_packages` now runs the same three-frame
+`create` twice, once over tiff frames and once over jpeg frames, and both
+package. The README's encoder bullet and the image-sequence example say which
+formats reach grk_compress directly and which decode through ffmpeg first.
 
 ## Fixed 2026-08-17 (the picture MXF is written while the encode runs)
 

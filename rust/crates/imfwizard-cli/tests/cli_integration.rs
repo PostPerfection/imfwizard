@@ -519,73 +519,85 @@ fn an_image_sequence_directory_encodes_and_packages() {
         eprintln!("skipping: grk_compress not available");
         return;
     }
-    let dir = TempDir::new().unwrap();
-    let frames = dir.path().join("frames");
-    std::fs::create_dir_all(&frames).unwrap();
-    let made = std::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=s=1920x1080:r=24",
-            "-frames:v",
-            "3",
-            // the tiff encoder writes 8 or 16 bits a component and App 2E takes
-            // 8, 10 or 12
-            "-pix_fmt",
-            "rgb24",
-        ])
-        .arg(frames.join("frame_%06d.tif"))
-        .output()
-        .expect("ffmpeg");
-    assert!(
-        made.status.success(),
-        "{}",
-        String::from_utf8_lossy(&made.stderr)
-    );
-    let output = dir.path().join("imp");
+    // tiff frames go straight to grk_compress, jpeg frames decode through ffmpeg
+    for (extension, pixel_format) in [("tif", "rgb24"), ("jpg", "yuvj420p")] {
+        let dir = TempDir::new().unwrap();
+        let frames = dir.path().join("frames");
+        std::fs::create_dir_all(&frames).unwrap();
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=s=1920x1080:r=24",
+                "-frames:v",
+                "3",
+                // the tiff encoder writes 8 or 16 bits a component and App 2E takes
+                // 8, 10 or 12
+                "-pix_fmt",
+                pixel_format,
+            ])
+            .arg(frames.join(format!("frame_%06d.{extension}")))
+            .output()
+            .expect("ffmpeg");
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        let output = dir.path().join("imp");
 
-    cmd()
-        .args([
-            "create",
-            "-o",
-            &output.to_string_lossy(),
-            "-t",
-            "Sequence Smoke",
-            "--video",
-            &frames.to_string_lossy(),
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("IMP created"));
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &output.to_string_lossy(),
+                "-t",
+                "Sequence Smoke",
+                "--video",
+                &frames.to_string_lossy(),
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("IMP created"));
 
-    // the image-sequence encoder names its codestreams .j2k where the video one
-    // names them .j2c
-    let codestreams = std::fs::read_dir(output.join("j2k"))
-        .expect("j2k output directory")
-        .filter(|entry| {
-            entry.as_ref().is_ok_and(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|x| x == "j2c" || x == "j2k")
+        // the image-sequence encoder names its codestreams .j2k where the video one
+        // names them .j2c
+        let codestreams = std::fs::read_dir(output.join("j2k"))
+            .expect("j2k output directory")
+            .filter(|entry| {
+                entry.as_ref().is_ok_and(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|x| x == "j2c" || x == "j2k")
+                })
             })
-        })
-        .count();
-    assert_eq!(codestreams, 3, "one codestream per source frame");
+            .count();
+        assert_eq!(
+            codestreams, 3,
+            "{extension}: one codestream per source frame"
+        );
 
-    let package: Vec<_> = std::fs::read_dir(&output)
-        .unwrap()
-        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
-        .collect();
-    assert!(package.iter().any(|n| n == "ASSETMAP.xml"), "{package:?}");
-    assert!(package.iter().any(|n| n.starts_with("CPL_")), "{package:?}");
-    assert!(
-        package.iter().any(|n| n.starts_with("VIDEO_")),
-        "{package:?}"
-    );
+        let package: Vec<_> = std::fs::read_dir(&output)
+            .unwrap()
+            .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert!(
+            package.iter().any(|n| n == "ASSETMAP.xml"),
+            "{extension}: {package:?}"
+        );
+        assert!(
+            package.iter().any(|n| n.starts_with("CPL_")),
+            "{extension}: {package:?}"
+        );
+        assert!(
+            package.iter().any(|n| n.starts_with("VIDEO_")),
+            "{extension}: {package:?}"
+        );
+    }
 }
 
 /// A burn draws display-RGB text onto decoded frames, so every route that hands

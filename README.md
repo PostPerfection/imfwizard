@@ -25,7 +25,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP
 
 ### Encoding & Transcoding
-- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok (`grk_compress`)
+- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok. DPX, TIFF, EXR and BMP frames are handed to `grk_compress` as they are, JPEG and PNG frames decode through ffmpeg first, since grok reads them only when it was built with those loaders
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source or a J2K directory is refused
@@ -378,7 +378,7 @@ imfwizard create --check \
 ### Create an IMP from non-J2K images (auto-encode)
 
 ```bash
-# A directory of DPX, TIFF, EXR or BMP frames is encoded to J2K on the way in.
+# A directory of DPX, TIFF, EXR, BMP, JPEG or PNG frames is encoded to J2K on the way in.
 # The frames carry no rate of their own, so --fps-num/--fps-den is the rate.
 imfwizard create \
   --title "My Film" \
