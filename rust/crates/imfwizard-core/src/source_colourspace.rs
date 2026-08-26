@@ -1,11 +1,12 @@
 //! The colour space the picture source carries, mapped onto the encode path.
 //!
 //! postkit decides the encoder transform from `encode::SourceColour`. Rec.709
-//! takes the built-in Rec.709 to DCI X'Y'Z' transform and X'Y'Z' leaves the
-//! frames alone. postkit also carries `DisplayRgbIn`, a per-space transform that
-//! would cover the five wide-gamut and log spaces, but nothing here builds one
-//! yet, so those spaces are refused rather than encoded through the Rec.709
-//! matrix, which would be silently wrong colour.
+//! takes the built-in Rec.709 to DCI X'Y'Z' transform, X'Y'Z' leaves the frames
+//! alone, and P3 and Rec.2020 go through `DisplayRgbIn`, postkit's per-space
+//! matrix applied to every frame with the compressor transform off. ACES,
+//! ACEScg and LogC need a rendering transform postkit does not carry, so they
+//! are refused rather than encoded through the Rec.709 matrix, which would be
+//! silently wrong colour.
 
 use postkit::colour::ColourSpace;
 use postkit::encode::SourceColour;
@@ -38,14 +39,13 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
         // already X'Y'Z', so nothing may transform it again. postkit spells this
         // AlreadyPq for its HDR origin; skipping the transform is its only effect
         ColourSpace::Xyz => Ok(SourceColour::AlreadyPq),
-        ColourSpace::P3
-        | ColourSpace::Rec2020
-        | ColourSpace::Aces
-        | ColourSpace::AcesCg
-        | ColourSpace::LogC => Err(format!(
-            "no {space:?} to X'Y'Z' transform is available here: only Rec.709 is wired up, \
-             and converting {space:?} through the Rec.709 matrix would be wrong colour. \
-             Convert the source to Rec.709 or X'Y'Z' first"
+        // display RGB in a wider gamut: postkit converts each frame with that
+        // space's matrix and the compressor transform stays off
+        ColourSpace::P3 | ColourSpace::Rec2020 => Ok(SourceColour::DisplayRgbIn(space)),
+        ColourSpace::Aces | ColourSpace::AcesCg | ColourSpace::LogC => Err(format!(
+            "no {space:?} to X'Y'Z' transform is available here: it needs a rendering \
+             transform, and converting {space:?} through a plain matrix would be wrong \
+             colour. Convert the source to Rec.709, P3, Rec.2020 or X'Y'Z' first"
         )),
     }
 }
@@ -66,8 +66,6 @@ pub fn reject_on_precompressed_picture(
     // rather than silently counting as "asks the encoder for nothing"
     let asks_the_encoder_for_something = match colour {
         SourceColour::DisplayRgb => false,
-        // nothing here builds one, so this arm only fires if postkit's per-space
-        // transform ever reaches imfwizard, and it is unsupported when it does
         SourceColour::DisplayRgbIn(_) | SourceColour::DciLut(_) | SourceColour::AlreadyPq => true,
     };
     if asks_the_encoder_for_something {
@@ -131,14 +129,18 @@ mod tests {
     }
 
     #[test]
+    fn a_wide_gamut_space_carries_its_own_transform_into_the_encode() {
+        for space in [ColourSpace::P3, ColourSpace::Rec2020] {
+            assert_eq!(
+                to_source_colour(space).unwrap(),
+                SourceColour::DisplayRgbIn(space)
+            );
+        }
+    }
+
+    #[test]
     fn the_spaces_with_no_transform_are_refused_by_name() {
-        for space in [
-            ColourSpace::P3,
-            ColourSpace::Rec2020,
-            ColourSpace::Aces,
-            ColourSpace::AcesCg,
-            ColourSpace::LogC,
-        ] {
+        for space in [ColourSpace::Aces, ColourSpace::AcesCg, ColourSpace::LogC] {
             let error = to_source_colour(space).unwrap_err();
             assert!(error.contains(&format!("{space:?}")), "{error}");
         }

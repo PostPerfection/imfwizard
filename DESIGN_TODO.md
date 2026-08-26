@@ -43,29 +43,23 @@ the queue owns it, one advance per end of file), and the transport bar tracking
 live during playback after postkit's non-blocking render fix (its DESIGN_TODO
 has the entry).
 
-## Open: five source colour spaces are refused
+## Open: three source colour spaces are refused
 
-`create --source-colourspace` takes all seven of postkit's `ColourSpace` values,
-but `source_colourspace.rs` only passes `rec709` and `xyz` to the encode and
-refuses `p3`, `rec2020`, `aces`, `acescg` and `logc`.
-
-`p3` and `rec2020` need no postkit change: `SourceColour::DisplayRgbIn(space)`
-converts every frame with that space's matrix (`colour::DcdmTransform`) on the
-encoder threads with the compressor transform off, and dcpwizard encodes both
-through it. Wire the two here the same way and add them to the GUI's Source
-Color Space select.
-
-`aces`, `acescg` and `logc` need a rendering transform: a 3D LUT through the
-existing `SourceColour::DciLut` behind a `--source-lut` flag, or for LogC a
-transfer-function arm ahead of the matrix in `DcdmTransform`. dcpwizard has the
-same gap, so that half is a coordinated change with postkit.
+`create --source-colourspace` takes all seven of postkit's `ColourSpace` values.
+`rec709`, `p3`, `rec2020` and `xyz` encode. `aces`, `acescg` and `logc` are
+refused because they need a rendering transform: a 3D LUT through the existing
+`SourceColour::DciLut` behind a `--source-lut` flag, or for LogC a
+transfer-function arm ahead of the matrix in postkit's `DcdmTransform`.
+dcpwizard has the same gap, so it is a coordinated change with postkit.
 
 ## Open: smaller gaps in the source edits (2026-08-16)
 
-- GPU J2K encoding. easyDCP and DCP-o-matic both offer GPU/CUDA acceleration;
-  nothing here touches it. postkit grok_encoder names no device, and the concept
-  exists only on the decode side (preview's gpu_device). Check what the pinned grok
-  exposes through grok-ffi before scoping. Shared with dcpwizard, one postkit fix.
+- GPU J2K encoding. The grok library has no GPU encode path of its own: it is a
+  separately licensed accelerator plugin (`grk_plugin_load` and
+  `grk_plugin_init` with a device id and a licence key), which is what
+  DCP-o-matic's `config grok-licence` drives. postkit's DESIGN_TODO has the
+  scoping. Shared with dcpwizard, one postkit change plus a device and licence
+  setting in each wizard.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop
