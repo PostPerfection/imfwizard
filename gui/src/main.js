@@ -4,7 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
@@ -52,7 +52,6 @@ function switchView(viewName) {
 }
 
 const SHORTCUTS_KEY = "imfwizard-shortcuts";
-const PREVIEW_SEEK_SECONDS = 5;
 
 const PROJECT_BUTTON_SHORTCUTS = [
   { id: "new-project", label: "New IMP", binding: "Ctrl+N", buttonId: "btn-new-project" },
@@ -101,6 +100,8 @@ initShortcuts({
     previewAction("preview-play-pause", "Play / pause", "Space", previewPlayPause),
     previewAction("preview-back", `Back ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowLeft", () => previewSeek(-PREVIEW_SEEK_SECONDS)),
     previewAction("preview-forward", `Forward ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowRight", () => previewSeek(PREVIEW_SEEK_SECONDS)),
+    previewAction("preview-frame-back", "Step back one frame", ",", previewFrameStepBack),
+    previewAction("preview-frame-forward", "Step forward one frame", ".", previewFrameStepForward),
     previewAction("preview-start", "Go to start", "Home", () => previewSeekAbsolute(0)),
     clickAction(THEME_BUTTON_SHORTCUT, "Appearance"),
   ],
