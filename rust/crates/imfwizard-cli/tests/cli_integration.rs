@@ -201,12 +201,13 @@ fn an_unknown_source_colourspace_is_refused_by_name() {
         .stderr(predicate::str::contains("rec601"));
 }
 
-/// postkit models only the Rec.709 to X'Y'Z' transform, so the wide-gamut and log
-/// spaces are refused rather than encoded through the wrong matrix.
+/// postkit carries a matrix for the display spaces but no rendering transform, so
+/// the scene-referred and log spaces are refused rather than encoded through the
+/// wrong matrix.
 #[test]
 fn a_colourspace_with_no_transform_is_refused() {
     let dir = TempDir::new().unwrap();
-    for space in ["p3", "rec2020", "aces", "acescg", "logc"] {
+    for space in ["aces", "acescg", "logc"] {
         cmd()
             .args([
                 "create",
