@@ -109,4 +109,6 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 
 imfwizard builds against the `extern/postkit` submodule (pinned to the postkit commit with the `postkit::packaging` dedup work); bump the pin when postkit changes. dcpdoctor-core is pinned at rev ce050e5.
 
-The GUI frontend takes its preview module, keyboard shortcut engine and base stylesheet from the `extern/guikit` submodule, shared with dcpwizard; `gui/src/style.css` holds only the imfwizard deltas. Bump the pin when guikit changes.
+The GUI frontend takes its preview module, keyboard shortcut engine, Jobs panel (`extern/guikit/src/jobs.js`) and base stylesheet from the `extern/guikit` submodule, shared with dcpwizard; `gui/src/style.css` holds only the imfwizard deltas. Bump the pin when guikit changes.
+
+The GUI's build queue is `postkit::gui_job_queue::GuiJobQueue<JobConfig>`, shared with dcpwizard: it holds the queue, the cancel and pause flags, the finished-job history and the `gui-jobs.jsonl` record. `gui/src-tauri/src/pipeline.rs` supplies the `GuiJob` impl for `JobConfig` and the tauri commands over it.

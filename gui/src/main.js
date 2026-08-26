@@ -6,6 +6,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
+import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
 
@@ -1229,56 +1230,6 @@ document.getElementById("del-start")?.addEventListener("click", async () => {
   setStatus(`${jobIds.length} delivery jobs queued`);
 });
 
-// === Jobs ===
-let jobsPollInterval = null;
-
-const JOBS_TABLE_COLUMNS = 5;
-const CANCELLABLE_JOB_STATES = ["running", "queued"];
-
-function escapeHtml(text) {
-  const replacements = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-  return String(text).replace(/[&<>"]/g, ch => replacements[ch]);
-}
-
-function jobRow({ id, title, state, progress, message }) {
-  const cancel = CANCELLABLE_JOB_STATES.includes(state)
-    ? `<button class="btn-sm btn-cancel" data-job-id="${id}">✕</button>`
-    : "";
-  const rowTitle = message ? ` title="${escapeHtml(message)}"` : "";
-  return `<tr${rowTitle}><td>${id}</td><td>${escapeHtml(title)}</td>` +
-    `<td>${state}</td><td>${progress}</td><td>${cancel}</td></tr>`;
-}
-
-async function refreshJobs() {
-  const badge = document.getElementById("jobs-status");
-  const tbody = document.getElementById("jobs-tbody");
-  if (!tbody) return;
-  try {
-    const jobs = await invoke("list_jobs");
-    badge.textContent = "Active";
-    const rows = jobs.map(job => jobRow({
-      id: job.id,
-      title: job.title,
-      state: job.status,
-      progress: job.percent > 0 ? `${Math.round(job.percent)}%` : "",
-      message: job.message,
-    }));
-    tbody.innerHTML = rows.length
-      ? rows.join("")
-      : `<tr><td colspan="${JOBS_TABLE_COLUMNS}" style="text-align:center">No jobs</td></tr>`;
-    tbody.querySelectorAll(".btn-cancel").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        await invoke("cancel_job", { jobId: Number(btn.dataset.jobId) });
-        refreshJobs();
-      });
-    });
-  } catch { badge.textContent = "Error"; }
-}
-
-function startJobsPolling() { if (!jobsPollInterval) jobsPollInterval = setInterval(refreshJobs, 3000); }
-function stopJobsPolling() { if (jobsPollInterval) { clearInterval(jobsPollInterval); jobsPollInterval = null; } }
-document.getElementById("jobs-refresh")?.addEventListener("click", refreshJobs);
-
 // === Utilities ===
 function setStatus(text) {
   const el = document.getElementById("status-text");
@@ -1629,6 +1580,11 @@ updateStatusStats();
 initPreview();
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
+initJobsPanel({
+  tableBody: document.getElementById("jobs-tbody"),
+  statusBadge: document.getElementById("jobs-status"),
+  refreshButton: document.getElementById("jobs-refresh"),
+});
 setStatus("Ready");
 
 // === Target Conversion (Scale/Crop/Letterbox) ===
