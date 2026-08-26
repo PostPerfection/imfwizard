@@ -9,6 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use postkit::encode::{InputType, detect_input_type, find_source_frames};
 use postkit::picture_processing::{
     Crop, DEFAULT_AUTO_CROP_THRESHOLD, Fit, PicturePlan, PictureProcessing, Rotation, detect_crop,
@@ -23,7 +25,7 @@ const RASTER_SEPARATOR: char = 'x';
 
 /// Everything the picture flags ask for, before a source size turns it into a
 /// plan. Crops are in source pixels, in the source's own orientation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourcePictureOptions {
     pub crop: Crop,
     pub auto_crop: bool,

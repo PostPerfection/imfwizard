@@ -46,6 +46,7 @@ pub mod executor;
 pub mod job_queue;
 pub mod preferences;
 pub mod rest_api;
+pub mod store;
 pub mod tools;
 pub mod watch;
 
