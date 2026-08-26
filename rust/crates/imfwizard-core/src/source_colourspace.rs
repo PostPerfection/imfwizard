@@ -2,11 +2,11 @@
 //!
 //! postkit decides the encoder transform from `encode::SourceColour`. Rec.709
 //! takes the built-in Rec.709 to DCI X'Y'Z' transform, X'Y'Z' leaves the frames
-//! alone, and P3 and Rec.2020 go through `DisplayRgbIn`, postkit's per-space
-//! matrix applied to every frame with the compressor transform off. ACES,
-//! ACEScg and LogC need a rendering transform postkit does not carry, so they
-//! are refused rather than encoded through the Rec.709 matrix, which would be
-//! silently wrong colour.
+//! alone, and P3, Rec.2020 and LogC go through `DisplayRgbIn`, postkit's
+//! per-space curve and matrix applied to every frame with the compressor
+//! transform off. ACES and ACEScg are scene-referred, so no matrix reaches
+//! X'Y'Z' from them and they are refused rather than encoded through the Rec.709
+//! matrix, which would be silently wrong colour.
 
 use postkit::colour::ColourSpace;
 use postkit::encode::SourceColour;
@@ -39,15 +39,34 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
         // already X'Y'Z', so nothing may transform it again. postkit spells this
         // AlreadyPq for its HDR origin; skipping the transform is its only effect
         ColourSpace::Xyz => Ok(SourceColour::AlreadyPq),
-        // display RGB in a wider gamut: postkit converts each frame with that
-        // space's matrix and the compressor transform stays off
-        ColourSpace::P3 | ColourSpace::Rec2020 => Ok(SourceColour::DisplayRgbIn(space)),
-        ColourSpace::Aces | ColourSpace::AcesCg | ColourSpace::LogC => Err(format!(
-            "no {space:?} to X'Y'Z' transform is available here: it needs a rendering \
-             transform, and converting {space:?} through a plain matrix would be wrong \
-             colour. Convert the source to Rec.709, P3, Rec.2020 or X'Y'Z' first"
+        // a wider display gamut, or ARRI LogC3: postkit linearises each frame
+        // with that space's own curve, matrixes it, and the compressor transform
+        // stays off
+        ColourSpace::P3 | ColourSpace::Rec2020 | ColourSpace::LogC => {
+            Ok(SourceColour::DisplayRgbIn(space))
+        }
+        ColourSpace::Aces | ColourSpace::AcesCg => Err(format!(
+            "{space:?} is scene-referred: no matrix reaches X'Y'Z' from it, so it needs \
+             a rendering transform. Pass --source-lut a 3D LUT that lands on X'Y'Z', or \
+             convert the source first with `imfwizard aces --idt <IDT> --odt <ODT>`"
         )),
     }
+}
+
+/// Refuse a 3D LUT that is not on disk, since ffmpeg only reads it once the
+/// decode has started and reports it as a filter failure.
+pub fn reject_missing_lut(colour: &SourceColour) -> Result<(), String> {
+    let SourceColour::DciLut(lut) = colour else {
+        return Ok(());
+    };
+    if lut.is_file() {
+        return Ok(());
+    }
+    Err(format!(
+        "--source-lut {} is not a file: it takes a 3D LUT (.cube) that converts the \
+         source to X'Y'Z'",
+        lut.display()
+    ))
 }
 
 /// Refuse a source colour that asks the encoder for something when the picture
@@ -138,11 +157,37 @@ mod tests {
         }
     }
 
+    /// postkit's `DcdmTransform` decodes LogC3 ahead of the matrix, so LogC takes
+    /// the same per-frame route P3 and Rec.2020 take.
     #[test]
-    fn the_spaces_with_no_transform_are_refused_by_name() {
-        for space in [ColourSpace::Aces, ColourSpace::AcesCg, ColourSpace::LogC] {
+    fn logc_takes_the_per_frame_transform() {
+        assert_eq!(
+            to_source_colour(ColourSpace::LogC).unwrap(),
+            SourceColour::DisplayRgbIn(ColourSpace::LogC)
+        );
+        assert!(postkit::colour::DcdmTransform::to_xyz(ColourSpace::LogC).is_ok());
+    }
+
+    #[test]
+    fn the_scene_referred_spaces_are_refused_by_name_with_both_routes() {
+        for space in [ColourSpace::Aces, ColourSpace::AcesCg] {
             let error = to_source_colour(space).unwrap_err();
             assert!(error.contains(&format!("{space:?}")), "{error}");
+            assert!(error.contains("--source-lut"), "{error}");
+            assert!(error.contains("imfwizard aces"), "{error}");
         }
+    }
+
+    #[test]
+    fn a_lut_that_is_not_there_is_refused_by_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("nothing.cube");
+        let error = reject_missing_lut(&SourceColour::DciLut(missing.clone())).unwrap_err();
+        assert!(error.contains(&missing.display().to_string()), "{error}");
+
+        let present = directory.path().join("identity.cube");
+        std::fs::write(&present, "LUT_3D_SIZE 2\n").unwrap();
+        assert!(reject_missing_lut(&SourceColour::DciLut(present)).is_ok());
+        assert!(reject_missing_lut(&SourceColour::DisplayRgb).is_ok());
     }
 }

@@ -42,25 +42,36 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 - HDR/WCG (ST 2067-21): `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs on the picture MXF descriptor (asdcplib `open_write_hdr`) and emits the matching CPL RGBADescriptor EssenceDescriptor + SourceEncoding; `--mastering-display <x265 string>` adds the ST 2086 block; `--max-cll`/`--max-fall` (u16 nits, refused without `--hdr`) land in the CPL ExtensionProperties beside ApplicationIdentification as app2e `xs:unsignedShort` elements, byte-identical output when absent. ST 2067-21 carries the light levels in the CPL, not the MXF descriptor, SMPTE defined no descriptor membership for them (the registered ULs belong to an ST 2108-2 serial-interface pack), so asdcplib rightly has no property. Photon schema-validates the pair and never compares them to the essence. The XSD tests import app2e-2016.xsd, since ExtensionProperties is `xs:any` lax and xmllint would otherwise skip the elements.
 - Accessibility audio (`create --audio-role ad|hi`): emits an MCA EssenceDescriptor (WAVEPCMDescriptor + SoundfieldGroup + chVIN/chHI AudioChannelLabel + RFC5646SpokenLanguage) linked to the audio resource via SourceEncoding. Audio language is also expressed at the composition level (LocaleList). SL stays a video overlay with no MCA audio descriptor (see DESIGN_TODO).
 - SCC conversion handles pop-on captions only; roll-up, paint-on, and text-mode fail loud.
-- Source colour space (`create --source-colourspace`): postkit decides the encoder
-  transform from `encode::SourceColour`, which offers three shapes, so only two of
-  the seven `ColourSpace` values map. `rec709` is `SourceColour::DisplayRgb`, the
-  variant `EncodeRunOptions::default()` already used, which is what keeps the
-  default output unchanged. `xyz` is `SourceColour::AlreadyPq`; that name is about
-  where postkit met the case (HDR essence), and skipping the transform is its only
-  effect, which is exactly what an already-X'Y'Z' source needs. The other five have
-  no postkit transform to X'Y'Z' at all: `convert_colour` refuses them without a 3D
-  LUT and `rgb_to_xyz_inplace` is Rec.709-only, so they are refused rather than run
-  through the Rec.709 matrix (see DESIGN_TODO). `--hdr` plus a source colour space
+- Source colour space (`create --source-colourspace`, `create --source-lut`):
+  postkit decides the encoder transform from `encode::SourceColour`, and five of
+  the seven `ColourSpace` values map onto it. `rec709` is
+  `SourceColour::DisplayRgb`, the variant `EncodeRunOptions::default()` already
+  used, which is what keeps the default output unchanged. `xyz` is
+  `SourceColour::AlreadyPq`. That name is about where postkit met the case (HDR
+  essence), and skipping the transform is its only effect, which is exactly what
+  an already-X'Y'Z' source needs. `p3`, `rec2020` and `logc` are
+  `SourceColour::DisplayRgbIn(space)`: postkit builds one `DcdmTransform` for the
+  run and applies it to every decoded frame with the compressor transform off,
+  LogC linearising through ARRI's LogC3 EI 800 curve before the ALEXA Wide Gamut
+  matrix, with scene linear above 1.0 clipping to white. `aces` and `acescg` are
+  scene-referred, so no 3x3 matrix reaches X'Y'Z' from them and `source_space`
+  refuses to build one: they are refused here naming the two routes that do
+  convert them, `--source-lut` and the `aces` subcommand's ctlrender IDT/ODT
+  pipeline. `--source-lut <file.cube>` is `SourceColour::DciLut`, an ffmpeg
+  `lut3d` filter appended to the decode, after which nothing transforms the
+  frames again, so it conflicts with `--source-colourspace`. A LUT path that is
+  not a file is refused in `preflight::check_before_encode`, since ffmpeg only
+  opens it once the decode is running. `--hdr` plus a source colour space
   the encoder would transform is refused, because postkit's own rule is that
   essence a caller labels PQ can never hold frames the encoder rewrote; `--hdr`
-  with `xyz` composes and `--hdr` alone is unchanged. `xyz` reaches only the video
-  input: postkit's image-sequence encoder always applies the transform and refuses
-  any other source colour, so an image sequence or a still stays rec709-only, and
-  a J2K directory reaches the wrapper with no encode at all, so anything other
-  than rec709 is refused there rather than dropped in silence. The GUI select
-  offers only the two values that work; the CLI takes all seven spellings so the
-  five without a transform fail with an explanation, not an unknown-value error.
+  with `xyz` composes and `--hdr` alone is unchanged. Anything but `rec709`
+  reaches only the video input: postkit's image-sequence encoder always applies
+  the transform and refuses any other source colour, so an image sequence or a
+  still stays rec709-only, and a J2K directory reaches the wrapper with no encode
+  at all, so anything other than rec709 is refused there rather than dropped in
+  silence. The GUI select offers the five spellings that encode and has no LUT
+  picker. The CLI takes all seven spellings so the two without a transform fail
+  with an explanation, not an unknown-value error.
 - Timed text trim (`source_edits.rs`) reads both TTML time shapes, clock times
   (`00:00:01.500`, `00:00:01:12`) and offset times (`0.8s`, `900ms`, `24f`), and
   writes each cue back in the metric it arrived in. A time it cannot read, ticks

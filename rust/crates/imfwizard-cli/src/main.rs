@@ -482,10 +482,17 @@ enum Commands {
         audio_delay: Option<i64>,
 
         /// Colour space the picture source carries: rec709 (default), p3, xyz,
-        /// rec2020, aces, acescg or logc. rec709 runs the encoder's X'Y'Z'
-        /// transform, xyz leaves the frames alone.
+        /// rec2020 or logc. rec709 runs the encoder's X'Y'Z' transform, xyz
+        /// leaves the frames alone. aces and acescg are refused, since they need
+        /// a rendering transform: use --source-lut or `imfwizard aces`.
         #[arg(long = "source-colourspace")]
         source_colourspace: Option<String>,
+
+        /// 3D LUT (.cube) that converts the source to X'Y'Z' during decode,
+        /// after which nothing transforms the frames again. Conflicts with
+        /// --source-colourspace, whose transform the LUT replaces.
+        #[arg(long = "source-lut", conflicts_with = "source_colourspace")]
+        source_lut: Option<PathBuf>,
 
         /// Remove this much from the head of the source, as frames (48f) or
         /// seconds (2s). Picture, sound and timed text all move together.
@@ -907,7 +914,8 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Source colour space (rec709, p3, aces, logc)
+        /// Source colour space (rec709, p3, rec2020, xyz or logc). aces and
+        /// acescg are scene-referred and need --lut instead.
         #[arg(short, long, default_value = "rec709")]
         colour_space: String,
 
@@ -934,7 +942,8 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Source colour space (rec709, p3, xyz, rec2020, aces, acescg, logc)
+        /// Source colour space (rec709, p3 or rec2020). xyz, aces, acescg and
+        /// logc have no ffmpeg colorspace model and need --lut.
         #[arg(short, long)]
         source: String,
 
@@ -1498,6 +1507,7 @@ fn run() {
             max_fall,
             audio_delay,
             source_colourspace,
+            source_lut,
             trim_start,
             trim_end,
             still_length,
@@ -1564,10 +1574,15 @@ fn run() {
             let colourspace = source_colourspace
                 .as_deref()
                 .map(|s| imfwizard_core::source_colourspace::parse(s).unwrap_or_else(|e| fail(e)));
-            let source_colour = imfwizard_core::source_colourspace::to_source_colour(
-                colourspace.unwrap_or(postkit::colour::ColourSpace::Rec709),
-            )
-            .unwrap_or_else(|e| fail(e));
+            let source_colour = match source_lut {
+                // the LUT lands the frames on X'Y'Z' during decode, so it stands
+                // in for a source colour space rather than joining one
+                Some(lut) => postkit::encode::SourceColour::DciLut(lut),
+                None => imfwizard_core::source_colourspace::to_source_colour(
+                    colourspace.unwrap_or(postkit::colour::ColourSpace::Rec709),
+                )
+                .unwrap_or_else(|e| fail(e)),
+            };
             // --hdr declares the essence untransformed, so the resolved route
             // (not the flag, which defaults to rec709 when absent) must not
             // run the encoder transform

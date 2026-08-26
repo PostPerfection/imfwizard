@@ -43,15 +43,6 @@ the queue owns it, one advance per end of file), and the transport bar tracking
 live during playback after postkit's non-blocking render fix (its DESIGN_TODO
 has the entry).
 
-## Open: three source colour spaces are refused
-
-`create --source-colourspace` takes all seven of postkit's `ColourSpace` values.
-`rec709`, `p3`, `rec2020` and `xyz` encode. `aces`, `acescg` and `logc` are
-refused because they need a rendering transform: a 3D LUT through the existing
-`SourceColour::DciLut` behind a `--source-lut` flag, or for LogC a
-transfer-function arm ahead of the matrix in postkit's `DcdmTransform`.
-dcpwizard has the same gap, so it is a coordinated change with postkit.
-
 ## Open: smaller gaps in the source edits (2026-08-16)
 
 - GPU J2K encoding. The grok library has no GPU encode path of its own: it is a

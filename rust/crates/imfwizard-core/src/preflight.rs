@@ -65,6 +65,7 @@ pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
 /// two faults names the one a reader can act on.
 pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     plan.picture_options.check()?;
+    crate::source_colourspace::reject_missing_lut(&plan.source_colour)?;
     if let Some(picture) = &plan.picture {
         if plan.still_frames.is_none() && detect_input_type(picture) == InputType::Unknown {
             return Err(unclassified_picture_refusal(picture));
@@ -193,6 +194,24 @@ mod tests {
         let error = check_before_encode(&plan).unwrap_err();
 
         assert!(error.contains("tif, tiff, dpx, exr, bmp"), "{error}");
+    }
+
+    /// ffmpeg reads the LUT once the decode is running, so a path that names
+    /// nothing has to be refused here instead.
+    #[test]
+    fn a_source_lut_that_is_not_there_is_refused_before_the_encode() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("hdr_to_xyz.cube");
+
+        let plan = CreatePlan {
+            fps_num: 24,
+            fps_den: 1,
+            source_colour: SourceColour::DciLut(missing.clone()),
+            ..Default::default()
+        };
+        let error = check_before_encode(&plan).unwrap_err();
+
+        assert!(error.contains(&missing.display().to_string()), "{error}");
     }
 
     #[test]

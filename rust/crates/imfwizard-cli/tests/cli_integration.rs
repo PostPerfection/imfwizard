@@ -201,13 +201,12 @@ fn an_unknown_source_colourspace_is_refused_by_name() {
         .stderr(predicate::str::contains("rec601"));
 }
 
-/// postkit carries a matrix for the display spaces but no rendering transform, so
-/// the scene-referred and log spaces are refused rather than encoded through the
-/// wrong matrix.
+/// ACES and ACEScg are scene-referred, so no matrix reaches X'Y'Z' from them and
+/// the refusal has to name both routes that do convert them.
 #[test]
-fn a_colourspace_with_no_transform_is_refused() {
+fn a_scene_referred_colourspace_is_refused_with_both_routes() {
     let dir = TempDir::new().unwrap();
-    for space in ["aces", "acescg", "logc"] {
+    for space in ["aces", "acescg"] {
         cmd()
             .args([
                 "create",
@@ -220,9 +219,65 @@ fn a_colourspace_with_no_transform_is_refused() {
             ])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("X'Y'Z' transform is available"));
+            .stderr(
+                predicate::str::contains("--source-lut")
+                    .and(predicate::str::contains("imfwizard aces")),
+            );
     }
 }
+
+/// The LUT output is taken as already converted, so naming a source colour space
+/// alongside it asks for two transforms.
+#[test]
+fn a_source_lut_and_a_source_colourspace_together_are_refused() {
+    let dir = TempDir::new().unwrap();
+    let lut = dir.path().join("identity.cube");
+    std::fs::write(&lut, IDENTITY_CUBE).unwrap();
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Test",
+            "--source-lut",
+            &lut.to_string_lossy(),
+            "--source-colourspace",
+            "p3",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+/// ffmpeg only opens the LUT once the decode runs, so `create` has to refuse a
+/// path that names nothing before it encodes anything.
+#[test]
+fn a_source_lut_that_is_not_there_is_refused_by_path() {
+    let dir = TempDir::new().unwrap();
+    let missing = dir.path().join("hdr_to_xyz.cube");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Test",
+            "--source-lut",
+            &missing.to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hdr_to_xyz.cube"));
+}
+
+/// The smallest legal .cube: a 2x2x2 grid whose entries are the cube corners, so
+/// lut3d maps every value onto itself.
+const IDENTITY_CUBE: &str = "LUT_3D_SIZE 2\n\
+    0.0 0.0 0.0\n1.0 0.0 0.0\n0.0 1.0 0.0\n1.0 1.0 0.0\n\
+    0.0 0.0 1.0\n1.0 0.0 1.0\n0.0 1.0 1.0\n1.0 1.0 1.0\n";
 
 /// --hdr says nothing transformed the essence, so a source the encoder would
 /// transform contradicts it.
