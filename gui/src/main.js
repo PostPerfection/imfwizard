@@ -887,6 +887,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       title, outputDir: output, compositions: comps, sourceSettings, hintsAccepted,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
       bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
+      qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
     });
     let result = await submit(!getPrefs().showHintsBeforeBuild);
     if (result.jobId === null) {
@@ -1217,6 +1218,7 @@ document.getElementById("del-start")?.addEventListener("click", async () => {
         framerate: document.getElementById("prop-framerate")?.value || "24/1",
         contentKind: document.getElementById("prop-content-kind")?.value || "feature",
         bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
+        qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
       });
       jobIds.push(result.jobId);
     } catch (e) {

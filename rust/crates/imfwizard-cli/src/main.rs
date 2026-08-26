@@ -152,6 +152,29 @@ fn measured_any_phase(progress: &postkit::pipeline::PipelineProgress) -> bool {
         || progress.write_secs > 0.0
 }
 
+/// How many bits a frame of `create`'s picture gets. Boxed for the same reason
+/// `PictureArguments` is.
+#[derive(clap::Args)]
+struct CompressionArguments {
+    /// Delivery preset (netflix, disney, apple, hbo, amazon, dci-2k, dci-4k,
+    /// broadcast, archival); sets the J2K target bitrate. See `profiles`.
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Target bitrate in Mbps for the J2K encode, above 0 and at most 1000.
+    /// Wins over the bitrate --profile carries. Without either the encode
+    /// runs at a 10:1 compression ratio.
+    #[arg(long)]
+    bitrate: Option<f64>,
+
+    /// PSNR target in dB for the J2K encode, at least 20 and at most 80.
+    /// The encoder allocates to this quality instead of a compression
+    /// ratio, and the bitrate becomes a per-frame byte cap no frame may
+    /// exceed.
+    #[arg(long)]
+    quality_psnr: Option<f64>,
+}
+
 /// What `create` does to the source picture before it is compressed. Boxed
 /// where it is flattened, so `create` does not dwarf every other subcommand in
 /// the parsed command enum.
@@ -435,16 +458,8 @@ enum Commands {
         #[arg(short, long, default_value = "feature")]
         kind: String,
 
-        /// Delivery preset (netflix, disney, apple, hbo, amazon, dci-2k, dci-4k,
-        /// broadcast, archival); sets the J2K target bitrate. See `profiles`.
-        #[arg(long)]
-        profile: Option<String>,
-
-        /// Target bitrate in Mbps for the J2K encode, above 0 and at most 1000.
-        /// Wins over the bitrate --profile carries. Without either the encode
-        /// runs at a 10:1 compression ratio.
-        #[arg(long)]
-        bitrate: Option<f64>,
+        #[command(flatten)]
+        compression: Box<CompressionArguments>,
 
         /// Frame rate numerator
         #[arg(long, default_value = "24")]
@@ -1497,8 +1512,7 @@ fn run() {
             subtitles,
             burn: burn_arguments,
             kind,
-            profile,
-            bitrate,
+            compression,
             fps_num,
             fps_den,
             hdr,
@@ -1515,6 +1529,11 @@ fn run() {
             audio_map,
             check,
         } => {
+            let CompressionArguments {
+                profile,
+                bitrate,
+                quality_psnr,
+            } = *compression;
             // the HDR detail flags only make sense with an HDR preset
             for (name, given) in [
                 ("--mastering-display", mastering_display.is_some()),
@@ -1567,6 +1586,17 @@ fn run() {
             {
                 fail(format!(
                     "--bitrate {mbps} is outside the range: above 0 and at most {MAXIMUM_BITRATE_MBPS} Mbps"
+                ));
+            }
+            let psnr_range = imfwizard_core::encode::MINIMUM_QUALITY_PSNR_DB
+                ..=imfwizard_core::encode::MAXIMUM_QUALITY_PSNR_DB;
+            if let Some(db) = quality_psnr
+                && !psnr_range.contains(&db)
+            {
+                fail(format!(
+                    "--quality-psnr {db} is outside the range: at least {} and at most {} dB",
+                    psnr_range.start(),
+                    psnr_range.end()
                 ));
             }
             // the source colour space decides the encoder transform, so a bad
@@ -1834,11 +1864,26 @@ fn run() {
                             picture.encode_height,
                             encode_fps.as_f64(),
                         );
-                        match bitrate.or(preset_bitrate_mbps) {
-                            Some(mbps) => {
+                        // under a PSNR target the bitrate is a ceiling per frame
+                        // rather than what the allocation aims at
+                        let codestream_byte_cap = quality_psnr
+                            .and(bitrate.or(preset_bitrate_mbps))
+                            .map(|mbps| {
+                                imfwizard_core::encode::codestream_byte_cap_for_bitrate(
+                                    encode_fps.as_f64(),
+                                    mbps,
+                                )
+                            });
+                        match (quality_psnr, bitrate.or(preset_bitrate_mbps)) {
+                            (Some(db), Some(mbps)) => tracing::info!(
+                                "PSNR {db} dB (bitrate {mbps} Mbps, at most {} bytes a frame)",
+                                codestream_byte_cap.unwrap_or_default()
+                            ),
+                            (Some(db), None) => tracing::info!("PSNR {db} dB (no byte cap)"),
+                            (None, Some(mbps)) => {
                                 tracing::info!("Bitrate {mbps} Mbps (ratio {compression_ratio:.1})")
                             }
-                            None => tracing::info!("Ratio {compression_ratio:.1}"),
+                            (None, None) => tracing::info!("Ratio {compression_ratio:.1}"),
                         }
 
                         // the picture MXF is written as the frames finish where the
@@ -1888,6 +1933,8 @@ fn run() {
                             &output,
                             &postkit::pipeline::EncodeRunOptions {
                                 compression_ratio,
+                                quality_psnr,
+                                codestream_byte_cap,
                                 fps: encode_fps,
                                 frame_range: encode_window,
                                 source_colour: source_colour.clone(),
@@ -1900,6 +1947,9 @@ fn run() {
                         let (j2k_out, picture_mxf) = match encoded {
                             Ok((r, track)) => {
                                 tracing::info!("Encoded {} frames", r.frames_encoded);
+                                for finding in r.picture_findings.describe(encode_fps.as_f64()) {
+                                    tracing::warn!("{finding}");
+                                }
                                 if let Some(track) = &track {
                                     tracing::info!(
                                         "Picture MXF written during the encode: {} ({} frames)",

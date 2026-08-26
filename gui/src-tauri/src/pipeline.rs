@@ -245,6 +245,9 @@ pub struct JobConfig {
     fps_num: u32,
     fps_den: u32,
     bandwidth: u32,
+    /// PSNR target in dB for the J2K encode, None when the encode allocates by
+    /// compression ratio.
+    quality_psnr: Option<f64>,
     edits: imfwizard_core::source_edits::SourceEdits,
     source_colour: postkit::encode::SourceColour,
     /// Frames to hold a still input for; None when the input is not a still.
@@ -415,6 +418,7 @@ pub async fn submit_job(
     framerate: Option<String>,
     content_kind: Option<String>,
     bandwidth: Option<u32>,
+    quality_psnr: Option<f64>,
     compositions: Option<Vec<CompositionInput>>,
     source_settings: Option<SourceSettings>,
     hints_accepted: Option<bool>,
@@ -576,6 +580,7 @@ pub async fn submit_job(
         fps_num,
         fps_den,
         bandwidth: bandwidth.unwrap_or(250),
+        quality_psnr,
         edits,
         source_colour,
         still_frames,
@@ -1066,6 +1071,14 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
             _ => imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
         };
+        // under a PSNR target the bandwidth is a ceiling per frame rather than
+        // what the allocation aims at
+        let codestream_byte_cap = job.quality_psnr.map(|_| {
+            imfwizard_core::encode::codestream_byte_cap_for_bitrate(
+                encode_fps.as_f64(),
+                job.bandwidth as f64,
+            )
+        });
         log_to(
             &log_file,
             &format_stage_timing(
@@ -1157,6 +1170,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             None => {
                 let encode_options = postkit::pipeline::EncodeRunOptions {
                     compression_ratio,
+                    quality_psnr: job.quality_psnr,
+                    codestream_byte_cap,
                     fps: encode_fps,
                     frame_range: encode_window,
                     source_colour: job.source_colour.clone(),
@@ -1221,6 +1236,9 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     )?,
                 };
                 total_elapsed += encode_result.elapsed_secs;
+                for finding in encode_result.picture_findings.describe(encode_fps.as_f64()) {
+                    log_to(&log_file, &format!("[ENCODE] {finding}"));
+                }
                 encode_result.j2k_dir
             }
         };
@@ -1408,6 +1426,7 @@ mod tests {
             fps_num: 24,
             fps_den: 1,
             bandwidth: 250,
+            quality_psnr: None,
             edits: imfwizard_core::source_edits::SourceEdits::default(),
             source_colour: postkit::encode::SourceColour::DisplayRgb,
             still_frames: None,

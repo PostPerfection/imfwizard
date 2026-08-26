@@ -260,6 +260,21 @@ imfwizard create \
   --output /path/to/output/
 ```
 
+### Encode to a quality target instead of a ratio
+
+```bash
+# --quality-psnr is a PSNR target in dB, at least 20 and at most 80. The encoder
+# allocates to that quality rather than to a compression ratio, and the bitrate
+# (from --bitrate or --profile) becomes a per-frame byte cap no frame may exceed.
+# A frame the quality target pushes over the cap is encoded again by ratio to fit.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/video.mov \
+  --bitrate 100 \
+  --quality-psnr 45 \
+  --output /path/to/output/
+```
+
 ### Create an IMP with subtitles
 
 ```bash

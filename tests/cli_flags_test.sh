@@ -85,6 +85,7 @@ HTML_FILE="gui/index.html"
 CREATE_CONTROLS=(
   "prop-audio-delay=--audio-delay"
   "prop-source-colourspace=--source-colourspace"
+  "prop-quality-psnr=--quality-psnr"
   "prop-trim-start=--trim-start"
   "prop-trim-end=--trim-end"
   "prop-still-length=--still-length"
