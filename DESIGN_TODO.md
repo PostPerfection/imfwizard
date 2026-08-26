@@ -96,13 +96,6 @@ Closing it needs a postkit change, one of:
 dcpwizard needs the same decision, so this is a coordinated change across both
 repos plus postkit, not an imfwizard-only fix.
 
-## Open: --audio-map reaches only the WAV that is named (2026-08-16)
-
-`--audio-map` maps only the WAV `--audio` names. The track demuxed from `--video`
-is written after the map would have run, so it is refused by name rather than
-mapped; moving the demux ahead of the map would fix it and is a change to the
-order `create` builds its sources in.
-
 ## Open: smaller gaps in the source edits (2026-08-16)
 
 - PK wav_io round-trips samples through normalised f32, so 32-bit int PCM is not
@@ -145,7 +138,7 @@ order `create` builds its sources in.
   message: the HDR detail flags requiring `--hdr`, the `--hdr` plus transforming
   source colour space guard, the spelling parsers (hdr preset, audio role,
   delivery profile, source colour space, duration specs, rotation, flip, raster),
-  `--audio-map` without `--audio` (and the GUI's per-composition wording of it),
+  the GUI's per-composition `--audio-map` without an audio file,
   `--still-length` without a still and a still without one, an appearance flag
   without `--burn-subtitle`, `--burn-subtitle` without `--video`, and the GUI's
   output-folder-already-holds-an-IMP and already-building-into guards. Moving
@@ -203,6 +196,20 @@ does not exist here. Closed captions are not packaged as a separate track, so
 the 32-character caption rules have nothing to run on.
 
 # Done
+
+## 2026-08-26
+
+### --audio-map reaches the track demuxed from --video
+
+The note that said otherwise was stale: `create` writes `audio_demux.wav` into
+`audio_files` before the map is applied to every entry, so the only thing
+stopping a map from reaching it was the CLI's own refusal, which is gone. With
+`--audio-map` given and the demux producing nothing, `create` now fails naming
+the source and saying which happened, ffmpeg not running, ffmpeg refusing the
+file, or the source carrying no audio stream, where before it packaged silently
+with the map applied to nothing. Without `--audio-map` a soundless video still
+packages picture-only. The GUI never demuxes from `--video`, so its own guard is
+correct and stays.
 
 ## Fixed 2026-08-17 (the picture MXF is written while the encode runs)
 

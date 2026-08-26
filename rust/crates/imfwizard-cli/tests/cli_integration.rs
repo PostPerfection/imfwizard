@@ -1326,24 +1326,115 @@ fn the_picture_flags_are_refused_where_they_cannot_act() {
     }
 }
 
-/// The auto-demuxed track is written after the map would have run, so a map with
-/// no --audio has to say so rather than doing nothing.
+/// The track demuxed from `--video` is written before the map runs, so a map
+/// with no `--audio` has to reach the demuxed sound.
 #[test]
-fn an_audio_map_without_an_audio_file_is_refused() {
+fn an_audio_map_reaches_the_track_demuxed_from_the_video() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
     cmd()
         .args([
             "create",
             "-o",
-            &dir.path().join("out").to_string_lossy(),
+            &output.to_string_lossy(),
             "-t",
-            "Map",
+            "Demuxed Map",
+            "--video",
+            &clip.to_string_lossy(),
+            "--audio-map",
+            "1:L,1:R,1:C@-6",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    let mapped = output.join("audio_mapped.wav");
+    let mut reader = hound::WavReader::open(&mapped).expect("the mapped wav");
+    assert_eq!(reader.spec().channels, 3);
+    let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
+    let half = 10f64.powf(-6.0 / 20.0);
+    let mut sounding_frames = 0;
+    for frame in 0..samples.len() / 3 {
+        let left = samples[frame * 3] as f64;
+        let centre = samples[frame * 3 + 2] as f64;
+        assert!(
+            (centre - left * half).abs() <= 1.0,
+            "frame {frame}: centre {centre} is not {half} of {left}"
+        );
+        if left.abs() > 1000.0 {
+            sounding_frames += 1;
+        }
+    }
+    assert!(
+        sounding_frames > 0,
+        "the mapped lanes are silent, so the demuxed sine never reached the map"
+    );
+}
+
+/// With no `--audio` and a video that carries no sound, the map has nothing to
+/// apply to, which used to package silently.
+#[test]
+fn an_audio_map_on_a_video_with_no_sound_is_refused_by_name() {
+    if !have_ffmpeg() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("silent.mov");
+    synthesize_silent_clip(&clip);
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("imp").to_string_lossy(),
+            "-t",
+            "Silent Map",
+            "--video",
+            &clip.to_string_lossy(),
             "--audio-map",
             "1:L,2:R",
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--audio-map needs --audio"));
+        .stderr(predicate::str::contains(
+            "--audio-map has nothing to apply to",
+        ))
+        .stderr(predicate::str::contains("carries no audio stream"));
+}
+
+/// A three frame colour-bars clip with no audio stream at all.
+fn synthesize_silent_clip(path: &Path) {
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=s=1920x1080:r=24",
+            "-frames:v",
+            "3",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+        ])
+        .arg(path)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

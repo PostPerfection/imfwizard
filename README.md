@@ -57,7 +57,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Color & Audio Processing
 - **Source colour space**, `create --source-colourspace rec709|xyz` picks whether the encoder runs its X'Y'Z' transform (rec709, the default) or leaves frames that already carry it alone (xyz). p3, rec2020, aces, acescg and logc are accepted spellings but refused, since nothing here builds the transform they would need
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
-- **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the `--audio` WAV's channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
+- **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
 - **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
 - **Audio description mixing**, combine AD narration with main mix using ducking

@@ -43,6 +43,40 @@ fn fail(message: impl std::fmt::Display) -> ! {
     std::process::exit(1);
 }
 
+/// Why the demux from `--video` produced no WAV, separating a source with no
+/// sound in it from an ffmpeg that could not run or refused the file.
+fn demux_failure_reason(
+    video: &std::path::Path,
+    demuxed: &std::io::Result<std::process::Output>,
+) -> String {
+    let run = match demuxed {
+        Err(e) => return format!("ffmpeg could not run: {e}"),
+        Ok(run) => run,
+    };
+    let probe = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(video)
+        .output();
+    match probe {
+        Ok(probe) if probe.status.success() && probe.stdout.is_empty() => {
+            "it carries no audio stream".to_string()
+        }
+        _ => format!(
+            "ffmpeg failed to demux it: {}",
+            String::from_utf8_lossy(&run.stderr).trim()
+        ),
+    }
+}
+
 /// Encode picture through the shared grok pipeline (grk_compress), printing
 /// per-frame progress. Ctrl-C cancels the run.
 ///
@@ -1548,14 +1582,6 @@ fn run() {
 
             let picture_options = picture_arguments.resolve();
 
-            // the auto-demuxed track is written after the map would have run, so
-            // mapping it would silently do nothing
-            if audio_map.is_some() && audio.is_none() {
-                fail(
-                    "--audio-map needs --audio: pass the WAV to map explicitly, since the track demuxed from --video is written after the map runs",
-                );
-            }
-
             if fps_num == 0 || fps_den == 0 {
                 fail(format!(
                     "--fps-num {fps_num} --fps-den {fps_den}: an edit rate needs both above 0"
@@ -1873,11 +1899,20 @@ fn run() {
                                     .arg(&wav_out)
                                     .output();
                                 match demux {
-                                    Ok(o) if o.status.success() => {
+                                    Ok(run) if run.status.success() => {
                                         tracing::info!("Demuxed audio: {}", wav_out.display());
                                         vec![wav_out]
                                     }
-                                    _ => vec![],
+                                    demuxed => {
+                                        if audio_map.is_some() {
+                                            fail(format!(
+                                                "--audio-map has nothing to apply to: no sound came out of {}, {}",
+                                                video_path.display(),
+                                                demux_failure_reason(&video_path, &demuxed)
+                                            ));
+                                        }
+                                        vec![]
+                                    }
                                 }
                             }
                         };
