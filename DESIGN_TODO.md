@@ -13,18 +13,20 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
-## Open: frame-extract still decodes J2K with ffmpeg
+## Open: App 2E frame-extract still decodes J2K with ffmpeg
 
-`frame-extract` calls `postkit::preview::extract_frame`, which runs ffmpeg over
-whatever it is given, so for an App 2E track file that is ffmpeg's software
-jpeg2000 decoder at a few frames a second, and its `-ss` sits after `-i`, so a
-late frame decodes every frame before it. postkit now decodes J2K in process
-through `grok_decoder`, 68 ms a frame on 2K at 125 Mb/s against ffmpeg's 302 ms
-and 5 ms at `reduce` 2, and this workspace already links `grok-ffi`, so the
-decoder is here and unused. Routing `extract_frame` to it needs a rule for what
-counts as J2K essence and a decision about encrypted essence with no key, which
-ffmpeg renders as garbage and grok refuses. Same entry in dcpwizard's
-DESIGN_TODO: one postkit change serves both.
+`postkit::preview::extract_frame` now routes to grok, but only for codestreams
+declaring a DCI cinema profile, so an App 2E track file still goes to ffmpeg's
+software jpeg2000 decoder at a few frames a second with `-ss` after `-i`. The
+profile is the rule, not the container: App 2E samples are RGB or YCbCr in
+Rec.709 or Rec.2020, not X'Y'Z', so `XyzToSrgb`, the DCDM inverse the grok path
+applies, would give wrong colour on them. grok decodes them either way, so what
+is missing is the display transform for those spaces.
+`DcdmTransform::to_xyz(Rec709)` feeding `XyzToSrgb` chains two transforms that
+already exist, and 4:2:2 essence needs chroma upsampling that `grok_decoder`
+refuses by name today. Needs a real App 2E track file to verify against. Same
+entry in postkit's DESIGN_TODO. A DCP-native `to-dcp` output does take the grok
+path already, since its codestreams carry the cinema profile.
 
 ## Open: no black or frozen picture pass over a finished IMP
 
