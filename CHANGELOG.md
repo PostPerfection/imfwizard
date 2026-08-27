@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Removed
+- **`imfwizard_core::burnin`**: a re-export of `postkit::burnin` that nothing here called. imfwizard packages a burn through `create --burn-subtitle`, and a caller wanting the standalone pass calls postkit directly.
 - **`sdi-preview`**: it set an mpv property mpv does not have and played on screen while claiming DeckLink output. A real SDI path needs ffmpeg or GStreamer built against the Blackmagic SDK, recorded in DESIGN_TODO.
 
 ### Added
