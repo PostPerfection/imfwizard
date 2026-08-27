@@ -13,6 +13,15 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
+## Open: no black or frozen picture pass over a finished IMP
+
+postkit's `picture_findings::detect_in_essence` runs ffmpeg's blackdetect and
+freezedetect over a finished picture file, and dcpwizard's `report
+--scan-picture` renders what it finds per reel. Nothing here calls it: this
+repo's `report` is a re-export of postkit's generic severity/category renderer,
+so there is no section for a per-track-file finding to go in. The encode already
+reports its own findings.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
