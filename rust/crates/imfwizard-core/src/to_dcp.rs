@@ -381,7 +381,7 @@ fn check_j2k_dci(frame: &[u8]) -> Result<(), String> {
     let h = postkit::j2k::parse_j2k_header(frame)
         .ok_or("picture essence is not a JPEG 2000 codestream")?;
     match postkit::j2k::J2kProfile::from(h.profile) {
-        postkit::j2k::J2kProfile::CinemaS2k | postkit::j2k::J2kProfile::CinemaS4k => {}
+        postkit::j2k::J2kProfile::Cinema2k | postkit::j2k::J2kProfile::Cinema4k => {}
         other => {
             return Err(format!(
                 "J2K is a {other:?} profile, not a DCI 2K/4K cinema profile; transcode required"
