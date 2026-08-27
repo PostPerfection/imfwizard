@@ -1015,6 +1015,15 @@ enum Commands {
         /// Output image file (png, jpg, tiff)
         #[arg(short, long)]
         output: String,
+
+        /// Content key for encrypted picture essence, 32 hex chars. Other users
+        /// of the machine can read it from the process list: prefer --keys-json
+        #[arg(long, conflicts_with = "keys_json")]
+        key: Option<String>,
+
+        /// KEYS.json holding the content key for encrypted essence
+        #[arg(long)]
+        keys_json: Option<String>,
     },
 
     /// Inject Dolby Vision RPU into HEVC stream
@@ -2838,11 +2847,25 @@ fn run() {
             input,
             frame,
             output,
+            key,
+            keys_json,
         } => {
+            let key = match postkit::preview::resolve_picture_key(
+                std::path::Path::new(&input),
+                key.as_deref(),
+                keys_json.as_deref().map(std::path::Path::new),
+            ) {
+                Ok(key) => key,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                }
+            };
             let result = postkit::preview::extract_frame(
                 std::path::Path::new(&input),
                 frame,
                 std::path::Path::new(&output),
+                key,
             );
             if result == 0 {
                 println!("Frame {frame} extracted to {output}");
