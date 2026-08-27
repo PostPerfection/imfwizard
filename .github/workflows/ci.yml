@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev ffmpeg
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'

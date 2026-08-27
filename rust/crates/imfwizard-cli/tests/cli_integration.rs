@@ -157,30 +157,36 @@ fn a_negative_audio_delay_reaches_the_delay() {
         .stderr(predicate::str::contains("audio delay of -5000 ms"));
 }
 
-/// A J2K directory goes straight to the wrapper, so a source colour space would
-/// have nothing to act on and must not be accepted in silence.
+/// An App 2E picture carries the RGB its descriptor declares, so a source in any
+/// other space is refused by name before anything is encoded.
 #[test]
-fn a_source_colourspace_on_precompressed_picture_is_refused() {
+fn a_source_colourspace_that_is_not_rec709_is_refused_by_name() {
     let dir = TempDir::new().unwrap();
     let frames = dir.path().join("j2k");
     std::fs::create_dir_all(&frames).unwrap();
     std::fs::write(frames.join("frame_00000000.j2c"), b"codestream").unwrap();
 
-    cmd()
-        .args([
-            "create",
-            "-o",
-            &dir.path().join("out").to_string_lossy(),
-            "-t",
-            "T",
-            "--video",
-            &frames.to_string_lossy(),
-            "--source-colourspace",
-            "xyz",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("already J2K"));
+    for (space, needle) in [
+        ("xyz", "X'Y'Z'"),
+        ("p3", "Rec.709 RGB"),
+        ("rec2020", "Rec.709 RGB"),
+    ] {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &dir.path().join("out").to_string_lossy(),
+                "-t",
+                "T",
+                "--video",
+                &frames.to_string_lossy(),
+                "--source-colourspace",
+                space,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(needle));
+    }
 }
 
 #[test]
@@ -201,10 +207,10 @@ fn an_unknown_source_colourspace_is_refused_by_name() {
         .stderr(predicate::str::contains("rec601"));
 }
 
-/// ACES and ACEScg are scene-referred, so no matrix reaches X'Y'Z' from them and
-/// the refusal has to name both routes that do convert them.
+/// ACES and ACEScg are scene-referred, so the refusal has to name the one route
+/// that converts them.
 #[test]
-fn a_scene_referred_colourspace_is_refused_with_both_routes() {
+fn a_scene_referred_colourspace_is_refused_naming_the_route_that_converts_it() {
     let dir = TempDir::new().unwrap();
     for space in ["aces", "acescg"] {
         cmd()
@@ -219,10 +225,7 @@ fn a_scene_referred_colourspace_is_refused_with_both_routes() {
             ])
             .assert()
             .failure()
-            .stderr(
-                predicate::str::contains("--source-lut")
-                    .and(predicate::str::contains("imfwizard aces")),
-            );
+            .stderr(predicate::str::contains("imfwizard aces"));
     }
 }
 
@@ -251,12 +254,13 @@ fn a_source_lut_and_a_source_colourspace_together_are_refused() {
         .stderr(predicate::str::contains("cannot be used with"));
 }
 
-/// ffmpeg only opens the LUT once the decode runs, so `create` has to refuse a
-/// path that names nothing before it encodes anything.
+/// The LUT lands the frames on X'Y'Z', which an App 2E picture cannot carry, so
+/// `create` refuses it by path before anything is encoded.
 #[test]
-fn a_source_lut_that_is_not_there_is_refused_by_path() {
+fn a_source_lut_is_refused_by_path() {
     let dir = TempDir::new().unwrap();
-    let missing = dir.path().join("hdr_to_xyz.cube");
+    let lut = dir.path().join("hdr_to_xyz.cube");
+    std::fs::write(&lut, IDENTITY_CUBE).unwrap();
 
     cmd()
         .args([
@@ -266,11 +270,13 @@ fn a_source_lut_that_is_not_there_is_refused_by_path() {
             "-t",
             "Test",
             "--source-lut",
-            &missing.to_string_lossy(),
+            &lut.to_string_lossy(),
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("hdr_to_xyz.cube"));
+        .stderr(
+            predicate::str::contains("hdr_to_xyz.cube").and(predicate::str::contains("X'Y'Z'")),
+        );
 }
 
 /// The smallest legal .cube: a 2x2x2 grid whose entries are the cube corners, so
@@ -279,33 +285,15 @@ const IDENTITY_CUBE: &str = "LUT_3D_SIZE 2\n\
     0.0 0.0 0.0\n1.0 0.0 0.0\n0.0 1.0 0.0\n1.0 1.0 0.0\n\
     0.0 0.0 1.0\n1.0 0.0 1.0\n0.0 1.0 1.0\n1.0 1.0 1.0\n";
 
-/// --hdr says nothing transformed the essence, so a source the encoder would
-/// transform contradicts it.
+/// --hdr says nothing transformed the essence, and an App 2E encode transforms
+/// nothing, so the two compose: the only thing left to refuse is the picture
+/// that was never named.
 #[test]
-fn hdr_refuses_a_source_the_encoder_would_transform() {
+fn hdr_composes_with_the_only_source_colourspace_that_encodes() {
     let dir = TempDir::new().unwrap();
-    let create = |space: &str| {
-        cmd()
-            .args([
-                "create",
-                "-o",
-                &dir.path().to_string_lossy(),
-                "-t",
-                "Test",
-                "--hdr",
-                "pq-bt2020",
-                "--source-colourspace",
-                space,
-            ])
-            .assert()
-            .failure()
-    };
-    create("rec709").stderr(predicate::str::contains("--source-colourspace rec709"));
-    // xyz leaves the frames alone, so it composes with an HDR label
-    create("xyz").stderr(predicate::str::contains("--source-colourspace").not());
-    // no flag at all resolves to rec709, which the encoder transforms
-    cmd()
-        .args([
+    let create = |extra: &[&str]| {
+        let mut command = cmd();
+        command.args([
             "create",
             "-o",
             &dir.path().to_string_lossy(),
@@ -313,10 +301,18 @@ fn hdr_refuses_a_source_the_encoder_would_transform() {
             "Test",
             "--hdr",
             "pq-bt2020",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--source-colourspace rec709"));
+        ]);
+        command.args(extra);
+        command.assert().failure()
+    };
+    for extra in [&[][..], &["--source-colourspace", "rec709"][..]] {
+        create(extra).stderr(
+            predicate::str::contains("J2K input directory is required")
+                .and(predicate::str::contains("--source-colourspace").not()),
+        );
+    }
+    // xyz is a DCP picture whatever the HDR label says
+    create(&["--source-colourspace", "xyz"]).stderr(predicate::str::contains("X'Y'Z'"));
 }
 
 #[test]
@@ -688,17 +684,6 @@ fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
     };
 
     for (mut command, needle) in [
-        (
-            create(&clip, &["--source-colourspace", "xyz"]),
-            "X'Y'Z' already",
-        ),
-        (
-            create(
-                &clip,
-                &["--hdr", "pq-bt2020", "--source-colourspace", "xyz"],
-            ),
-            "X'Y'Z' already",
-        ),
         (create(&codestreams, &[]), "already compressed"),
         (
             create(&clip, &["--subtitle", &srt.to_string_lossy()]),

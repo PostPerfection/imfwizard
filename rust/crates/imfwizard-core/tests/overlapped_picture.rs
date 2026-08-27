@@ -17,6 +17,17 @@ const HEIGHT: u32 = 1080;
 const FRAMES: u64 = 4;
 const FPS: u32 = 24;
 
+/// The IMF Rsiz this raster and rate compose, which is what `create` encodes at.
+fn imf_rsiz() -> u16 {
+    imfwizard_core::encode::imf_rsiz_for_encode(
+        WIDTH,
+        HEIGHT,
+        FPS as f64,
+        imfwizard_core::encode::bitrate_mbps_for_job(None, None, WIDTH, HEIGHT, FPS as f64),
+    )
+    .unwrap()
+}
+
 fn have_ffmpeg() -> bool {
     std::process::Command::new("ffmpeg")
         .arg("-version")
@@ -96,13 +107,15 @@ fn a_video_create_wraps_its_picture_during_the_encode() {
         &encode_dir,
         &postkit::pipeline::EncodeRunOptions {
             fps: postkit::encode::FrameRate::whole(FPS),
+            source_colour: postkit::encode::SourceColour::KeepRgb,
+            rsiz: imf_rsiz(),
             ..Default::default()
         },
         PictureWrapTarget {
             imp_dir: imp_dir.clone(),
             fps_num: FPS,
             fps_den: 1,
-            hdr: Some(hdr.to_asdcp()),
+            colour: imfwizard_core::mxf_wrap::picture_colour(Some(&hdr)),
         },
         &Arc::new(AtomicBool::new(false)),
         &Arc::new(AtomicBool::new(false)),

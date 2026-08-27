@@ -355,7 +355,12 @@ mod tests {
         std::fs::write(path, data).unwrap();
     }
 
-    /// Build `n` distinct J2K codestreams in `dir` via grk_compress.
+    /// The IMF profile and levels grk_compress is asked for, which is what an
+    /// App 2E track file at 2048x1080 and 24 fps declares.
+    const IMF_PROFILE_FLAG: &str = "2K,mainlevel=4,sublevel=2";
+
+    /// Build `n` distinct J2K codestreams in `dir` via grk_compress. They carry
+    /// an IMF Rsiz, since the AS-02 wrap takes no other family.
     fn make_j2c_frames(compress: &Path, lib: &str, dir: &Path, n: u8) {
         std::fs::create_dir_all(dir).unwrap();
         for i in 0..n {
@@ -364,7 +369,14 @@ mod tests {
             let j2c = dir.join(format!("frame_{i:04}.j2c"));
             let out = std::process::Command::new(compress)
                 .env("LD_LIBRARY_PATH", lib)
-                .args(["-i", &ppm.to_string_lossy(), "-o", &j2c.to_string_lossy()])
+                .args([
+                    "-i",
+                    &ppm.to_string_lossy(),
+                    "-o",
+                    &j2c.to_string_lossy(),
+                    "-z",
+                    IMF_PROFILE_FLAG,
+                ])
                 .output()
                 .unwrap();
             assert!(
@@ -490,9 +502,12 @@ mod tests {
     }
 
     /// Write an encrypted AS-02 J2K MXF carrying `frames` copies of one codestream.
+    ///
+    /// The descriptor's sub-descriptor is read off `j2c` itself, so the MXF
+    /// describes the essence it holds rather than a size and depth chosen here.
     fn write_encrypted_mxf(j2c: &[u8], out: &Path, frames: u32) {
         use asdcplib::crypto::{AesEncContext, HmacContext};
-        use asdcplib::jp2k::PictureDescriptor;
+        use asdcplib::jp2k::{CodestreamHeader, PictureDescriptor};
         use asdcplib::{LabelSet, Rational, WriterInfo};
 
         let desc = PictureDescriptor {
@@ -502,7 +517,7 @@ mod tests {
             stored_height: H,
             aspect_ratio: Rational::new(W as i32, H as i32),
             container_duration: frames,
-            component_count: 3,
+            codestream: CodestreamHeader::parse(j2c).expect("read the codestream header"),
         };
         let info = WriterInfo {
             asset_uuid: [0x11; 16],

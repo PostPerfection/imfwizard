@@ -496,16 +496,17 @@ enum Commands {
         #[arg(long = "audio-delay")]
         audio_delay: Option<i64>,
 
-        /// Colour space the picture source carries: rec709 (default), p3, xyz,
-        /// rec2020 or logc. rec709 runs the encoder's X'Y'Z' transform, xyz
-        /// leaves the frames alone. aces and acescg are refused, since they need
-        /// a rendering transform: use --source-lut or `imfwizard aces`.
+        /// Colour space the picture source carries. An App 2E picture ships the
+        /// RGB its essence descriptor declares, so rec709 (the default) is the
+        /// only one that encodes: it is compressed untransformed. xyz, p3,
+        /// rec2020, logc, aces and acescg are refused by name, since the only
+        /// transform there is for them lands on X'Y'Z'.
         #[arg(long = "source-colourspace")]
         source_colourspace: Option<String>,
 
-        /// 3D LUT (.cube) that converts the source to X'Y'Z' during decode,
-        /// after which nothing transforms the frames again. Conflicts with
-        /// --source-colourspace, whose transform the LUT replaces.
+        /// 3D LUT (.cube) that converts the source to X'Y'Z' during decode.
+        /// Refused: an App 2E picture carries RGB, so apply the LUT to the
+        /// source first or package the result as a DCP.
         #[arg(long = "source-lut", conflicts_with = "source_colourspace")]
         source_lut: Option<PathBuf>,
 
@@ -1608,31 +1609,19 @@ fn run() {
                     psnr_range.end()
                 ));
             }
-            // the source colour space decides the encoder transform, so a bad
-            // spelling has to fail before anything is encoded
+            // a spelling the encode cannot take has to fail before anything is
+            // encoded. The LUT is refused in the preflight instead, so its path
+            // reaches the message
             let colourspace = source_colourspace
                 .as_deref()
                 .map(|s| imfwizard_core::source_colourspace::parse(s).unwrap_or_else(|e| fail(e)));
             let source_colour = match source_lut {
-                // the LUT lands the frames on X'Y'Z' during decode, so it stands
-                // in for a source colour space rather than joining one
                 Some(lut) => postkit::encode::SourceColour::DciLut(lut),
                 None => imfwizard_core::source_colourspace::to_source_colour(
-                    colourspace.unwrap_or(postkit::colour::ColourSpace::Rec709),
+                    colourspace.unwrap_or(imfwizard_core::source_colourspace::APP2E_SOURCE_SPACE),
                 )
                 .unwrap_or_else(|e| fail(e)),
             };
-            // --hdr declares the essence untransformed, so the resolved route
-            // (not the flag, which defaults to rec709 when absent) must not
-            // run the encoder transform
-            if hdr.is_some() && source_colour.applies_xyz_transform() {
-                fail(format!(
-                    "--hdr labels the picture as essence nothing transformed, but \
-                     --source-colourspace {} makes the encoder run its own X'Y'Z' transform. \
-                     Use --source-colourspace xyz for a source that is already X'Y'Z'",
-                    source_colourspace.as_deref().unwrap_or("rec709")
-                ));
-            }
 
             let picture_options = picture_arguments.resolve();
 
@@ -1765,6 +1754,22 @@ fn run() {
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
                 let fps = imfwizard_core::encode::FrameRate::new(fps_num, fps_den);
+                // a hold encodes at the default ratio whatever --bitrate says,
+                // so the sub level is the one that ratio reaches
+                let still_bitrate_mbps = imfwizard_core::encode::bitrate_mbps_for_job(
+                    None,
+                    None,
+                    picture.encode_width,
+                    picture.encode_height,
+                    fps.as_f64(),
+                );
+                let rsiz = imfwizard_core::encode::imf_rsiz_for_encode(
+                    picture.encode_width,
+                    picture.encode_height,
+                    fps.as_f64(),
+                    still_bitrate_mbps,
+                )
+                .unwrap_or_else(|e| fail(e));
                 let held = output.join(postkit::still::HELD_PICTURE_DIR);
                 postkit::still::build_still_frames(&postkit::still::StillHold {
                     image,
@@ -1774,6 +1779,7 @@ fn run() {
                     height: picture.encode_height,
                     filters: &picture.plan.filters,
                     apply_xyz_transform: source_colour.applies_xyz_transform(),
+                    rsiz,
                     colour_transform: None,
                     burn: build_subtitle_burn(fps),
                     out_dir: &held,
@@ -1873,6 +1879,23 @@ fn run() {
                             picture.encode_height,
                             encode_fps.as_f64(),
                         );
+                        // the codestreams declare an IMF profile, not the cinema
+                        // one a DCP carries: the levels come from this raster,
+                        // this rate and the bits a second the job allows
+                        let rsiz = imfwizard_core::encode::imf_rsiz_for_encode(
+                            picture.encode_width,
+                            picture.encode_height,
+                            encode_fps.as_f64(),
+                            imfwizard_core::encode::bitrate_mbps_for_job(
+                                bitrate,
+                                preset_bitrate_mbps,
+                                picture.encode_width,
+                                picture.encode_height,
+                                encode_fps.as_f64(),
+                            ),
+                        )
+                        .unwrap_or_else(|e| fail(e));
+                        tracing::info!("JPEG 2000 profile: IMF, RSIZ {rsiz:#06x}");
                         // under a PSNR target the bitrate is a ceiling per frame
                         // rather than what the allocation aims at
                         let codestream_byte_cap = quality_psnr
@@ -1914,7 +1937,7 @@ fn run() {
                                 imp_dir: output.clone(),
                                 fps_num,
                                 fps_den,
-                                hdr: hdr.as_ref().map(|h| h.to_asdcp()),
+                                colour: imfwizard_core::mxf_wrap::picture_colour(hdr.as_ref()),
                             }),
                         };
 
@@ -1947,6 +1970,7 @@ fn run() {
                                 fps: encode_fps,
                                 frame_range: encode_window,
                                 source_colour: source_colour.clone(),
+                                rsiz,
                                 subtitle_burn: build_subtitle_burn(encode_fps),
                                 picture: picture.processing.clone(),
                                 ..Default::default()

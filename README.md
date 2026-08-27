@@ -19,16 +19,17 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Original Version IMP creation** from J2K + WAV
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
 - **Subtitle conversion** to IMSC/TTML from SRT, SCC (CEA-608 pop-on captions), ASS/SSA, FCPXML, and MKS (Matroska); ASS/FCPXML/MKS keep styling and placement (italic/bold/underline/colour, alignment, position) in the TTML output
+- **App 2E picture essence**, the codestreams declare an IMF JPEG 2000 profile (RSIZ 0x0400 to 0x09ff, the profile the raster picks with the levels its rate and bitrate ask for) and carry 12-bit RGB 4:4:4. The picture MXF signals ColorPrimaries and TransferCharacteristic on its RGBA essence descriptor, Rec.709 without `--hdr` and the preset's PQ primaries with it
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
-- **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP
+- **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP. It rewraps only, so it takes a DCI X'Y'Z' cinema picture: an IMP imfwizard made carries RGB IMF essence and is refused naming the transcode it would need
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok. DPX, TIFF, EXR and BMP frames are handed to `grk_compress` as they are, JPEG and PNG frames decode through ffmpeg first, since grok reads them only when it was built with those loaders
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
-- **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto an already-X'Y'Z' source or a J2K directory is refused
+- **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
@@ -55,8 +56,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
 
 ### Color & Audio Processing
-- **Source colour space**, `create --source-colourspace rec709|p3|rec2020|logc|xyz` says what the picture carries. rec709 (the default) runs the encoder's own X'Y'Z' transform, xyz leaves frames that already carry it alone, and p3, rec2020 and logc are converted frame by frame with that space's curve and matrix. aces and acescg are refused: they are scene-referred, so no matrix reaches X'Y'Z' from them
-- **Source LUT**, `create --source-lut <file.cube>` converts the source to X'Y'Z' during decode with ffmpeg's lut3d filter, after which nothing transforms the frames again. It is the route for an ACES or ACEScg master, alongside converting it first with `imfwizard aces --idt <IDT> --odt <ODT>`. It conflicts with `--source-colourspace`
+- **Source colour space**, `create --source-colourspace rec709` says what the picture carries. An App 2E picture ships the RGB its essence descriptor declares, so rec709 (the default) is the only value that encodes: the decoded frames are compressed untouched. xyz, p3, rec2020, logc, aces and acescg are each refused by name, since the only transform there is for them lands on X'Y'Z', which is a DCP picture rather than an IMF one. Convert such a source to Rec.709 RGB first
+- **Source LUT**, `create --source-lut <file.cube>` is refused for the same reason: the LUT lands the frames on X'Y'Z' and nothing transforms them again, so the codestreams would contradict the descriptor. Apply the LUT to the source first, or package the result as a DCP
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d

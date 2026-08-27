@@ -13,20 +13,31 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
-## Open: App 2E frame-extract still decodes J2K with ffmpeg
+## Open: `to-dcp` cannot take an IMP imfwizard made
 
-`postkit::preview::extract_frame` now routes to grok, but only for codestreams
-declaring a DCI cinema profile, so an App 2E track file still goes to ffmpeg's
-software jpeg2000 decoder at a few frames a second with `-ss` after `-i`. The
-profile is the rule, not the container: App 2E samples are RGB or YCbCr in
-Rec.709 or Rec.2020, not X'Y'Z', so `XyzToSrgb`, the DCDM inverse the grok path
-applies, would give wrong colour on them. grok decodes them either way, so what
-is missing is the display transform for those spaces.
-`DcdmTransform::to_xyz(Rec709)` feeding `XyzToSrgb` chains two transforms that
-already exist, and 4:2:2 essence needs chroma upsampling that `grok_decoder`
-refuses by name today. Needs a real App 2E track file to verify against. Same
-entry in postkit's DESIGN_TODO. A DCP-native `to-dcp` output does take the grok
-path already, since its codestreams carry the cinema profile.
+`to_dcp.rs`'s `check_j2k_dci` accepts only a DCI 2K/4K cinema profile, since the
+command rewraps essence rather than transcoding it. Every IMP `create` writes now
+carries RGB IMF codestreams, so `to-dcp` refuses its own output naming the
+transcode it would need. Making it work means decoding each frame, converting
+Rec.709 (or the `--hdr` preset's PQ primaries) to DCI X'Y'Z', and re-encoding
+under the cinema profile, which is the whole grok encode again rather than a
+rewrap. The pieces exist: `postkit::grok_decoder::decode`,
+`postkit::colour::DcdmTransform`, and `grok_encoder` with `apply_xyz_transform`
+on and the cinema Rsiz. What is missing is the command deciding between a rewrap
+and a transcode and reporting which it did. Until then `to-dcp` serves only an
+IMP whose picture is already DCI cinema essence.
+
+## Open: no gamut conversion for a source that is not Rec.709
+
+`create --source-colourspace` takes `rec709` alone. P3, Rec.2020, LogC, ACES and
+ACEScg parse and are refused by name, because the only transform postkit has for
+each of them is `DcdmTransform`, which lands on X'Y'Z'. An App 2E picture carries
+the RGB its essence descriptor declares, so what those sources need is an
+RGB-to-RGB conversion into Rec.709 (or into the `--hdr` preset's primaries),
+which nothing here or in postkit has. `--source-lut` is refused for the same
+reason and would be the cheapest route back: a `lut3d` landing on Rec.709 RGB
+rather than X'Y'Z' works today if the flag could say which space it targets.
+Shared with postkit, whose `colour.rs` is where the matrix would go.
 
 ## Open: no black or frozen picture pass over a finished IMP
 
@@ -36,6 +47,14 @@ freezedetect over a finished picture file, and dcpwizard's `report
 repo's `report` is a re-export of postkit's generic severity/category renderer,
 so there is no section for a per-track-file finding to go in. The encode already
 reports its own findings.
+
+## Open: a subsampled App 2E track file has no decode path
+
+`postkit::grok_decoder` refuses a component that is not 4:4:4 by name, so a
+frame-extract or a preview of an App 2E track file carrying 4:2:2 chroma has
+nowhere to go. Every picture `create` writes is 4:4:4, so this is only about
+essence from elsewhere. Chroma upsampling belongs in postkit's decoder, which is
+where its DESIGN_TODO carries the entry.
 
 ## Deliberately skipped / standing limitations
 

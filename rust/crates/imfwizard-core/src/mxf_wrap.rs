@@ -200,7 +200,25 @@ pub fn precheck_j2k(input_dir: &std::path::Path) -> Result<(), String> {
             files[0].display()
         ));
     };
-    validate_app2e_picture(header.width, header.height, header.bit_depth)
+    validate_app2e_picture(
+        header.profile,
+        header.width,
+        header.height,
+        header.bit_depth,
+    )
+}
+
+/// The colour metadata an App 2E picture wrap declares: the `--hdr` preset's
+/// when the job named one, Rec.709 SDR otherwise.
+///
+/// ST 2067-21 puts ColorPrimaries and TransferCharacteristic on the RGBA essence
+/// descriptor and postkit's AS-02 wrap refuses a picture that signals neither,
+/// so every picture wrap goes through this.
+pub fn picture_colour(hdr: Option<&crate::hdr_wcg::HdrWcg>) -> asdcplib::jp2k::HdrMetadata {
+    match hdr {
+        Some(hdr) => hdr.to_asdcp(),
+        None => postkit::mxf_wrap::rec709_sdr_picture_colour(),
+    }
 }
 
 /// The picture rasters App 2E allows.
@@ -227,15 +245,36 @@ pub fn validate_app2e_raster(width: u32, height: u32) -> Result<(), String> {
     ))
 }
 
-pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<(), String> {
+pub fn validate_app2e_picture(
+    rsiz: u16,
+    width: u32,
+    height: u32,
+    bit_depth: u8,
+) -> Result<(), String> {
     validate_app2e_raster(width, height)?;
     if !matches!(bit_depth, 8 | 10 | 12) {
         return Err(format!(
             "App 2E requires 8, 10, or 12-bit picture essence, got {bit_depth}-bit"
         ));
     }
+    let profile = postkit::j2k::J2kProfile::from(rsiz);
+    if profile != postkit::j2k::J2kProfile::Imf {
+        let samples = match profile.is_dci_cinema() {
+            true => "a DCI cinema profile, so its samples are X'Y'Z'",
+            false => "not an IMF profile",
+        };
+        return Err(format!(
+            "App 2E requires an IMF JPEG 2000 profile (RSIZ 0x0400 to 0x09ff), got \
+             RSIZ {rsiz:#06x}, which is {samples}"
+        ));
+    }
     Ok(())
 }
+
+/// The Rsiz a synthetic codestream declares: IMF 2K, main level 4, sub level 2,
+/// what 2048x1080 at 24 fps and 250 Mbps composes to.
+#[cfg(test)]
+pub(crate) const SYNTHETIC_IMF_RSIZ: u16 = 0x0424;
 
 /// A minimal JPEG 2000 codestream at a given raster: SOC, SIZ, SOD, EOC. The
 /// App 2E checks and the AS-02 writer read only the SIZ, so nothing more is
@@ -244,7 +283,7 @@ pub fn validate_app2e_picture(width: u32, height: u32, bit_depth: u8) -> Result<
 pub(crate) fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -> Vec<u8> {
     const COMPONENTS: u16 = 3;
     let mut siz = Vec::new();
-    siz.extend_from_slice(&3u16.to_be_bytes()); // Rsiz
+    siz.extend_from_slice(&SYNTHETIC_IMF_RSIZ.to_be_bytes()); // Rsiz
     siz.extend_from_slice(&width.to_be_bytes()); // Xsiz
     siz.extend_from_slice(&height.to_be_bytes()); // Ysiz
     siz.extend_from_slice(&0u32.to_be_bytes()); // XOsiz
@@ -276,9 +315,41 @@ mod tests {
 
     #[test]
     fn app2e_picture_constraints_reject_invalid_essence() {
-        assert!(validate_app2e_picture(1920, 1080, 12).is_ok());
-        assert!(validate_app2e_picture(2048, 872, 12).is_err());
-        assert!(validate_app2e_picture(2048, 1080, 16).is_err());
+        assert!(validate_app2e_picture(SYNTHETIC_IMF_RSIZ, 1920, 1080, 12).is_ok());
+        assert!(validate_app2e_picture(SYNTHETIC_IMF_RSIZ, 2048, 872, 12).is_err());
+        assert!(validate_app2e_picture(SYNTHETIC_IMF_RSIZ, 2048, 1080, 16).is_err());
+    }
+
+    /// A DCP codestream at a legal raster and depth is still not App 2E picture:
+    /// its samples are X'Y'Z', so the refusal has to name the profile.
+    #[test]
+    fn a_cinema_profile_codestream_is_not_app2e_picture() {
+        const CINEMA_2K_RSIZ: u16 = 0x0003;
+        let error = validate_app2e_picture(CINEMA_2K_RSIZ, 2048, 1080, 12).unwrap_err();
+        assert!(error.contains("0x0003"), "{error}");
+        assert!(error.contains("X'Y'Z'"), "{error}");
+
+        // Rsiz 0, what grk_compress writes without a profile flag
+        let error = validate_app2e_picture(0, 2048, 1080, 12).unwrap_err();
+        assert!(error.contains("not an IMF profile"), "{error}");
+    }
+
+    /// The AS-02 wrap refuses a picture that signals no colour, so an SDR job
+    /// with no `--hdr` still has to arrive with the Rec.709 ULs.
+    #[test]
+    fn an_sdr_picture_wrap_signals_rec709() {
+        let colour = picture_colour(None);
+        assert_eq!(
+            colour.color_primaries,
+            Some(asdcplib::jp2k::COLOR_PRIMARIES_BT709)
+        );
+        assert_eq!(
+            colour.transfer_characteristic,
+            Some(asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709)
+        );
+
+        let hdr = crate::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None).unwrap();
+        assert_eq!(picture_colour(Some(&hdr)), hdr.to_asdcp());
     }
 
     /// `create` runs this on the probed source before the encode, so the message

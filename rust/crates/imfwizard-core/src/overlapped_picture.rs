@@ -43,7 +43,9 @@ pub struct PictureWrapTarget {
     pub imp_dir: std::path::PathBuf,
     pub fps_num: u32,
     pub fps_den: u32,
-    pub hdr: Option<asdcplib::jp2k::HdrMetadata>,
+    /// The colour the picture signals, from [`crate::mxf_wrap::picture_colour`].
+    /// Not optional: an AS-02 picture wrap that signals none is refused.
+    pub colour: asdcplib::jp2k::HdrMetadata,
 }
 
 /// Encode a composition's picture and write its AS-02 picture MXF as the frames
@@ -78,7 +80,7 @@ pub fn encode_and_wrap_picture(
             fps_num: target.fps_num,
             fps_den: target.fps_den,
             encryption: None,
-            hdr: target.hdr,
+            hdr: Some(target.colour),
             asset_uuid: Some(*asset_uuid.as_bytes()),
         },
         cancel,

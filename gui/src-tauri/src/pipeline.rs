@@ -317,7 +317,7 @@ pub async fn submit_job(
     let source_colour = imfwizard_core::source_colourspace::to_source_colour(
         match settings.source_colourspace.as_deref() {
             Some(spelling) => imfwizard_core::source_colourspace::parse(spelling)?,
-            None => postkit::colour::ColourSpace::Rec709,
+            None => imfwizard_core::source_colourspace::APP2E_SOURCE_SPACE,
         },
     )?;
     let frames_from_spec = |spec: &Option<String>| match spec.as_deref() {
@@ -884,6 +884,30 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
             _ => imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
         };
+        // the codestreams declare an IMF profile, not the cinema one a DCP
+        // carries. A J2K sequence skips the encode, so no profile is chosen for
+        // it and the wrap checks the one its codestreams already carry.
+        let rsiz = match &picture {
+            Some(resolved) => Some(imfwizard_core::encode::imf_rsiz_for_encode(
+                resolved.encode_width,
+                resolved.encode_height,
+                encode_fps.as_f64(),
+                imfwizard_core::encode::bitrate_mbps_for_job(
+                    Some(job.bandwidth as f64),
+                    None,
+                    resolved.encode_width,
+                    resolved.encode_height,
+                    encode_fps.as_f64(),
+                ),
+            )?),
+            None => None,
+        };
+        if let Some(rsiz) = rsiz {
+            log_to(
+                &log_file,
+                &format!("[ENCODE] JPEG 2000 profile: IMF, RSIZ {rsiz:#06x}"),
+            );
+        }
         // under a PSNR target the bandwidth is a ceiling per frame rather than
         // what the allocation aims at
         let codestream_byte_cap = job.quality_psnr.map(|_| {
@@ -930,7 +954,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 imp_dir: job.output_dir.clone(),
                 fps_num: job.fps_num,
                 fps_den: job.fps_den,
-                hdr: None,
+                // the GUI has no HDR control, so every build it makes is SDR
+                colour: imfwizard_core::mxf_wrap::picture_colour(None),
             }),
         };
         // a trimmed video encodes the kept window only, so the frames the trim
@@ -959,6 +984,20 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     .as_ref()
                     .ok_or_else(|| format!("cannot read the size of {}", video_path.display()))?;
                 let held = enc_dir.join(postkit::still::HELD_PICTURE_DIR);
+                // a hold encodes at the default ratio whatever the Bitrate field
+                // says, so the sub level is the one that ratio reaches
+                let still_rsiz = imfwizard_core::encode::imf_rsiz_for_encode(
+                    plan.encode_width,
+                    plan.encode_height,
+                    encode_fps.as_f64(),
+                    imfwizard_core::encode::bitrate_mbps_for_job(
+                        None,
+                        None,
+                        plan.encode_width,
+                        plan.encode_height,
+                        encode_fps.as_f64(),
+                    ),
+                )?;
                 postkit::still::build_still_frames(&postkit::still::StillHold {
                     image: &video_path,
                     frames: hold_for,
@@ -967,6 +1006,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     height: plan.encode_height,
                     filters: &plan.plan.filters,
                     apply_xyz_transform: job.source_colour.applies_xyz_transform(),
+                    rsiz: still_rsiz,
                     colour_transform: None,
                     burn: subtitle_burn.clone(),
                     out_dir: &held,
@@ -988,6 +1028,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     fps: encode_fps,
                     frame_range: encode_window,
                     source_colour: job.source_colour.clone(),
+                    // unset only for a J2K sequence, which postkit never encodes
+                    rsiz: rsiz.unwrap_or_default(),
                     subtitle_burn: subtitle_burn.clone(),
                     picture: picture
                         .as_ref()

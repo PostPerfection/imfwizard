@@ -65,7 +65,7 @@ pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
 /// two faults names the one a reader can act on.
 pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     plan.picture_options.check()?;
-    crate::source_colourspace::reject_missing_lut(&plan.source_colour)?;
+    crate::source_colourspace::reject_dci_lut(&plan.source_colour)?;
     if let Some(picture) = &plan.picture {
         if plan.still_frames.is_none() && detect_input_type(picture) == InputType::Unknown {
             return Err(unclassified_picture_refusal(picture));
@@ -89,7 +89,9 @@ fn check_burn(plan: &CreatePlan) -> Result<(), String> {
         burn,
         &crate::subtitle_burn::BurnTarget {
             timed_text: &plan.timed_text_files,
-            frames_already_xyz: !plan.source_colour.applies_xyz_transform(),
+            frames_already_xyz: crate::source_colourspace::frames_reach_the_compressor_as_xyz(
+                &plan.source_colour,
+            ),
             input_is_codestreams: detect_input_type(picture) == InputType::J2kSequence,
         },
     )?;
@@ -196,22 +198,24 @@ mod tests {
         assert!(error.contains("tif, tiff, dpx, exr, bmp"), "{error}");
     }
 
-    /// ffmpeg reads the LUT once the decode is running, so a path that names
-    /// nothing has to be refused here instead.
+    /// A LUT landing on X'Y'Z' would fill an App 2E track file with samples its
+    /// descriptor says are Rec.709 RGB, so it is refused before the encode.
     #[test]
-    fn a_source_lut_that_is_not_there_is_refused_before_the_encode() {
+    fn a_source_lut_is_refused_before_the_encode() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("hdr_to_xyz.cube");
+        let lut = dir.path().join("hdr_to_xyz.cube");
+        std::fs::write(&lut, "LUT_3D_SIZE 2\n").unwrap();
 
         let plan = CreatePlan {
             fps_num: 24,
             fps_den: 1,
-            source_colour: SourceColour::DciLut(missing.clone()),
+            source_colour: SourceColour::DciLut(lut.clone()),
             ..Default::default()
         };
         let error = check_before_encode(&plan).unwrap_err();
 
-        assert!(error.contains(&missing.display().to_string()), "{error}");
+        assert!(error.contains(&lut.display().to_string()), "{error}");
+        assert!(error.contains("X'Y'Z'"), "{error}");
     }
 
     #[test]

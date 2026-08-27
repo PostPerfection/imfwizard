@@ -21,6 +21,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# the App 2E test reads the picture MXF `create` wrote back off disk
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "3fe0962" }
 assert_cmd = "2"
 hound = "3.5.1"
 predicates = "3"

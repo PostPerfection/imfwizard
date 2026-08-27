@@ -208,7 +208,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                     PICTURE_PREFIX,
                     j2k_dir,
                     crate::EssenceType::J2k,
-                    comp.hdr.as_ref().map(|h| h.to_asdcp()),
+                    Some(crate::mxf_wrap::picture_colour(comp.hdr.as_ref())),
                 ) {
                     Ok(tf) => comp_tracks.push(tf),
                     Err(e) => {
