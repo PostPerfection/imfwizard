@@ -73,7 +73,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1
         with:
-          grok-ref: v20.3.12
+          grok-ref: v20.3.13
 
       - name: Install JDK (Linux)
         if: runner.os == 'Linux'
@@ -153,7 +153,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1
         with:
-          grok-ref: v20.3.12
+          grok-ref: v20.3.13
 
       - name: Build frontend
         working-directory: gui

@@ -82,7 +82,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1
         with:
-          grok-ref: v20.3.12
+          grok-ref: v20.3.13
 
       - name: Build release
         working-directory: rust
@@ -143,7 +143,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1
         with:
-          grok-ref: v20.3.12
+          grok-ref: v20.3.13
 
       - name: Build .deb package
         working-directory: rust
