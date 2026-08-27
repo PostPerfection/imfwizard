@@ -13,6 +13,19 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
+## Open: frame-extract still decodes J2K with ffmpeg
+
+`frame-extract` calls `postkit::preview::extract_frame`, which runs ffmpeg over
+whatever it is given, so for an App 2E track file that is ffmpeg's software
+jpeg2000 decoder at a few frames a second, and its `-ss` sits after `-i`, so a
+late frame decodes every frame before it. postkit now decodes J2K in process
+through `grok_decoder`, 68 ms a frame on 2K at 125 Mb/s against ffmpeg's 302 ms
+and 5 ms at `reduce` 2, and this workspace already links `grok-ffi`, so the
+decoder is here and unused. Routing `extract_frame` to it needs a rule for what
+counts as J2K essence and a decision about encrypted essence with no key, which
+ffmpeg renders as garbage and grok refuses. Same entry in dcpwizard's
+DESIGN_TODO: one postkit change serves both.
+
 ## Open: no black or frozen picture pass over a finished IMP
 
 postkit's `picture_findings::detect_in_essence` runs ffmpeg's blackdetect and
