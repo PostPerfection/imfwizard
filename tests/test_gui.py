@@ -72,6 +72,8 @@ def gui_process_environment():
     # webkit's dma-buf renderer draws nothing through llvmpipe, which is all a
     # headless runner has
     environment["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
+    # under xvfb the accelerated compositor leaves the window black
+    environment["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
     return environment
 
 
