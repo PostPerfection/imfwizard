@@ -65,15 +65,16 @@ here: the display transform for it is a tone map plus a gamut conversion into
 sRGB, and neither exists in postkit's `colour` yet. The fix is postkit's, and
 its DESIGN_TODO carries the entry with the fixture it wants first.
 
-## Open: a dcpdoctor pass does not yet prove App 2E picture
+## Open: dcpdoctor does not decode an App 2E frame
 
-dcpdoctor's IMF validator reads the AS-02 descriptor and never checks that the
-codestream Rsiz is an IMF profile, that ColorPrimaries and
-TransferCharacteristic are present, or that the coding UL and pixel layout match
-the codestream. It passed the cinema-profile X'Y'Z' IMPs this repo shipped
-before `create` was fixed. Until dcpdoctor's App 2E check lands (its
-DESIGN_TODO has the five checks), the proof that `create` writes App 2E picture
-is `app2e_picture.rs` reading the track file back, not a dcpdoctor pass.
+dcpdoctor checks an App 2E MainImage track's descriptor: the Rsiz is an IMF
+profile, ColorPrimaries and TransferCharacteristic are present, the coding
+label matches the Rsiz and the pixel layout matches the codestream
+(`picture_not_imf_profile` and its three siblings). The cinema-profile X'Y'Z'
+IMPs this repo shipped before `create` was fixed fail it. It decodes nothing,
+so a codestream whose Rsiz and label say IMF but whose samples are X'Y'Z' would
+still pass, and `app2e_picture.rs` reading a decoded frame back stays the proof
+of that here.
 
 ## Deliberately skipped / standing limitations
 
