@@ -334,11 +334,11 @@ mod tests {
     const W: u32 = 2048;
     const H: u32 = 1080;
 
-    /// grk_compress/grk_decompress paths and lib dir, or None to skip a test.
-    fn grok_tools() -> Option<(PathBuf, PathBuf, String)> {
-        let compress = postkit::grok::find_grk_compress()?;
-        let decompress = find_grk_decompress()?;
-        Some((compress, decompress, postkit::grok::grok_lib_path()))
+    /// grk_compress/grk_decompress paths and lib dir.
+    fn grok_tools() -> (PathBuf, PathBuf, String) {
+        let compress = postkit::grok::find_grk_compress().expect("grk_compress on PATH");
+        let decompress = find_grk_decompress().expect("grk_decompress on PATH");
+        (compress, decompress, postkit::grok::grok_lib_path())
     }
 
     /// Write an 8-bit RGB PPM whose pixels vary with a per-frame seed.
@@ -409,10 +409,7 @@ mod tests {
 
     #[test]
     fn exports_full_sequence_and_subrange() {
-        let Some((compress, _decompress, lib)) = grok_tools() else {
-            eprintln!("skipping: grk_compress/grk_decompress not found");
-            return;
-        };
+        let (compress, _decompress, lib) = grok_tools();
 
         let tmp = tempfile::tempdir().unwrap();
         let frames = tmp.path().join("j2k");
@@ -462,10 +459,7 @@ mod tests {
 
     #[test]
     fn rejects_encrypted_essence() {
-        let Some((compress, _decompress, lib)) = grok_tools() else {
-            eprintln!("skipping: grk_compress not found");
-            return;
-        };
+        let (compress, _decompress, lib) = grok_tools();
 
         let tmp = tempfile::tempdir().unwrap();
         let frames = tmp.path().join("j2k");

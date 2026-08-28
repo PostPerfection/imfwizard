@@ -559,14 +559,10 @@ mod tests {
     }
 
     /// Netflix Photon must analyse the HDR IMP and find nothing wrong with the
-    /// ASSETMAP, PKL, CPL or picture MXF. Gated on PHOTON_JAR (+ java); skips when
-    /// absent.
+    /// ASSETMAP, PKL, CPL or picture MXF. Needs PHOTON_JAR and java, which
+    /// `scripts/fetch_photon.sh` provides.
     #[test]
     fn hdr_imp_is_clean_under_photon() {
-        if std::env::var("PHOTON_JAR").is_err() {
-            eprintln!("skipping: set PHOTON_JAR to run the Photon check");
-            return;
-        }
         let dir = tempfile::tempdir().unwrap();
         let (result, out) = build_hdr_imp(dir.path());
         assert!(result.success, "create failed: {}", result.error);

@@ -86,11 +86,6 @@ of that here.
   with the card to build and prove.
 - SL (sign language) accessibility: a video-overlay track, not audio, so it gets no
   MCA audio descriptor. Composition-level LocaleList still carries languages.
-- Photon runs and the generated IMP is clean under it, but only on Linux CI:
-  `scripts/fetch_photon.sh` pulls Photon and its dependencies from Maven Central
-  (checksums pinned) and CI sets `PHOTON_JAR` there, so `hdr_imp_is_clean_under_photon`
-  executes rather than skipping. Still gated: a bare run without the script skips
-  it, and macOS/Windows CI never runs it.
 - Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
   thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
   measures and adjusts to a target (no other processing). Docs describe these as-is.

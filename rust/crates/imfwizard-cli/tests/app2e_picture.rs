@@ -36,14 +36,6 @@ fn cmd() -> Command {
     Command::cargo_bin("imfwizard").unwrap()
 }
 
-fn have_ffmpeg() -> bool {
-    std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 /// A lossless RGB clip of pure red, so the samples that reach the encoder are
 /// exactly 255,0,0 and any spread across the three components is the encode's.
 fn make_red_clip(path: &Path) {
@@ -101,16 +93,6 @@ fn centre_pixel(decoded: &postkit::grok_decoder::DecodedFrame) -> (i32, i32, i32
 
 #[test]
 fn create_writes_an_app2e_picture_track() {
-    // the encode decodes the source through ffmpeg, and grok compresses it
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
-    if postkit::grok::find_grk_compress().is_none() {
-        eprintln!("skipping: grk_compress not available");
-        return;
-    }
-
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("red.mkv");
     make_red_clip(&clip);

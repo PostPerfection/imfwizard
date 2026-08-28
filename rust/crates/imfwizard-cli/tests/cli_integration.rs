@@ -394,14 +394,6 @@ fn subtitle_convert_help() {
         .success();
 }
 
-fn have_ffmpeg() -> bool {
-    std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 /// A one second colour-bars clip with a sine tone, at the raster asked for.
 fn synthesize_clip(path: &Path, width: u32, height: u32) {
     let output = std::process::Command::new("ffmpeg")
@@ -442,10 +434,6 @@ fn synthesize_clip(path: &Path, width: u32, height: u32) {
 /// which made every video encode fail on the first frame.
 #[test]
 fn a_video_source_encodes_and_packages() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);
@@ -492,14 +480,6 @@ fn a_video_source_encodes_and_packages() {
 /// composition runs long against a CPL that says 24000/1001.
 #[test]
 fn a_23_976_source_encodes_one_codestream_per_source_frame() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
-    if postkit::grok::find_grk_compress().is_none() {
-        eprintln!("skipping: grk_compress not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     let made = std::process::Command::new("ffmpeg")
@@ -563,14 +543,6 @@ fn a_23_976_source_encodes_one_codestream_per_source_frame() {
 /// codestreams it cannot read.
 #[test]
 fn an_image_sequence_directory_encodes_and_packages() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
-    if postkit::grok::find_grk_compress().is_none() {
-        eprintln!("skipping: grk_compress not available");
-        return;
-    }
     // tiff frames go straight to grk_compress, jpeg frames decode through ffmpeg
     for (extension, pixel_format) in [("tif", "rgb24"), ("jpg", "yuvj420p")] {
         let dir = TempDir::new().unwrap();
@@ -701,24 +673,9 @@ fn a_burn_subtitle_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
 /// same clip encoded with and without cues must not come out the same picture.
 #[test]
 fn a_burnt_subtitle_changes_the_encoded_picture() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let srt = dir.path().join("cues.srt");
     std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\nburnt in\n\n").unwrap();
-    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(
-        &srt,
-        None,
-        &postkit::subtitle_raster::BurnStyleOverrides::default(),
-        postkit::encode::FrameRate::whole(24),
-    )
-    .is_err()
-    {
-        eprintln!("skipping: no font available to burn with");
-        return;
-    }
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);
 
@@ -759,10 +716,6 @@ fn a_burnt_subtitle_changes_the_encoded_picture() {
 /// encode per run of frames sharing a cue set, not one per frame.
 #[test]
 fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let card = dir.path().join("card.png");
     let made = std::process::Command::new("ffmpeg")
@@ -793,17 +746,6 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
          2\n00:00:02,000 --> 00:00:03,000\nsecond line\n\n",
     )
     .unwrap();
-    if imfwizard_core::subtitle_burn::prepare_subtitle_burn(
-        &srt,
-        None,
-        &postkit::subtitle_raster::BurnStyleOverrides::default(),
-        postkit::encode::FrameRate::whole(24),
-    )
-    .is_err()
-    {
-        eprintln!("skipping: no font available to burn with");
-        return;
-    }
 
     let output = dir.path().join("imp");
     cmd()
@@ -860,10 +802,6 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
 /// on essence nothing can wrap.
 #[test]
 fn an_illegal_raster_is_refused_before_any_encode() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     // the raster off a Sintel master, which App 2E has no place for
@@ -1383,10 +1321,6 @@ fn the_picture_flags_are_refused_where_they_cannot_act() {
 /// with no `--audio` has to reach the demuxed sound.
 #[test]
 fn an_audio_map_reaches_the_track_demuxed_from_the_video() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);
@@ -1435,10 +1369,6 @@ fn an_audio_map_reaches_the_track_demuxed_from_the_video() {
 /// apply to, which used to package silently.
 #[test]
 fn an_audio_map_on_a_video_with_no_sound_is_refused_by_name() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("silent.mov");
     synthesize_silent_clip(&clip);
@@ -1518,10 +1448,6 @@ fn an_unreadable_audio_map_is_refused_by_name() {
 /// fitted into a named raster comes out on that raster, not the source's own.
 #[test]
 fn a_rotated_source_encodes_onto_the_named_raster() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 2048, 1080);
@@ -1566,10 +1492,6 @@ fn a_rotated_source_encodes_onto_the_named_raster() {
 /// the left channel at half amplitude, which is what -6 dB is.
 #[test]
 fn an_audio_map_writes_the_gained_lane_into_the_package() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let wav = dir.path().join("stereo.wav");
     write_stereo_ramp_wav(&wav);
@@ -1760,10 +1682,6 @@ fn subtitle_convert_writes_a_default_size_and_colour() {
 /// finish and leave the output folder untouched, rather than encoding first.
 #[test]
 fn the_pre_build_check_refuses_a_trim_longer_than_the_clip() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);
@@ -1793,10 +1711,6 @@ fn the_pre_build_check_refuses_a_trim_longer_than_the_clip() {
 /// caller sees it without spending an encode.
 #[test]
 fn the_pre_build_check_prints_the_first_cue_hint() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);
@@ -1833,10 +1747,6 @@ fn the_pre_build_check_prints_the_first_cue_hint() {
 /// inventing a hint.
 #[test]
 fn the_pre_build_check_is_quiet_on_a_clean_job() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
     let dir = TempDir::new().unwrap();
     let clip = dir.path().join("clip.mov");
     synthesize_clip(&clip, 1920, 1080);

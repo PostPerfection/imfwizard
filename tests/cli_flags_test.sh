@@ -11,6 +11,10 @@ BINARY="${1:-./rust/target/release/imfwizard}"
 JS_FILE="gui/src/main.js"
 FAILURES=0
 
+if [[ ! -x "$BINARY" && -x "$BINARY.exe" ]]; then
+  BINARY="$BINARY.exe"
+fi
+
 if [[ ! -x "$BINARY" ]]; then
   echo "ERROR: Binary not found at $BINARY"
   echo "Usage: $0 [path-to-imfwizard-binary]"
@@ -48,8 +52,8 @@ echo "Binary: $BINARY"
 echo ""
 
 # Extract subcommands from args arrays and inline Command calls
-JS_SUBCMDS=$(grep -oP 'args\s*=\s*\["([a-z][-a-z]*)"|Command\.(?:sidecar|create)\("imfwizard",\s*\["([a-z][-a-z]*)' "$JS_FILE" \
-  | grep -oP '\["[a-z][-a-z]*' | tr -d '["' | sort -u)
+JS_SUBCMDS=$(grep -oE 'args[[:space:]]*=[[:space:]]*\["[a-z][-a-z]*"|Command\.(sidecar|create)\("imfwizard",[[:space:]]*\["[a-z][-a-z]*' "$JS_FILE" \
+  | grep -oE '\["[a-z][-a-z]*' | tr -d '["' | sort -u)
 
 for subcmd in $JS_SUBCMDS; do
   # Only check things that are real subcommands
@@ -62,8 +66,8 @@ for subcmd in $JS_SUBCMDS; do
   echo "Checking subcommand: $subcmd"
 
   # Find the line(s) defining the args array for this subcommand and extract flags
-  FLAGS=$(grep -P "\[\"$subcmd\"" "$JS_FILE" \
-    | grep -oP '"--[a-z][-a-z0-9]*"|"-[a-z]"' \
+  FLAGS=$(grep -F "[\"$subcmd\"" "$JS_FILE" \
+    | grep -oE '"--[a-z][-a-z0-9]*"|"-[a-z]"' \
     | tr -d '"' \
     | sort -u || true)
 

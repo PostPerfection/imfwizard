@@ -623,26 +623,20 @@ mod tests {
         }
     }
 
+    /// The SMPTE 429-7/8/9 schemas dcpdoctor vendors, alongside local copies of
+    /// xmldsig-core-schema.xsd and xml.xsd. POSTKIT_DCP_XSD_DIR overrides it.
+    const VENDORED_DCP_XSD_DIR: &str = "../../../extern/dcpdoctor/schemas";
+
     /// Validate the DCP docs this module writes against the official SMPTE
-    /// 429-7/8/9 XSDs. Gated on POSTKIT_DCP_XSD_DIR (a dir holding the SMPTE
-    /// schemas plus a local xmldsig-core-schema.xsd and xml.xsd) and xmllint;
-    /// skips when absent. Full essence-bearing DCP validation is done separately
+    /// 429-7/8/9 XSDs. Full essence-bearing DCP validation is done separately
     /// with dcpdoctor once real MXF track files exist.
     #[test]
     fn generated_dcp_docs_pass_smpte_xsd() {
-        let Ok(xsd_dir) = std::env::var("POSTKIT_DCP_XSD_DIR") else {
-            eprintln!("skipping: set POSTKIT_DCP_XSD_DIR to the SMPTE XSD directory");
-            return;
+        let xsd_dir = match std::env::var("POSTKIT_DCP_XSD_DIR") {
+            Ok(dir) => PathBuf::from(dir),
+            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED_DCP_XSD_DIR),
         };
-        if std::process::Command::new("xmllint")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            eprintln!("skipping: xmllint not installed");
-            return;
-        }
-        let xsd = std::path::Path::new(&xsd_dir);
+        let xsd = xsd_dir.as_path();
         let dir = tempfile::tempdir().unwrap();
 
         // the 429-7 CPL imports xmldsig and xml.xsd by http URL; map them to the

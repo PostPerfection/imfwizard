@@ -18,14 +18,6 @@ const TRIM_END: u64 = 3;
 const KEPT_FRAMES: u64 = SOURCE_FRAMES - TRIM_START - TRIM_END;
 const FPS: u32 = 24;
 
-fn have_ffmpeg() -> bool {
-    std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 fn make_clip(path: &Path) {
     let output = std::process::Command::new("ffmpeg")
         .args([
@@ -89,11 +81,6 @@ fn codestreams(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn a_trimmed_video_encodes_only_the_kept_frames() {
-    if !have_ffmpeg() {
-        eprintln!("skipping: ffmpeg not available");
-        return;
-    }
-
     let dir = tempfile::tempdir().unwrap();
     let video = dir.path().join("clip.mp4");
     make_clip(&video);

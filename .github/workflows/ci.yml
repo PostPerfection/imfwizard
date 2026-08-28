@@ -39,12 +39,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev ffmpeg
+          sudo apt-get install -y pkg-config libxml2-dev libxml2-utils libssl-dev libxerces-c-dev fonts-dejavu-core
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install pkg-config libxml2 openssl@3 xerces-c
+          brew install pkg-config libxml2 openssl@3 xerces-c ffmpeg
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -53,7 +53,7 @@ jobs:
           # vcpkg reads curl 56 and 503 off github's archive host as permanent and
           # refuses to retry the source download, so retry the whole install
           for ($attempt = 1; $attempt -le 5; $attempt++) {
-            vcpkg install libxml2 openssl xerces-c --triplet x64-windows
+            vcpkg install "libxml2[tools]" openssl xerces-c --triplet x64-windows
             if ($LASTEXITCODE -eq 0) { break }
             if ($attempt -eq 5) { throw "vcpkg install failed after $attempt attempts" }
             Start-Sleep -Seconds (30 * $attempt)
@@ -68,6 +68,23 @@ jobs:
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows" >> $GITHUB_ENV
           echo "OPENSSL_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $GITHUB_ENV
+          # the libxml2 tools feature installs xmllint.exe here
+          echo "C:/vcpkg/installed/x64-windows/tools/libxml2" >> $GITHUB_PATH
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-27-16-45/ffmpeg-n8.1.2-47-g156bb4d299-linux64-gpl-8.1.tar.xz
+          tar -xJf ffmpeg.tar.xz
+          echo "$PWD/ffmpeg-n8.1.2-47-g156bb4d299-linux64-gpl-8.1/bin" >> "$GITHUB_PATH"
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-27-16-45/ffmpeg-n8.1.2-47-g156bb4d299-win64-gpl-8.1.zip
+          unzip -q ffmpeg.zip
+          echo "$(cygpath -w "$PWD/ffmpeg-n8.1.2-47-g156bb4d299-win64-gpl-8.1/bin")" >> "$GITHUB_PATH"
 
       # the workspace links grok-ffi, so every platform needs this to compile
       - name: Setup grok
@@ -75,28 +92,57 @@ jobs:
         with:
           grok-ref: v20.4.0
 
-      - name: Install JDK (Linux)
-        if: runner.os == 'Linux'
+      - name: Install JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Cache Photon
-        if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/photon-jars
           key: photon-${{ runner.os }}-${{ hashFiles('scripts/fetch_photon.sh') }}
 
       - name: Setup Photon
-        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          bash scripts/fetch_photon.sh "$GITHUB_WORKSPACE/photon-jars"
-          echo "PHOTON_JAR=$GITHUB_WORKSPACE/photon-jars" >> "$GITHUB_ENV"
+          workspace="$GITHUB_WORKSPACE"
+          if command -v cygpath >/dev/null 2>&1; then
+            workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+          fi
+          bash scripts/fetch_photon.sh "$workspace/photon-jars"
+          # java is a native process on Windows and cannot read an MSYS path
+          jars="$workspace/photon-jars"
+          if command -v cygpath >/dev/null 2>&1; then
+            jars=$(cygpath -w "$jars")
+          fi
+          echo "PHOTON_JAR=$jars" >> "$GITHUB_ENV"
           # dcpdoctor-core reads PHOTON_DIR for its own Photon pass during
           # `validate`. Without it, it clones and gradle-builds Photon itself.
-          echo "PHOTON_DIR=$GITHUB_WORKSPACE/photon-jars" >> "$GITHUB_ENV"
+          echo "PHOTON_DIR=$jars" >> "$GITHUB_ENV"
+
+      - name: Check test tools
+        shell: bash
+        run: |
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          xmllint --version
+          java -version
+          grk_compress -h > /dev/null
+          test -n "$PHOTON_JAR"
+          # the burn shapes text with fontdb, and cosmic-text builds it without
+          # the fontconfig feature, so it reads these directories directly
+          case "$RUNNER_OS" in
+            Linux) font_dir=/usr/share/fonts ;;
+            macOS) font_dir=/System/Library/Fonts ;;
+            *) font_dir= ;;
+          esac
+          if [ -n "$font_dir" ]; then
+            font=$(find "$font_dir" -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) | head -n 1)
+            test -n "$font"
+            echo "$font"
+          fi
 
       - name: Build
         working-directory: rust
@@ -115,15 +161,14 @@ jobs:
         run: cargo fmt -- --check
 
       - name: CLI smoke test
-        if: runner.os != 'Windows'
+        shell: bash
         run: |
           ./rust/target/release/imfwizard --version
           ./rust/target/release/imfwizard --help
           ./rust/target/release/imfwizard doctor --json || true
 
-      # linux only: the script uses grep -P, which macOS BSD grep lacks
       - name: CLI flags test
-        if: runner.os == 'Linux'
+        shell: bash
         run: bash tests/cli_flags_test.sh ./rust/target/release/imfwizard
 
   gui:

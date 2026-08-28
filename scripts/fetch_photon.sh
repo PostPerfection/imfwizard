@@ -66,9 +66,15 @@ for entry in "${artifacts[@]}"; do
   mv "$destination/$jar.tmp" "$destination/$jar"
 done
 
+# java is a native process under git bash and cannot read an MSYS path
+classpath="$destination/*"
+if command -v cygpath >/dev/null 2>&1; then
+  classpath="$(cygpath -w "$destination")\\*"
+fi
+
 # IMPAnalyzer with no arguments prints usage and exits nonzero, so only the text
 # tells us the classes all resolved.
-usage=$(java -cp "$destination/*" "$main_class" 2>&1 || true)
+usage=$(java -cp "$classpath" "$main_class" 2>&1 || true)
 if ! printf '%s' "$usage" | grep -q "Usage:"; then
   echo "Photon did not start from $destination:" >&2
   printf '%s\n' "$usage" >&2

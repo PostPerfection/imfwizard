@@ -270,18 +270,20 @@ mod tests {
         assert!(xml.contains("<SourceEncoding>"));
     }
 
-    /// Locate the ST 2067-3 XSDs and validate `cpl_xml` with xmllint. Returns None
-    /// when the gate is unmet (no IMFWIZARD_IMF_XSD_DIR, no xmllint); panics if the
-    /// dir is set but the XSDs are missing (a misconfiguration).
-    fn validate_st2067_3(cpl_xml: &str) -> Option<bool> {
-        let xsd_dir = std::env::var("IMFWIZARD_IMF_XSD_DIR").ok()?;
-        if std::process::Command::new("xmllint")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            return None;
+    /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd,
+    /// app2e-2016.xsd and xmldsig-core-schema.xsd. IMFWIZARD_IMF_XSD_DIR overrides it.
+    const VENDORED_IMF_XSD_DIR: &str = "../../../extern/dcpdoctor/extern/photon/src/main/resources";
+
+    fn imf_xsd_dir() -> std::path::PathBuf {
+        match std::env::var("IMFWIZARD_IMF_XSD_DIR") {
+            Ok(dir) => std::path::PathBuf::from(dir),
+            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED_IMF_XSD_DIR),
         }
+    }
+
+    /// Validate `cpl_xml` against the ST 2067-3 XSDs with xmllint.
+    fn validate_st2067_3(cpl_xml: &str) -> bool {
+        let xsd_dir = imf_xsd_dir();
         fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
             for e in std::fs::read_dir(dir).ok()?.flatten() {
                 let p = e.path();
@@ -295,13 +297,14 @@ mod tests {
             }
             None
         }
-        let root = std::path::Path::new(&xsd_dir);
+        let root = xsd_dir.as_path();
         let (Some(cpl_xsd), Some(dsig_xsd)) = (
             walk(root, "imf-cpl-20160411.xsd"),
             walk(root, "xmldsig-core-schema.xsd"),
         ) else {
             panic!(
-                "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {xsd_dir}"
+                "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {}",
+                root.display()
             );
         };
 
@@ -338,16 +341,15 @@ mod tests {
             .arg(&driver)
             .arg(&cpl_path)
             .output()
-            .unwrap();
+            .expect("run xmllint");
         if !out.status.success() {
             eprintln!("xmllint failed: {}", String::from_utf8_lossy(&out.stderr));
         }
-        Some(out.status.success())
+        out.status.success()
     }
 
     /// An HDR/WCG CPL (image RGBADescriptor with transfer/colour ULs + ST 2086
-    /// mastering display) must pass the ST 2067-3:2016 XSD. Same gating as the
-    /// language test.
+    /// mastering display) must pass the ST 2067-3:2016 XSD.
     #[test]
     fn hdr_cpl_passes_st2067_3_xsd() {
         let dir = tempfile::tempdir().unwrap();
@@ -387,15 +389,13 @@ mod tests {
         assert!(cpl_xml.contains("<r0:RGBADescriptor"));
         assert!(cpl_xml.contains("<r1:TransferCharacteristic>"));
         assert!(cpl_xml.contains(">993</app2e:MaxCLL>"));
-        match validate_st2067_3(&cpl_xml) {
-            Some(ok) => assert!(ok, "HDR CPL must pass ST 2067-3 XSD"),
-            None => eprintln!("skipping: set IMFWIZARD_IMF_XSD_DIR and install xmllint"),
-        }
+        assert!(
+            validate_st2067_3(&cpl_xml),
+            "HDR CPL must pass ST 2067-3 XSD"
+        );
     }
 
-    /// Validate a language CPL against the official ST 2067-3:2016 XSD. Gated on
-    /// IMFWIZARD_IMF_XSD_DIR (a dir holding imf-cpl-20160411.xsd and
-    /// xmldsig-core-schema.xsd anywhere below it) plus xmllint; skips when absent.
+    /// Validate a language CPL against the official ST 2067-3:2016 XSD.
     #[test]
     fn language_cpl_passes_st2067_3_xsd() {
         let dir = tempfile::tempdir().unwrap();
@@ -424,14 +424,14 @@ mod tests {
         )
         .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
-        match validate_st2067_3(&cpl_xml) {
-            Some(ok) => assert!(ok, "language CPL must pass ST 2067-3 XSD"),
-            None => eprintln!("skipping: set IMFWIZARD_IMF_XSD_DIR and install xmllint"),
-        }
+        assert!(
+            validate_st2067_3(&cpl_xml),
+            "language CPL must pass ST 2067-3 XSD"
+        );
     }
 
     /// Validate an accessibility CPL (audio-description MCA descriptor + LocaleList)
-    /// against the ST 2067-3:2016 XSD. Same gating as the language test.
+    /// against the ST 2067-3:2016 XSD.
     #[test]
     fn accessibility_cpl_passes_st2067_3_xsd() {
         let dir = tempfile::tempdir().unwrap();
@@ -461,9 +461,9 @@ mod tests {
         )
         .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
-        match validate_st2067_3(&cpl_xml) {
-            Some(ok) => assert!(ok, "accessibility CPL must pass ST 2067-3 XSD"),
-            None => eprintln!("skipping: set IMFWIZARD_IMF_XSD_DIR and install xmllint"),
-        }
+        assert!(
+            validate_st2067_3(&cpl_xml),
+            "accessibility CPL must pass ST 2067-3 XSD"
+        );
     }
 }

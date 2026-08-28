@@ -584,17 +584,8 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
     }
 
     #[test]
-    fn mks_converts_or_skips_without_ffmpeg() {
+    fn mks_converts_to_ttml() {
         let dir = tempfile::tempdir().unwrap();
-        // real mks fixture needs ffmpeg to author; skip gracefully when absent.
-        if std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .output()
-            .is_err()
-        {
-            eprintln!("ffmpeg not present, skipping mks test");
-            return;
-        }
         // build a tiny mkv with an embedded srt subtitle track
         let srt = dir.path().join("s.srt");
         std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nhi there\n").unwrap();
@@ -602,14 +593,17 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
         let built = std::process::Command::new("ffmpeg")
             .args(["-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=3", "-i"])
             .arg(&srt)
-            .args(["-c:s", "srt", "-shortest"])
+            // ffmpeg infers no muxer from .mks
+            .args(["-c:s", "srt", "-shortest", "-f", "matroska"])
             .arg(&mks)
-            .output();
-        let ok = matches!(&built, Ok(o) if o.status.success()) && mks.exists();
-        if !ok {
-            eprintln!("ffmpeg could not build mks fixture, skipping");
-            return;
-        }
+            .output()
+            .expect("ffmpeg");
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        assert!(mks.exists(), "ffmpeg wrote no mks fixture");
         let output = dir.path().join("out.ttml");
         convert_subtitles(
             &mks,
