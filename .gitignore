@@ -48,3 +48,6 @@ GTAGS
 TAGS
 Testing/
 gui/src-tauri/imfwizard-x86_64-unknown-linux-gnu
+
+# coverage
+rust/lcov.info

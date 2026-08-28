@@ -281,8 +281,9 @@ mod tests {
         }
     }
 
-    /// Validate `cpl_xml` against the ST 2067-3 XSDs with xmllint.
-    fn validate_st2067_3(cpl_xml: &str) -> bool {
+    /// xmllint's complaint about `cpl_xml` against the ST 2067-3 XSDs, empty
+    /// when it validates.
+    fn st2067_3_complaint(cpl_xml: &str) -> String {
         let xsd_dir = imf_xsd_dir();
         fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
             for e in std::fs::read_dir(dir).ok()?.flatten() {
@@ -317,7 +318,7 @@ mod tests {
             Some(p) => format!(
                 r#"
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-21/2016" schemaLocation="{}"/>"#,
-                p.display()
+                crate::file_uri::file_uri(&p)
             ),
             None => String::new(),
         };
@@ -330,8 +331,8 @@ mod tests {
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
   <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>{app2e_import}
 </xs:schema>"#,
-                cpl = cpl_xsd.display(),
-                dsig = dsig_xsd.display(),
+                cpl = crate::file_uri::file_uri(&cpl_xsd),
+                dsig = crate::file_uri::file_uri(&dsig_xsd),
             ),
         )
         .unwrap();
@@ -342,10 +343,10 @@ mod tests {
             .arg(&cpl_path)
             .output()
             .expect("run xmllint");
-        if !out.status.success() {
-            eprintln!("xmllint failed: {}", String::from_utf8_lossy(&out.stderr));
+        if out.status.success() {
+            return String::new();
         }
-        out.status.success()
+        String::from_utf8_lossy(&out.stderr).into_owned()
     }
 
     /// An HDR/WCG CPL (image RGBADescriptor with transfer/colour ULs + ST 2086
@@ -389,9 +390,10 @@ mod tests {
         assert!(cpl_xml.contains("<r0:RGBADescriptor"));
         assert!(cpl_xml.contains("<r1:TransferCharacteristic>"));
         assert!(cpl_xml.contains(">993</app2e:MaxCLL>"));
+        let complaint = st2067_3_complaint(&cpl_xml);
         assert!(
-            validate_st2067_3(&cpl_xml),
-            "HDR CPL must pass ST 2067-3 XSD"
+            complaint.is_empty(),
+            "HDR CPL must pass ST 2067-3 XSD:\n{complaint}"
         );
     }
 
@@ -424,9 +426,10 @@ mod tests {
         )
         .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
+        let complaint = st2067_3_complaint(&cpl_xml);
         assert!(
-            validate_st2067_3(&cpl_xml),
-            "language CPL must pass ST 2067-3 XSD"
+            complaint.is_empty(),
+            "language CPL must pass ST 2067-3 XSD:\n{complaint}"
         );
     }
 
@@ -461,9 +464,10 @@ mod tests {
         )
         .unwrap();
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
+        let complaint = st2067_3_complaint(&cpl_xml);
         assert!(
-            validate_st2067_3(&cpl_xml),
-            "accessibility CPL must pass ST 2067-3 XSD"
+            complaint.is_empty(),
+            "accessibility CPL must pass ST 2067-3 XSD:\n{complaint}"
         );
     }
 }

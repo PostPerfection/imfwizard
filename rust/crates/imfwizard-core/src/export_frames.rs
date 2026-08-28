@@ -103,7 +103,7 @@ pub fn export_frames(opts: &ExportFramesOptions) -> Result<ExportFramesResult, S
     std::fs::create_dir_all(&opts.output_dir)
         .map_err(|e| format!("cannot create output {}: {e}", opts.output_dir.display()))?;
 
-    let grk = find_grk_decompress()
+    let grk = postkit::grok::find_grk_decompress()
         .ok_or("grk_decompress not found (looked in $HOME/bin/grok/bin and PATH)")?;
     let lib_path = postkit::grok::grok_lib_path();
 
@@ -307,25 +307,6 @@ fn select_cpl(imp_dir: &Path, selector: Option<&str>) -> Result<timeline::CplInf
     }
 }
 
-/// Find grk_decompress: $HOME/bin/grok/bin first, then PATH. Mirrors
-/// postkit::grok::find_grk_compress.
-fn find_grk_decompress() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        let p = PathBuf::from(home).join("bin/grok/bin/grk_decompress");
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    std::process::Command::new("which")
-        .arg("grk_decompress")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| p.exists())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,7 +318,7 @@ mod tests {
     /// grk_compress/grk_decompress paths and lib dir.
     fn grok_tools() -> (PathBuf, PathBuf, String) {
         let compress = postkit::grok::find_grk_compress().expect("grk_compress on PATH");
-        let decompress = find_grk_decompress().expect("grk_decompress on PATH");
+        let decompress = postkit::grok::find_grk_decompress().expect("grk_decompress on PATH");
         (compress, decompress, postkit::grok::grok_lib_path())
     }
 

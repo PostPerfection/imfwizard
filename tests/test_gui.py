@@ -1,163 +1,153 @@
-#!/usr/bin/env python3
-"""GUI launch/exit integration test for imfwizard.
-
-Tests that the GUI binary starts and can be terminated cleanly.
-Works headless on Linux (uses xvfb-run if no DISPLAY), and natively on macOS/Windows.
-"""
+"""The GUI opens a window, paints it, and exits cleanly on SIGTERM. Needs a display."""
 
 import os
-import platform
-import shutil
 import signal
 import subprocess
-import sys
 import time
+from pathlib import Path
 
-PASS = 0
-FAIL = 0
+import pytest
+from Xlib import X, display, error
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_GUI_BINARY = REPOSITORY_ROOT / "gui/src-tauri/target/release/imfwizard-gui"
+
+# tauri.conf.json names the window "IMF Wizard - IMP Creator". The other window
+# tauri maps carries the binary name and is a few pixels wide.
+WINDOW_TITLE = "IMF Wizard"
+MIN_WINDOW_SIDE = 200
+
+WINDOW_TIMEOUT_SECONDS = 60
+PAINT_TIMEOUT_SECONDS = 60
+EXIT_TIMEOUT_SECONDS = 15
+POLL_SECONDS = 0.5
 
 
-def pass_test(desc):
-    global PASS
-    print(f"  PASS: {desc}")
-    PASS += 1
+def read_command(*command):
+    return subprocess.run(command, capture_output=True, text=True)
 
 
-def fail_test(desc, reason):
-    global FAIL
-    print(f"  FAIL: {desc} — {reason}")
-    FAIL += 1
+def window_geometry(screen, window_id):
+    """The window's geometry, or None when it is gone or holds no pixels."""
+    try:
+        geometry = screen.create_resource_object("window", window_id).get_geometry()
+    except error.XError:
+        return None
+    # an InputOnly window, such as the compositor's, has depth 0
+    return geometry if geometry.depth else None
 
 
-def find_binary():
-    """Find the GUI binary."""
-    test_dir = os.path.dirname(os.path.abspath(__file__))
-    project_dir = os.path.dirname(test_dir)
-    tauri_dir = os.path.join(project_dir, "gui", "src-tauri")
-
-    candidates = [
-        os.path.join(tauri_dir, "target", "release", "imfwizard-gui"),
-        os.path.join(tauri_dir, "target", "debug", "imfwizard-gui"),
-    ]
-    if platform.system() == "Windows":
-        candidates = [c + ".exe" for c in candidates]
-
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
+def app_window(screen):
+    """The app's own readable window id, or None while none is up yet."""
+    found = read_command("xdotool", "search", "--onlyvisible", "--name", WINDOW_TITLE)
+    for found_id in found.stdout.split():
+        window_id = int(found_id)
+        geometry = window_geometry(screen, window_id)
+        if geometry and min(geometry.width, geometry.height) >= MIN_WINDOW_SIDE:
+            return window_id
     return None
 
 
-def launch_gui(binary):
-    """Launch GUI binary, handling headless display on Linux."""
-    env = os.environ.copy()
+def distinct_pixels(screen, window_id):
+    """How many distinct pixel values the window's contents hold."""
+    geometry = window_geometry(screen, window_id)
+    if geometry is None:
+        return 0
+    window = screen.create_resource_object("window", window_id)
+    try:
+        grabbed = window.get_image(
+            0, 0, geometry.width, geometry.height, X.ZPixmap, 0xFFFFFFFF
+        )
+    except error.XError:
+        return 0
+    pixels = bytes(grabbed.data)
+    stride = len(pixels) // (geometry.width * geometry.height)
+    return len({pixels[at : at + stride] for at in range(0, len(pixels), stride)})
 
-    if platform.system() == "Linux" and not env.get("DISPLAY"):
-        xvfb = shutil.which("xvfb-run")
-        if xvfb:
-            return subprocess.Popen(
-                [xvfb, "-a", binary],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-        else:
-            return None  # Can't launch without display
-    else:
-        return subprocess.Popen(
-            [binary],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True
+
+def gui_process_environment():
+    environment = dict(os.environ)
+    # the app runs under XWayland on a wayland desktop, and under Xvfb in CI
+    environment["GDK_BACKEND"] = "x11"
+    # webkit's dma-buf renderer draws nothing through llvmpipe, which is all a
+    # headless runner has
+    environment["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
+    return environment
+
+
+def fail_with_output(message, process, log):
+    process.kill()
+    output = log.read_text(errors="replace") if log.exists() else ""
+    pytest.fail(f"{message}\n--- gui output ---\n{output[-4000:]}")
+
+
+def test_gui_opens_paints_and_exits(tmp_path):
+    binary = Path(os.environ.get("IMFWIZARD_GUI", DEFAULT_GUI_BINARY))
+    assert binary.is_file(), f"GUI binary not found at {binary}"
+    assert os.environ.get("DISPLAY"), "no DISPLAY: run under xvfb-run or a desktop"
+
+    screen = display.Display()
+    log = tmp_path / "gui.log"
+    with log.open("wb") as sink:
+        process = subprocess.Popen(
+            [str(binary)],
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            env=gui_process_environment(),
         )
 
+    try:
+        deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
+        window_id = None
+        while time.monotonic() < deadline and window_id is None:
+            if process.poll() is not None:
+                fail_with_output(
+                    f"the GUI exited with {process.returncode} before a window appeared",
+                    process,
+                    log,
+                )
+            time.sleep(POLL_SECONDS)
+            window_id = app_window(screen)
+        if window_id is None:
+            fail_with_output(
+                f"no window titled {WINDOW_TITLE!r} in {WINDOW_TIMEOUT_SECONDS}s",
+                process,
+                log,
+            )
 
-def is_running(proc):
-    return proc.poll() is None
+        # the window is created on the configured black background, so one
+        # distinct pixel means the webview has not drawn the page yet
+        deadline = time.monotonic() + PAINT_TIMEOUT_SECONDS
+        colours = 0
+        while time.monotonic() < deadline and colours < 2:
+            if process.poll() is not None:
+                fail_with_output(
+                    f"the GUI exited with {process.returncode} before it painted",
+                    process,
+                    log,
+                )
+            time.sleep(POLL_SECONDS)
+            colours = distinct_pixels(screen, window_id)
+        if colours < 2:
+            fail_with_output(
+                f"the window stayed one colour for {PAINT_TIMEOUT_SECONDS}s",
+                process,
+                log,
+            )
 
-
-def main():
-    global PASS, FAIL
-
-    binary = find_binary()
-    if not binary:
-        print("SKIP: GUI binary not found (build with 'npx tauri build' first)")
-        return 0
-
-    if platform.system() == "Linux" and not os.environ.get("DISPLAY"):
-        if not shutil.which("xvfb-run"):
-            print("SKIP: No DISPLAY and xvfb-run not available")
-            return 0
-
-    print("GUI Launch/Exit Tests")
-    print("=====================\n")
-
-    # Test 1: Binary launches without immediate crash
-    print("Test: Launch and verify process runs...")
-    proc = launch_gui(binary)
-    if proc is None:
-        fail_test("GUI launch", "could not start process")
-        return 1
-
-    time.sleep(2)
-    if is_running(proc):
-        pass_test("GUI binary launches and stays running")
-    else:
-        fail_test("GUI binary", f"crashed immediately (exit code {proc.returncode})")
-
-    # Test 2: Process responds to SIGTERM (clean shutdown)
-    print("Test: Clean shutdown via SIGTERM...")
-    if is_running(proc):
-        if platform.system() == "Windows":
-            proc.terminate()
-        else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-
+        process.send_signal(signal.SIGTERM)
         try:
-            proc.wait(timeout=5)
-            pass_test("GUI exits cleanly on SIGTERM")
+            process.wait(timeout=EXIT_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            fail_test("clean shutdown", "process did not exit within 5s")
-    else:
-        fail_test("clean shutdown", "process already dead")
-
-    # Test 3: Exit code is acceptable
-    print("Test: Exit code verification...")
-    proc2 = launch_gui(binary)
-    if proc2 is None:
-        fail_test("exit code", "could not start process")
-    else:
-        time.sleep(1)
-        if is_running(proc2):
-            if platform.system() == "Windows":
-                proc2.terminate()
-            else:
-                os.killpg(os.getpgid(proc2.pid), signal.SIGTERM)
-            try:
-                proc2.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc2.kill()
-                proc2.wait()
-
-            code = proc2.returncode
-            # 0 = clean exit, -15/143 = SIGTERM (acceptable)
-            if code in (0, -15, 143, -signal.SIGTERM):
-                pass_test(f"Exit code acceptable ({code})")
-            else:
-                fail_test("exit code", f"got {code}, expected 0 or SIGTERM")
-        else:
-            pass_test("Exit code acceptable (already exited)")
-
-    # Summary
-    print(f"\n{'=' * 32}")
-    total = PASS + FAIL
-    print(f"{PASS}/{total} tests passed")
-    if FAIL > 0:
-        print(f"{FAIL} test(s) FAILED")
-        return 1
-    print("All GUI tests passed!")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+            fail_with_output(
+                f"the GUI ignored SIGTERM for {EXIT_TIMEOUT_SECONDS}s", process, log
+            )
+        assert process.returncode in (
+            0,
+            -signal.SIGTERM,
+        ), f"unclean exit {process.returncode}"
+    finally:
+        screen.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=EXIT_TIMEOUT_SECONDS)

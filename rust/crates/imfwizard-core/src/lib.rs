@@ -71,6 +71,10 @@ pub mod xsd_validate;
 pub mod hash;
 pub mod signature;
 
+// Shared by the schema tests that hand paths to xmllint
+#[cfg(test)]
+mod file_uri;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

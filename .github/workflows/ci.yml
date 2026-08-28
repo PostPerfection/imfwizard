@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install pkg-config libxml2 openssl@3 xerces-c ffmpeg
+          brew install pkg-config libxml2 openssl@3 xerces-c
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -77,6 +77,21 @@ jobs:
           curl -sSL -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-27-16-45/ffmpeg-n8.1.2-47-g156bb4d299-linux64-gpl-8.1.tar.xz
           tar -xJf ffmpeg.tar.xz
           echo "$PWD/ffmpeg-n8.1.2-47-g156bb4d299-linux64-gpl-8.1/bin" >> "$GITHUB_PATH"
+
+      # homebrew's ffmpeg carries no libass or freetype, which the subtitle burn
+      # needs. conda-forge's gpl build enables both.
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: ffmpeg
+          create-args: ffmpeg=8.1.1=gpl_h4b93310_102
+          init-shell: none
+
+      - name: Put ffmpeg on PATH (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "$(dirname "$("${MAMBA_EXE:-micromamba}" run -n ffmpeg which ffmpeg)")" >> "$GITHUB_PATH"
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
@@ -144,11 +159,39 @@ jobs:
             echo "$font"
           fi
 
+      - name: Install cargo-llvm-cov (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install llvm-tools (Linux)
+        if: runner.os == 'Linux'
+        run: rustup component add llvm-tools-preview
+
       - name: Build
         working-directory: rust
         run: cargo build --release
 
+      - name: Test with coverage (Linux)
+        if: runner.os == 'Linux'
+        working-directory: rust
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
+      - name: Coverage summary (Linux)
+        if: runner.os == 'Linux'
+        working-directory: rust
+        run: cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: rust/lcov.info
+
       - name: Test
+        if: runner.os != 'Linux'
         working-directory: rust
         run: cargo test
 
@@ -193,12 +236,17 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libmpv-dev
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb xdotool
 
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1
         with:
           grok-ref: v20.4.0
+
+      - uses: PostPerfection/setup-libmpv@v1
+        with:
+          mpv-release: 20260828
+          mpv-archive: mpv-dev-x86_64-20260828-git-182fa6ca49.7z
 
       - name: Build frontend
         working-directory: gui
@@ -224,6 +272,16 @@ jobs:
       - name: Format check Tauri backend
         working-directory: gui/src-tauri
         run: cargo fmt -- --check
+
+      - name: Build the GUI
+        run: cargo build --release --manifest-path gui/src-tauri/Cargo.toml
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: GUI launch test
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            uv run --no-project --with pytest --with python-xlib pytest tests/test_gui.py -q
 
   deny:
     runs-on: ubuntu-24.04
