@@ -274,7 +274,9 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Build the GUI
-        run: cargo build --release --manifest-path gui/src-tauri/Cargo.toml
+        # without custom-protocol tauri builds a dev binary that loads the vite
+        # dev url instead of the embedded frontend, tauri build turns it on
+        run: cargo build --release --manifest-path gui/src-tauri/Cargo.toml --features tauri/custom-protocol
 
       - uses: astral-sh/setup-uv@v6
 

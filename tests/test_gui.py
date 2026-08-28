@@ -54,26 +54,29 @@ def distinct_pixels(screen, window_id):
     if geometry is None:
         return 0
     window = screen.create_resource_object("window", window_id)
+    # only the part on screen can be read, a window larger than the screen
+    # makes the whole read fail
+    root_window = screen.screen().root
+    root = root_window.get_geometry()
+    on_root = window.translate_coords(root_window, 0, 0)
+    width = min(geometry.width, root.width - on_root.x)
+    height = min(geometry.height, root.height - on_root.y)
     try:
-        grabbed = window.get_image(
-            0, 0, geometry.width, geometry.height, X.ZPixmap, 0xFFFFFFFF
-        )
+        grabbed = window.get_image(0, 0, width, height, X.ZPixmap, 0xFFFFFFFF)
     except error.XError:
         return 0
     pixels = bytes(grabbed.data)
-    stride = len(pixels) // (geometry.width * geometry.height)
+    stride = len(pixels) // (width * height)
     return len({pixels[at : at + stride] for at in range(0, len(pixels), stride)})
 
 
-def gui_process_environment():
+def gui_process_environment(config_home):
     environment = dict(os.environ)
     # the app runs under XWayland on a wayland desktop, and under Xvfb in CI
     environment["GDK_BACKEND"] = "x11"
-    # webkit's dma-buf renderer draws nothing through llvmpipe, which is all a
-    # headless runner has
-    environment["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
-    # under xvfb the accelerated compositor leaves the window black
-    environment["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+    # a fresh config, so the developer's saved window size and preferences
+    # stay out of the run
+    environment["XDG_CONFIG_HOME"] = str(config_home)
     return environment
 
 
@@ -95,7 +98,7 @@ def test_gui_opens_paints_and_exits(tmp_path):
             [str(binary)],
             stdout=sink,
             stderr=subprocess.STDOUT,
-            env=gui_process_environment(),
+            env=gui_process_environment(tmp_path / "config"),
         )
 
     try:
