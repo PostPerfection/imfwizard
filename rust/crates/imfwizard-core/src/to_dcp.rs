@@ -650,8 +650,8 @@ mod tests {
   <system systemId="http://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd" uri="{dsig}"/>
   <system systemId="http://www.w3.org/2001/03/xml.xsd" uri="{xml_xsd}"/>
 </catalog>"#,
-                dsig = crate::file_uri::file_uri(&xsd.join("xmldsig-core-schema.xsd")),
-                xml_xsd = crate::file_uri::file_uri(&xsd.join("xml.xsd")),
+                dsig = postkit::file_uri::file_uri(&xsd.join("xmldsig-core-schema.xsd")),
+                xml_xsd = postkit::file_uri::file_uri(&xsd.join("xml.xsd")),
             ),
         )
         .unwrap();
@@ -707,7 +707,7 @@ mod tests {
                 .args(["--nonet", "--noout", "--schema"])
                 .arg(xsd.join(schema))
                 .arg(doc)
-                .env("XML_CATALOG_FILES", crate::file_uri::file_uri(&catalog))
+                .env("XML_CATALOG_FILES", postkit::file_uri::file_uri(&catalog))
                 .output()
                 .expect("run xmllint");
             assert!(

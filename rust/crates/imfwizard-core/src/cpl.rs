@@ -318,7 +318,7 @@ mod tests {
             Some(p) => format!(
                 r#"
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-21/2016" schemaLocation="{}"/>"#,
-                crate::file_uri::file_uri(&p)
+                postkit::file_uri::file_uri(&p)
             ),
             None => String::new(),
         };
@@ -331,8 +331,8 @@ mod tests {
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
   <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>{app2e_import}
 </xs:schema>"#,
-                cpl = crate::file_uri::file_uri(&cpl_xsd),
-                dsig = crate::file_uri::file_uri(&dsig_xsd),
+                cpl = postkit::file_uri::file_uri(&cpl_xsd),
+                dsig = postkit::file_uri::file_uri(&dsig_xsd),
             ),
         )
         .unwrap();
