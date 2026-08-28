@@ -56,6 +56,25 @@ nowhere to go. Every picture `create` writes is 4:4:4, so this is only about
 essence from elsewhere. Chroma upsampling belongs in postkit's decoder, which is
 where its DESIGN_TODO carries the entry.
 
+## Open: an HDR IMP has no preview
+
+`frame-extract` and the embedded preview show Rec.709 SDR picture only.
+postkit's `render_imf_frame` refuses ST 2084, HLG, BT.2020 and P3-D65 by name,
+so an IMP made with `--hdr pq-bt2020` encodes and wraps but cannot be looked at
+here: the display transform for it is a tone map plus a gamut conversion into
+sRGB, and neither exists in postkit's `colour` yet. The fix is postkit's, and
+its DESIGN_TODO carries the entry with the fixture it wants first.
+
+## Open: a dcpdoctor pass does not yet prove App 2E picture
+
+dcpdoctor's IMF validator reads the AS-02 descriptor and never checks that the
+codestream Rsiz is an IMF profile, that ColorPrimaries and
+TransferCharacteristic are present, or that the coding UL and pixel layout match
+the codestream. It passed the cinema-profile X'Y'Z' IMPs this repo shipped
+before `create` was fixed. Until dcpdoctor's App 2E check lands (its
+DESIGN_TODO has the five checks), the proof that `create` writes App 2E picture
+is `app2e_picture.rs` reading the track file back, not a dcpdoctor pass.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
