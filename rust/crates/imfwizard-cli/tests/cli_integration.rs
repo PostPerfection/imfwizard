@@ -49,6 +49,15 @@ fn encode_subcommand_help() {
 }
 
 #[test]
+fn report_offers_the_finished_picture_scan() {
+    cmd()
+        .args(["report", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--scan-picture"));
+}
+
+#[test]
 fn profiles_lists_output() {
     cmd().args(["profiles"]).assert().success();
 }

@@ -52,7 +52,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **PSNR / SSIM** frame comparison between two image sequences
 - **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
-- **QC report** generation (text / JSON / HTML)
+- **QC report** generation (text / JSON / HTML), with optional black and frozen picture detection via `report --scan-picture`
 - **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
 
 ### Color & Audio Processing

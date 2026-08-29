@@ -863,6 +863,10 @@ enum Commands {
         /// Format: text, json, html
         #[arg(short, long, default_value = "html")]
         format: String,
+
+        /// Decode every picture frame to find black and frozen runs
+        #[arg(long)]
+        scan_picture: bool,
     },
 
     /// Start REST API server
@@ -2629,6 +2633,7 @@ fn run() {
             imp,
             output,
             format,
+            scan_picture,
         } => {
             let imp_dir = std::path::Path::new(&imp);
             let validate_result = imfwizard_core::validate::validate_imp_for_report(imp_dir);
@@ -2643,8 +2648,7 @@ fn run() {
                 ..Default::default()
             };
             for err in &validate_result.errors {
-                report.error_count += 1;
-                report.entries.push(postkit::report::ReportEntry {
+                report.add_entry(postkit::report::ReportEntry {
                     severity: "error".to_string(),
                     category: "validation".to_string(),
                     message: err.clone(),
@@ -2652,8 +2656,7 @@ fn run() {
                 });
             }
             for warn in &validate_result.warnings {
-                report.warning_count += 1;
-                report.entries.push(postkit::report::ReportEntry {
+                report.add_entry(postkit::report::ReportEntry {
                     severity: "warning".to_string(),
                     category: "validation".to_string(),
                     message: warn.clone(),
@@ -2661,15 +2664,22 @@ fn run() {
                 });
             }
             for info in &validate_result.infos {
-                report.entries.push(postkit::report::ReportEntry {
+                report.add_entry(postkit::report::ReportEntry {
                     severity: "info".to_string(),
                     category: "validation".to_string(),
                     message: info.clone(),
                     details: String::new(),
                 });
             }
+            if scan_picture {
+                for entry in imfwizard_core::report::scan_picture_entries(imp_dir) {
+                    report.add_entry(entry);
+                }
+            } else {
+                report.add_entry(imfwizard_core::report::picture_not_scanned_entry());
+            }
             if report.error_count == 0 {
-                report.pass_count = 1;
+                report.pass_count += 1;
                 report.summary = "IMP validation PASSED".to_string();
             } else {
                 report.summary = format!("{} errors found", report.error_count);

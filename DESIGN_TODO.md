@@ -39,15 +39,6 @@ reason and would be the cheapest route back: a `lut3d` landing on Rec.709 RGB
 rather than X'Y'Z' works today if the flag could say which space it targets.
 Shared with postkit, whose `colour.rs` is where the matrix would go.
 
-## Open: no black or frozen picture pass over a finished IMP
-
-postkit's `picture_findings::detect_in_essence` runs ffmpeg's blackdetect and
-freezedetect over a finished picture file, and dcpwizard's `report
---scan-picture` renders what it finds per reel. Nothing here calls it: this
-repo's `report` is a re-export of postkit's generic severity/category renderer,
-so there is no section for a per-track-file finding to go in. The encode already
-reports its own findings.
-
 ## Open: a subsampled App 2E track file has no decode path
 
 `postkit::grok_decoder` refuses a component that is not 4:4:4 by name, so a
