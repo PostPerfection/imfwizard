@@ -19,15 +19,13 @@ use crate::job_queue::{Job, JobQueue, JobState, JobType};
 /// parameters the queue cannot express fail loud rather than silently no-op.
 pub fn execute_job(job: &Job) -> Result<(), String> {
     match job.job_type {
-        JobType::Encode => {
-            let opts = crate::encode::EncodeOptions {
-                input_dir: job.input.clone(),
-                output_dir: job.output.clone(),
-                ..Default::default()
-            };
-            let r = crate::encode::encode(&opts);
-            if r.success { Ok(()) } else { Err(r.error) }
-        }
+        JobType::Encode => crate::encode::encode_image_sequence(
+            &job.input,
+            &job.output,
+            crate::encode::DEFAULT_ENCODE_BITRATE_MBPS,
+            crate::encode::FrameRate::default(),
+        )
+        .map(|_| ()),
         JobType::Transcode => {
             let opts = crate::transcode::TranscodeOptions {
                 input: job.input.clone(),

@@ -1,22 +1,23 @@
 //! Export a composition's picture track to a numbered image sequence.
 //!
 //! Selects a CPL, walks its timeline, opens each picture track's AS-02 J2K MXF via
-//! asdcplib, extracts every frame's J2K codestream, and decodes it with grk_decompress
-//! (the repo's J2K codec, which preserves the codestream's native precision).
+//! asdcplib, extracts every frame's J2K codestream, and decodes it in memory with
+//! grok, at the codestream's native precision.
 //!
 //! Output is the codestream's native colour encoding: no colour transform is applied,
-//! so XYZ or any other essence colorimetry is written through unchanged. Frames are
-//! numbered from 1 (frame_000001.tif) over the exported subrange.
+//! so XYZ or any other essence colorimetry is written through unchanged. A TIFF is
+//! written at the codestream's precision. PNG has no 12-bit depth, so an 8-bit
+//! codestream is an 8-bit PNG and anything deeper is a 16-bit one with the samples
+//! scaled up. Frames are numbered from 1 (frame_000001.tif) over the exported subrange.
 
 use std::path::{Path, PathBuf};
 
 use crate::timeline;
 
-/// Output image format. grk_decompress emits these at the codestream's native precision.
+/// Output image format.
 ///
-/// DPX is intentionally absent: grk_decompress cannot write DPX, and routing it through
-/// a second decoder (ffmpeg) would promote the essence to 16-bit, breaking the
-/// native-bit-depth contract.
+/// DPX is absent: nothing here writes DPX, and routing the frames through ffmpeg
+/// would promote the essence to 16-bit, breaking the native-bit-depth contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     Tiff,
@@ -29,8 +30,8 @@ impl ExportFormat {
             "tiff" | "tif" => Ok(Self::Tiff),
             "png" => Ok(Self::Png),
             "dpx" => Err(
-                "dpx export is not supported: grk_decompress (the J2K decoder, \
-                          chosen to preserve native bit depth) cannot emit DPX; use tiff or png"
+                "dpx export is not supported, it would not keep the native bit depth; use tiff \
+                 or png"
                     .into(),
             ),
             other => Err(format!("unknown format '{other}'; use tiff or png")),
@@ -103,15 +104,7 @@ pub fn export_frames(opts: &ExportFramesOptions) -> Result<ExportFramesResult, S
     std::fs::create_dir_all(&opts.output_dir)
         .map_err(|e| format!("cannot create output {}: {e}", opts.output_dir.display()))?;
 
-    let grk = postkit::grok::find_grk_decompress()
-        .ok_or("grk_decompress not found (looked in $HOME/bin/grok/bin and PATH)")?;
-    let lib_path = postkit::grok::grok_lib_path();
-
-    let tmp = opts.output_dir.join(".imfwizard_export_tmp");
-    std::fs::create_dir_all(&tmp).map_err(|e| format!("cannot create temp dir: {e}"))?;
-    let result = decode_range(opts, &segments, start, end, &grk, &lib_path, &tmp);
-    let _ = std::fs::remove_dir_all(&tmp);
-    let frames_written = result?;
+    let frames_written = decode_range(opts, &segments, start, end)?;
 
     Ok(ExportFramesResult {
         frames_written,
@@ -127,9 +120,6 @@ fn decode_range(
     segments: &[Segment],
     start: usize,
     end: usize,
-    grk: &Path,
-    lib_path: &str,
-    tmp: &Path,
 ) -> Result<u32, String> {
     let mut buf = vec![0u8; 16 * 1024 * 1024];
     let mut global = 0usize;
@@ -155,7 +145,7 @@ fn decode_range(
                 let out = opts
                     .output_dir
                     .join(format!("frame_{out_no:06}.{}", opts.format.ext()));
-                decode_frame(grk, lib_path, &buf[..n], tmp, &out)?;
+                write_decoded_frame(&buf[..n], opts.format, &out)?;
                 out_no += 1;
             }
         }
@@ -165,31 +155,52 @@ fn decode_range(
     Ok(out_no - 1)
 }
 
-/// Decode one J2K codestream to an image file via grk_decompress.
-fn decode_frame(
-    grk: &Path,
-    lib_path: &str,
-    j2c: &[u8],
-    tmp: &Path,
-    out: &Path,
-) -> Result<(), String> {
-    let src = tmp.join("frame.j2c");
-    std::fs::write(&src, j2c).map_err(|e| format!("writing temp codestream: {e}"))?;
+/// A PNG holds 8 or 16 bits a sample.
+const PNG_DEEP_BIT_DEPTH: u8 = 16;
 
-    let output = std::process::Command::new(grk)
-        .env("LD_LIBRARY_PATH", lib_path)
-        .args(["-i", &src.to_string_lossy(), "-o", &out.to_string_lossy()])
-        .output()
-        .map_err(|e| format!("spawning grk_decompress: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "grk_decompress could not decode a frame to {}: {}",
-            out.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+/// Decode one J2K codestream in memory and write it as `format`.
+fn write_decoded_frame(j2c: &[u8], format: ExportFormat, out: &Path) -> Result<(), String> {
+    let frame = postkit::grok_decoder::decode(j2c.to_vec(), 0)
+        .map_err(|e| format!("cannot decode a frame for {}: {e}", out.display()))?;
+    let samples = frame.interleaved_samples()?;
+    match format {
+        ExportFormat::Tiff => {
+            postkit::grok::write_tiff_rgb(out, frame.width, frame.height, frame.precision, &samples)
+        }
+        ExportFormat::Png => {
+            write_png_rgb(out, frame.width, frame.height, frame.precision, &samples)
+        }
     }
-    Ok(())
+}
+
+/// Write pixel-interleaved RGB as a PNG: 8-bit samples as they are, deeper
+/// ones scaled up to 16 bits.
+fn write_png_rgb(
+    out: &Path,
+    width: u32,
+    height: u32,
+    precision: u8,
+    samples: &[u16],
+) -> Result<(), String> {
+    let file =
+        std::fs::File::create(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    let data: Vec<u8> = if precision <= 8 {
+        encoder.set_depth(png::BitDepth::Eight);
+        samples.iter().map(|s| *s as u8).collect()
+    } else {
+        encoder.set_depth(png::BitDepth::Sixteen);
+        let shift = PNG_DEEP_BIT_DEPTH - precision;
+        samples
+            .iter()
+            .flat_map(|s| (s << shift).to_be_bytes())
+            .collect()
+    };
+    encoder
+        .write_header()
+        .and_then(|mut writer| writer.write_image_data(&data))
+        .map_err(|e| format!("cannot write {}: {e}", out.display()))
 }
 
 /// Resolve the timeline into picture segments, rejecting encrypted essence and
@@ -315,58 +326,62 @@ mod tests {
     const W: u32 = 2048;
     const H: u32 = 1080;
 
-    /// grk_compress/grk_decompress paths and lib dir.
-    fn grok_tools() -> (PathBuf, PathBuf, String) {
-        let compress = postkit::grok::find_grk_compress().expect("grk_compress on PATH");
-        let decompress = postkit::grok::find_grk_decompress().expect("grk_decompress on PATH");
-        (compress, decompress, postkit::grok::grok_lib_path())
-    }
-
-    /// Write an 8-bit RGB PPM whose pixels vary with a per-frame seed.
-    fn write_ppm(path: &Path, seed: u8) {
-        let mut data = format!("P6\n{W} {H}\n255\n").into_bytes();
-        data.reserve((W * H * 3) as usize);
+    /// One 8-bit RGB frame whose pixels vary with a per-frame seed, packed as
+    /// the rgb48be the encoder takes.
+    fn seeded_frame(seed: u8, index: u64) -> postkit::grok_encoder::RawFrame {
+        let mut data = Vec::with_capacity((W * H * 6) as usize);
         for y in 0..H {
             for x in 0..W {
-                data.push((x as u8).wrapping_add(seed));
-                data.push((y as u8).wrapping_mul(2));
-                data.push(seed);
+                for sample in [
+                    (x as u8).wrapping_add(seed),
+                    (y as u8).wrapping_mul(2),
+                    seed,
+                ] {
+                    data.extend_from_slice(&(u16::from(sample) << 8).to_be_bytes());
+                }
             }
         }
-        std::fs::write(path, data).unwrap();
+        postkit::grok_encoder::RawFrame::Packed {
+            data,
+            width: W,
+            height: H,
+            precision: 16,
+            index,
+        }
     }
 
-    /// The IMF profile and levels grk_compress is asked for, which is what an
-    /// App 2E track file at 2048x1080 and 24 fps declares.
-    const IMF_PROFILE_FLAG: &str = "2K,mainlevel=4,sublevel=2";
-
-    /// Build `n` distinct J2K codestreams in `dir` via grk_compress. They carry
-    /// an IMF Rsiz, since the AS-02 wrap takes no other family.
-    fn make_j2c_frames(compress: &Path, lib: &str, dir: &Path, n: u8) {
-        std::fs::create_dir_all(dir).unwrap();
-        for i in 0..n {
-            let ppm = dir.join(format!("src_{i}.ppm"));
-            write_ppm(&ppm, i.wrapping_mul(37).wrapping_add(1));
-            let j2c = dir.join(format!("frame_{i:04}.j2c"));
-            let out = std::process::Command::new(compress)
-                .env("LD_LIBRARY_PATH", lib)
-                .args([
-                    "-i",
-                    &ppm.to_string_lossy(),
-                    "-o",
-                    &j2c.to_string_lossy(),
-                    "-z",
-                    IMF_PROFILE_FLAG,
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "grk_compress failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            std::fs::remove_file(&ppm).unwrap();
-        }
+    /// Build `n` distinct J2K codestreams in `dir`, `frame_0000000N.j2c`. They
+    /// carry an IMF Rsiz, since the AS-02 wrap takes no other family.
+    fn make_j2c_frames(dir: &Path, n: u8) {
+        let profile = postkit::j2k::ImfProfile::for_raster(W, H).unwrap();
+        let levels = postkit::j2k::imf_levels(W, H, 24.0, 200_000_000).unwrap();
+        let params = postkit::grok_encoder::CompressParams {
+            profile: postkit::j2k::imf_rsiz(profile, levels),
+            apply_xyz_transform: false,
+            ..Default::default()
+        };
+        postkit::grok_encoder::initialize(0);
+        let mut next = 0u8;
+        let encoded = postkit::grok_encoder::encode_pipeline(
+            dir,
+            &params,
+            u64::from(n),
+            &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            &std::sync::Arc::new(postkit::grok_encoder::PhaseClocks::default()),
+            || {
+                if next >= n {
+                    return None;
+                }
+                let index = next;
+                next += 1;
+                Some(seeded_frame(
+                    index.wrapping_mul(37).wrapping_add(1),
+                    u64::from(index),
+                ))
+            },
+            |_| {},
+        );
+        assert!(encoded.success, "{}", encoded.error);
     }
 
     /// create_imp over a J2K frame dir, returning the IMP directory.
@@ -390,11 +405,9 @@ mod tests {
 
     #[test]
     fn exports_full_sequence_and_subrange() {
-        let (compress, _decompress, lib) = grok_tools();
-
         let tmp = tempfile::tempdir().unwrap();
         let frames = tmp.path().join("j2k");
-        make_j2c_frames(&compress, &lib, &frames, 5);
+        make_j2c_frames(&frames, 5);
         let imp = tmp.path().join("imp");
         build_imp(&frames, &imp);
 
@@ -440,11 +453,9 @@ mod tests {
 
     #[test]
     fn rejects_encrypted_essence() {
-        let (compress, _decompress, lib) = grok_tools();
-
         let tmp = tempfile::tempdir().unwrap();
         let frames = tmp.path().join("j2k");
-        make_j2c_frames(&compress, &lib, &frames, 2);
+        make_j2c_frames(&frames, 2);
         let imp = tmp.path().join("imp");
         build_imp(&frames, &imp);
 
@@ -458,7 +469,7 @@ mod tests {
                     .is_some_and(|n| n.starts_with("VIDEO_"))
             })
             .expect("wrapped VIDEO mxf");
-        let j2c = std::fs::read(frames.join("frame_0000.j2c")).unwrap();
+        let j2c = std::fs::read(frames.join("frame_00000000.j2c")).unwrap();
         write_encrypted_mxf(&j2c, &video, 2);
 
         let err = export_frames(&ExportFramesOptions {

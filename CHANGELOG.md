@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- **No grok binary is run any more**: a TIFF sequence handed to `create` or a GUI job is read by postkit's own loader threads, at 8, 12 or 16 bits, and compressed by the linked grok library, which brings a still sequence the per-frame byte cap, a subtitle burn and the overlapped MXF wrap that video already had. DPX, EXR and BMP sequences decode through ffmpeg. `export-frames` decodes each frame in memory and writes the TIFF itself at the codestream's precision; a PNG is 8-bit for an 8-bit codestream and 16-bit, scaled up, for anything deeper. `create` reads a TIFF sequence's raster from the file rather than ffprobe, which cannot read a 12-bit TIFF. grk_compress is gone from `tools`, and CI no longer checks for it.
+- **`encode` encodes App 2E codestreams**: it declares the IMF profile and levels for the raster and bitrate and compresses at the ratio that bitrate means, the way `create` does, where before it passed the bitrate as grk_compress's ratio flag with no profile, so `create` refused its output. Its `--threads` flag is gone, the encoder takes every core. The REST encode job does the same at 250 Mbps.
+
 ### Removed
 - **`imfwizard_core::burnin`**: a re-export of `postkit::burnin` that nothing here called. imfwizard packages a burn through `create --burn-subtitle`, and a caller wanting the standalone pass calls postkit directly.
 - **`sdi-preview`**: it set an mpv property mpv does not have and played on screen while claiming DeckLink output. A real SDI path needs ffmpeg or GStreamer built against the Blackmagic SDK, recorded in DESIGN_TODO.

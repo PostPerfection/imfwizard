@@ -1,7 +1,46 @@
 pub use postkit::encode::{
-    EncodeOptions, EncodeResult, FrameRate, ImageFormat, detect_image_format, encode,
-    find_source_frames,
+    EncodeResult, FrameRate, ImageFormat, detect_image_format, find_source_frames,
 };
+
+/// The bitrate the standalone `encode` command and the encode job compress at
+/// when none is asked for.
+pub const DEFAULT_ENCODE_BITRATE_MBPS: f64 = 250.0;
+
+/// Encode a directory of stills to App 2E codestreams at `bitrate_mbps`, the
+/// way `create` does for its picture, without packaging them. The codestreams
+/// land in a `j2k` directory under `output_dir`.
+pub fn encode_image_sequence(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+    bitrate_mbps: f64,
+    fps: FrameRate,
+) -> Result<postkit::pipeline::EncodeResult, String> {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    let (width, height) = postkit::encode::source_raster(input_dir)?;
+    let rsiz = imf_rsiz_for_encode(width, height, fps.as_f64(), bitrate_mbps)?;
+    postkit::pipeline::run_encode_with_options(
+        input_dir,
+        output_dir,
+        &postkit::pipeline::EncodeRunOptions {
+            compression_ratio: compression_ratio_for_bitrate(
+                width,
+                height,
+                fps.as_f64(),
+                bitrate_mbps,
+            ),
+            fps,
+            source_colour: postkit::encode::SourceColour::KeepRgb,
+            rsiz,
+            ..postkit::pipeline::EncodeRunOptions::default()
+        },
+        &Arc::new(AtomicBool::new(false)),
+        &Arc::new(AtomicBool::new(false)),
+        |progress| tracing::info!("{}", progress.message),
+        |line| tracing::info!("{line}"),
+    )
+}
 
 /// A J2K frame carries 12-bit RGB, three components a pixel, so an uncompressed
 /// frame is this many bits per pixel.

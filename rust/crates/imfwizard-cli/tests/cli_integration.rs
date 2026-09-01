@@ -552,7 +552,7 @@ fn a_23_976_source_encodes_one_codestream_per_source_frame() {
 /// codestreams it cannot read.
 #[test]
 fn an_image_sequence_directory_encodes_and_packages() {
-    // tiff frames go straight to grk_compress, jpeg frames decode through ffmpeg
+    // tiff frames are read by postkit itself
     for (extension, pixel_format) in [("tif", "rgb24"), ("jpg", "yuvj420p")] {
         let dir = TempDir::new().unwrap();
         let frames = dir.path().join("frames");

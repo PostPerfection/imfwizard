@@ -144,7 +144,6 @@ jobs:
           ffprobe -version | head -n 1
           xmllint --version
           java -version
-          grk_compress -h > /dev/null
           test -n "$PHOTON_JAR"
           # the burn shapes text with fontdb, and cosmic-text builds it without
           # the fontconfig feature, so it reads these directories directly

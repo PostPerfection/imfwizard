@@ -26,7 +26,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP. It rewraps only, so it takes a DCI X'Y'Z' cinema picture: an IMP imfwizard made carries RGB IMF essence and is refused naming the transcode it would need
 
 ### Encoding & Transcoding
-- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 via Grok. DPX, TIFF, EXR and BMP frames are handed to `grk_compress` as they are, JPEG and PNG frames decode through ffmpeg first, since grok reads them only when it was built with those loaders
+- **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
@@ -198,7 +198,6 @@ cargo build --release
 | Dependency | Purpose | Install |
 |-----------|---------|---------|
 | `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
-| `grk_compress` | JPEG 2000 encoding of image sequences (video goes through the linked Grok library instead) | [grok.rocks](https://grok.rocks/) |
 | `mpv` | GUI preview player | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
@@ -405,9 +404,9 @@ imfwizard create \
   --output /path/to/output/
 ```
 
-A directory holding anything else is refused by name. PNG and JPEG sequences
-decode through ffmpeg on the way to the encoder, the other formats go to
-`grk_compress` directly.
+A directory holding anything else is refused by name. TIFF frames are read
+directly, at 8, 12 or 16 bits a sample, and every other format decodes through
+ffmpeg on the way to the encoder.
 
 ### Transcode via ffmpeg
 

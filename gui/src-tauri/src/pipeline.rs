@@ -475,7 +475,7 @@ pub async fn detect_source_crop(
     threshold: Option<f32>,
 ) -> Result<DetectedCrop, String> {
     let picture = PathBuf::from(&video_path);
-    let (source_width, source_height) = imfwizard_core::source_picture::source_raster(&picture)?;
+    let (source_width, source_height) = postkit::encode::source_raster(&picture)?;
     let options = imfwizard_core::source_picture::SourcePictureOptions {
         auto_crop: true,
         auto_crop_threshold: threshold
@@ -761,8 +761,7 @@ fn format_stage_timing(stage: &str, duration: std::time::Duration) -> String {
 }
 
 /// The `[TIMING]` line naming where the time inside an encode went, or None
-/// when nothing was measured, which is a still or an image sequence handed
-/// straight to grk_compress.
+/// when nothing was measured, which is a still or a J2K sequence.
 fn format_encode_breakdown(
     stage: &str,
     progress: &postkit::pipeline::PipelineProgress,
@@ -857,7 +856,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             postkit::encode::InputType::J2kSequence => None,
             _ => {
                 let (source_width, source_height) =
-                    imfwizard_core::source_picture::source_raster(&video_path)?;
+                    postkit::encode::source_raster(&video_path)?;
                 let resolved = imfwizard_core::source_picture::resolve_picture(
                     &job.picture,
                     &video_path,

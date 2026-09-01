@@ -59,12 +59,6 @@ const TOOL_DEFS: &[ToolDef] = &[
         version_args: &["-version"],
     },
     ToolDef {
-        name: "grk_compress",
-        purpose: "JPEG 2000 encoding (Grok codec)",
-        required: true,
-        version_args: &["--version"],
-    },
-    ToolDef {
         name: "dovi_tool",
         purpose: "Dolby Vision RPU injection/extraction",
         required: false,
@@ -242,9 +236,6 @@ pub fn has_ffmpeg() -> bool {
 }
 pub fn has_ffprobe() -> bool {
     tool_available("ffprobe")
-}
-pub fn has_grk_compress() -> bool {
-    tool_available("grk_compress")
 }
 pub fn has_dovi_tool() -> bool {
     tool_available("dovi_tool")

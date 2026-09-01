@@ -111,7 +111,7 @@ fn check_app2e_picture(plan: &CreatePlan) -> Result<(), String> {
     if plan.picture_is_codestreams() {
         return crate::mxf_wrap::precheck_j2k(picture);
     }
-    let (source_width, source_height) = crate::source_picture::source_raster(picture)?;
+    let (source_width, source_height) = postkit::encode::source_raster(picture)?;
     let (width, height) =
         crate::source_picture::encode_raster(&plan.picture_options, source_width, source_height);
     crate::mxf_wrap::validate_app2e_raster(width, height)

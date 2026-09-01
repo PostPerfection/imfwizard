@@ -1148,6 +1148,7 @@ dependencies = [
  "base64",
  "dcpdoctor-core",
  "hound",
+ "png",
  "postkit",
  "quick-xml 0.37.5",
  "regex-lite",

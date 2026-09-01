@@ -26,11 +26,8 @@ pub fn overlap_refusal(job: &PictureJob) -> Option<&'static str> {
              nothing feeds the wrap frame by frame",
         );
     }
-    if job.input_type != postkit::encode::InputType::Video {
-        return Some(
-            "only a video source is decoded frame by frame: a J2K sequence is never encoded, and \
-             an image sequence can go straight to grk_compress",
-        );
+    if job.input_type == postkit::encode::InputType::J2kSequence {
+        return Some("a J2K sequence is never encoded, so nothing feeds the wrap frame by frame");
     }
     None
 }
@@ -108,6 +105,15 @@ mod tests {
     }
 
     #[test]
+    fn an_image_sequence_qualifies_since_postkit_encodes_it_frame_by_frame() {
+        let sequence = PictureJob {
+            input_type: postkit::encode::InputType::ImageSequence,
+            ..video()
+        };
+        assert_eq!(overlap_refusal(&sequence), None);
+    }
+
+    #[test]
     fn everything_that_does_not_stream_every_packaged_frame_is_refused() {
         for job in [
             PictureJob {
@@ -116,10 +122,6 @@ mod tests {
             },
             PictureJob {
                 input_type: postkit::encode::InputType::J2kSequence,
-                ..video()
-            },
-            PictureJob {
-                input_type: postkit::encode::InputType::ImageSequence,
                 ..video()
             },
         ] {

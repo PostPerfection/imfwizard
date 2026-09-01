@@ -7,11 +7,11 @@
 //! is the raster the App 2E check has to run on, since that is what the encoder
 //! writes and the wrapper sees.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use postkit::encode::{InputType, detect_input_type, find_source_frames};
+use postkit::encode::{InputType, detect_input_type};
 use postkit::picture_processing::{
     Crop, DEFAULT_AUTO_CROP_THRESHOLD, Fit, PicturePlan, PictureProcessing, Rotation, detect_crop,
     fill_crop, require_one_crop_decider,
@@ -171,22 +171,6 @@ pub fn reject_on_precompressed_picture(
     ))
 }
 
-/// The size the plan is measured against: the container's own raster, or the
-/// first frame of an image sequence.
-pub fn source_raster(picture: &Path) -> Result<(u32, u32), String> {
-    let measured = match detect_input_type(picture) {
-        InputType::ImageSequence if picture.is_dir() => first_frame(picture)?,
-        _ => picture.to_path_buf(),
-    };
-    let info = crate::probe::probe_video(&measured).ok_or_else(|| {
-        format!(
-            "cannot read the picture size of {}, so the picture processing cannot be planned",
-            measured.display()
-        )
-    })?;
-    Ok((info.width, info.height))
-}
-
 /// Read a `--raster` value, which has to be one of the App 2E rasters.
 pub fn parse_raster(value: &str) -> Result<(u32, u32), String> {
     let unreadable = || {
@@ -209,15 +193,6 @@ fn require_app2e_raster(width: u32, height: u32) -> Result<(), String> {
     Err(format!(
         "raster {width}x{height} is not one App 2E allows: pick {RASTER_SPELLINGS}"
     ))
-}
-
-fn first_frame(directory: &Path) -> Result<PathBuf, String> {
-    let frames = find_source_frames(directory)
-        .map_err(|error| format!("cannot list {}: {error}", directory.display()))?;
-    frames
-        .into_iter()
-        .next()
-        .ok_or_else(|| format!("no images in {}", directory.display()))
 }
 
 #[cfg(test)]

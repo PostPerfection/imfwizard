@@ -329,7 +329,7 @@ mod tests {
         assert!(error.contains("0x0003"), "{error}");
         assert!(error.contains("X'Y'Z'"), "{error}");
 
-        // Rsiz 0, what grk_compress writes without a profile flag
+        // Rsiz 0, no profile declared
         let error = validate_app2e_picture(0, 2048, 1080, 12).unwrap_err();
         assert!(error.contains("not an IMF profile"), "{error}");
     }

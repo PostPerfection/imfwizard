@@ -77,7 +77,7 @@ fn demux_failure_reason(
     }
 }
 
-/// Encode picture through the shared grok pipeline (grk_compress), printing
+/// Encode picture through the shared in-process grok pipeline, printing
 /// per-frame progress. Ctrl-C cancels the run.
 ///
 /// `wrap` writes the picture MXF as the frames finish instead of leaving the
@@ -143,8 +143,8 @@ fn encode_picture(
     result
 }
 
-/// Whether an encode timed anything. A still or an image sequence handed
-/// straight to grk_compress reports four zeros.
+/// Whether an encode timed anything. A still or a J2K sequence reports four
+/// zeros.
 fn measured_any_phase(progress: &postkit::pipeline::PipelineProgress) -> bool {
     progress.decode_wait_secs > 0.0
         || progress.prepare_secs > 0.0
@@ -552,12 +552,8 @@ enum Commands {
         output: PathBuf,
 
         /// Target bitrate in Mbps
-        #[arg(short, long, default_value = "250")]
+        #[arg(short, long, default_value_t = imfwizard_core::encode::DEFAULT_ENCODE_BITRATE_MBPS)]
         bitrate: f64,
-
-        /// Number of threads
-        #[arg(short, long, default_value = "0")]
-        threads: u32,
     },
 
     /// Transcode media via ffmpeg
@@ -1853,8 +1849,7 @@ fn run() {
                         );
 
                         let (source_width, source_height) =
-                            imfwizard_core::source_picture::source_raster(&video_path)
-                                .unwrap_or_else(|e| fail(e));
+                            postkit::encode::source_raster(&video_path).unwrap_or_else(|e| fail(e));
                         let picture = imfwizard_core::source_picture::resolve_picture(
                             &picture_options,
                             &video_path,
@@ -1963,7 +1958,6 @@ fn run() {
                             );
                         }
 
-                        // encode via the shared grok pipeline (grk_compress); no fallback
                         let encoded = encode_picture(
                             &video_path,
                             &output,
@@ -2124,21 +2118,23 @@ fn run() {
             input,
             output,
             bitrate,
-            threads,
         } => {
-            let opts = imfwizard_core::encode::EncodeOptions {
-                input_dir: input,
-                output_dir: output,
-                bitrate_mbps: bitrate,
-                num_threads: threads,
-                ..Default::default()
-            };
-            let result = imfwizard_core::encode::encode(&opts);
-            if result.success {
-                println!("Encoding complete: {} frames", result.frames_encoded);
-            } else {
-                eprintln!("Error: {}", result.error);
-                std::process::exit(1);
+            let result = imfwizard_core::encode::encode_image_sequence(
+                &input,
+                &output,
+                bitrate,
+                imfwizard_core::encode::FrameRate::default(),
+            );
+            match result {
+                Ok(result) => println!(
+                    "Encoding complete: {} frames in {}",
+                    result.frames_encoded,
+                    result.j2k_dir.display()
+                ),
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                }
             }
         }
 
