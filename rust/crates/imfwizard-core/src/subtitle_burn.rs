@@ -4,7 +4,7 @@
 //! track. The compositing itself is postkit's `subtitle_raster`.
 
 use postkit::subtitle_formats::{StyledCue, StyledRun};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::subtitle_convert::SubtitleFormat;
@@ -106,58 +106,4 @@ pub fn prepare_subtitle_burn(
     postkit::subtitle_raster::SubtitleBurn::new(cues, font, style, fps.as_f64())
         .map(Arc::new)
         .map_err(|e| format!("cannot burn {}: {e}", input.display()))
-}
-
-/// What the encode would hand a burn, as the pre-encode checks see it.
-pub struct BurnTarget<'a> {
-    /// Every timed-text file the composition packages.
-    pub timed_text: &'a [PathBuf],
-    /// Frames reach the encoder already X'Y'Z', so display-RGB text would land
-    /// in the wrong space. Covers `--source-colourspace xyz` and `--hdr`, which
-    /// declares the essence PQ.
-    pub frames_already_xyz: bool,
-    /// The picture is a J2K directory, so nothing decodes.
-    pub input_is_codestreams: bool,
-}
-
-/// Refuse a `--burn-subtitle` the encode cannot honour, before anything is
-/// encoded.
-pub fn check_burn_supported(burn_path: &Path, target: &BurnTarget) -> Result<(), String> {
-    if !burn_path.is_file() {
-        return Err(format!(
-            "--burn-subtitle file not found: {}",
-            burn_path.display()
-        ));
-    }
-    if target.timed_text.iter().any(|t| same_file(burn_path, t)) {
-        return Err(format!(
-            "{} is given to both --burn-subtitle and --subtitle: a burnt-in subtitle must not \
-             also be a timed-text track, so pick one",
-            burn_path.display()
-        ));
-    }
-    if target.input_is_codestreams {
-        return Err(
-            "--burn-subtitle needs frames to draw on, and a J2K directory is already compressed"
-                .into(),
-        );
-    }
-    if target.frames_already_xyz {
-        return Err(
-            "--burn-subtitle draws in display RGB, but this source reaches the encoder as \
-             X'Y'Z' already (--source-colourspace xyz, or --hdr declaring PQ essence): burn \
-             from the display-RGB master instead"
-                .into(),
-        );
-    }
-    Ok(())
-}
-
-/// Whether two paths name the same file, falling back to the paths themselves
-/// when either cannot be canonicalised.
-fn same_file(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
-    }
 }

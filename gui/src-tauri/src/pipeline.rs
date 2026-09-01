@@ -554,7 +554,7 @@ pub struct AudioMapShape {
 #[tauri::command]
 pub async fn audio_map_shape(audio_path: String) -> Result<AudioMapShape, String> {
     Ok(AudioMapShape {
-        input_channels: imfwizard_core::audio_map::input_channels(&PathBuf::from(&audio_path))?,
+        input_channels: postkit::wav_io::channel_count(&PathBuf::from(&audio_path))?,
         destination_names: imfwizard_core::audio_map::destination_names(),
     })
 }

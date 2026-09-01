@@ -4021,13 +4021,5 @@ fn run() {
 }
 
 fn parse_colour_space(s: &str) -> postkit::colour::ColourSpace {
-    match s.to_lowercase().as_str() {
-        "p3" | "dci-p3" => postkit::colour::ColourSpace::P3,
-        "xyz" => postkit::colour::ColourSpace::Xyz,
-        "rec2020" | "2020" => postkit::colour::ColourSpace::Rec2020,
-        "aces" | "ap0" => postkit::colour::ColourSpace::Aces,
-        "acescg" | "ap1" => postkit::colour::ColourSpace::AcesCg,
-        "logc" | "alexa" => postkit::colour::ColourSpace::LogC,
-        _ => postkit::colour::ColourSpace::Rec709,
-    }
+    postkit::colour::parse_colour_space(s).unwrap_or(postkit::colour::ColourSpace::Rec709)
 }

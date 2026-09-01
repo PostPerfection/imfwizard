@@ -1,13 +1,11 @@
-//! `create --burn-subtitle`: the refusal matrix and the burn sources there is a
-//! cue reader for.
+//! `create --burn-subtitle`: the burn sources there is a cue reader for, and
+//! the appearance the text is drawn with.
 //!
-//! The picture assertions live in postkit (`tests/subtitle_burn_e2e.rs`), which
-//! can decode a codestream back to pixels. What matters here is that the flag
-//! combinations fail before an encode starts.
+//! The refusals every package format shares are postkit's `preflight`. The
+//! picture assertions live in postkit (`tests/subtitle_burn_e2e.rs`), which can
+//! decode a codestream back to pixels.
 
-use imfwizard_core::subtitle_burn::{
-    BurnTarget, check_burn_supported, prepare_subtitle_burn, resolve_burn_style,
-};
+use imfwizard_core::subtitle_burn::{prepare_subtitle_burn, resolve_burn_style};
 use postkit::encode::FrameRate;
 use postkit::subtitle_raster::{BurnEffect, BurnStyleOverrides};
 use std::path::{Path, PathBuf};
@@ -24,66 +22,6 @@ fn write_srt(dir: &Path) -> PathBuf {
     let path = dir.join("cues.srt");
     std::fs::write(&path, SRT).unwrap();
     path
-}
-
-/// Everything a plain display-RGB video encode looks like.
-fn video_source(timed_text: &[PathBuf]) -> BurnTarget<'_> {
-    BurnTarget {
-        timed_text,
-        frames_already_xyz: false,
-        input_is_codestreams: false,
-    }
-}
-
-#[test]
-fn a_burn_is_refused_wherever_it_would_be_drawn_in_the_wrong_place() {
-    let dir = tempfile::tempdir().unwrap();
-    let srt = write_srt(dir.path());
-    let elsewhere = vec![dir.path().join("other.ttml")];
-
-    check_burn_supported(&srt, &video_source(&[])).expect("a plain display-RGB burn is fine");
-    check_burn_supported(&srt, &video_source(&elsewhere))
-        .expect("a different timed-text file is fine");
-
-    let missing = dir.path().join("nope.srt");
-    let same = vec![srt.clone()];
-    for (label, result, needle) in [
-        (
-            "missing file",
-            check_burn_supported(&missing, &video_source(&[])),
-            "not found",
-        ),
-        (
-            "same file as --subtitle",
-            check_burn_supported(&srt, &video_source(&same)),
-            "pick one",
-        ),
-        (
-            "J2K input",
-            check_burn_supported(
-                &srt,
-                &BurnTarget {
-                    input_is_codestreams: true,
-                    ..video_source(&[])
-                },
-            ),
-            "already compressed",
-        ),
-        (
-            "frames already X'Y'Z'",
-            check_burn_supported(
-                &srt,
-                &BurnTarget {
-                    frames_already_xyz: true,
-                    ..video_source(&[])
-                },
-            ),
-            "X'Y'Z' already",
-        ),
-    ] {
-        let err = result.expect_err(label);
-        assert!(err.contains(needle), "{label}: got {err}");
-    }
 }
 
 /// TTML/IMSC is what imfwizard packages, not what it reads back to cues, so the

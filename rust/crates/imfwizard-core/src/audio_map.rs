@@ -68,13 +68,6 @@ pub fn parse_audio_map(spec: &str, input_channels: usize) -> Result<MixMatrix, S
     )
 }
 
-/// How many channels a WAV carries.
-pub fn input_channels(input: &Path) -> Result<usize, String> {
-    let reader = hound::WavReader::open(input)
-        .map_err(|error| format!("cannot read {}: {error}", input.display()))?;
-    Ok(reader.spec().channels as usize)
-}
-
 /// Every destination name, in lane order, as a GUI matrix labels its columns.
 pub fn destination_names() -> Vec<String> {
     channel_map_7_1()
@@ -139,7 +132,7 @@ pub fn map_audio_file(
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(work_dir)
         .map_err(|error| format!("cannot create {}: {error}", work_dir.display()))?;
-    let channels = input_channels(input)?;
+    let channels = postkit::wav_io::channel_count(input)?;
     let matrix = parse_audio_map(spec, channels)?;
     let output = work_dir.join(MAPPED_AUDIO_NAME);
     let report = mix_wav_files(&matrix, &[input.to_path_buf()], &output)?;

@@ -79,19 +79,23 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     check_source_edits(plan)
 }
 
+/// The routes that hand the encoder X'Y'Z' frames, as the refusal names them.
+const XYZ_ROUTES: &str = "--source-colourspace xyz, or --hdr declaring PQ essence";
+
 /// A burn with no picture is refused by the front end that can be in that state,
 /// naming the control that carried it, so there is nothing to draw on here.
 fn check_burn(plan: &CreatePlan) -> Result<(), String> {
     let (Some(burn), Some(picture)) = (&plan.burn_subtitle, &plan.picture) else {
         return Ok(());
     };
-    crate::subtitle_burn::check_burn_supported(
+    postkit::preflight::check_burn_supported(
         burn,
-        &crate::subtitle_burn::BurnTarget {
+        &postkit::preflight::BurnTarget {
             timed_text: &plan.timed_text_files,
             frames_already_xyz: crate::source_colourspace::frames_reach_the_compressor_as_xyz(
                 &plan.source_colour,
-            ),
+            )
+            .then_some(XYZ_ROUTES),
             input_is_codestreams: detect_input_type(picture) == InputType::J2kSequence,
         },
     )?;
@@ -122,7 +126,7 @@ fn check_audio_map(plan: &CreatePlan) -> Result<(), String> {
         return Ok(());
     };
     for wav in &plan.audio_files {
-        crate::audio_map::parse_audio_map(spec, crate::audio_map::input_channels(wav)?)?;
+        crate::audio_map::parse_audio_map(spec, postkit::wav_io::channel_count(wav)?)?;
     }
     Ok(())
 }
