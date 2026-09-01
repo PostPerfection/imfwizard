@@ -855,8 +855,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let picture = match input_type {
             postkit::encode::InputType::J2kSequence => None,
             _ => {
-                let (source_width, source_height) =
-                    postkit::encode::source_raster(&video_path)?;
+                let (source_width, source_height) = postkit::encode::source_raster(&video_path)?;
                 let resolved = imfwizard_core::source_picture::resolve_picture(
                     &job.picture,
                     &video_path,
