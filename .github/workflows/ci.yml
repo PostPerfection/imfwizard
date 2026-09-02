@@ -153,7 +153,7 @@ jobs:
             *) font_dir= ;;
           esac
           if [ -n "$font_dir" ]; then
-            font=$(find "$font_dir" -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) | head -n 1)
+            font=$(find "$font_dir" -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) -print -quit)
             test -n "$font"
             echo "$font"
           fi
