@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use postkit::audio_mix_matrix::{MixMatrix, MixReport, mix_wav_files};
+use postkit::audio_mix_matrix::{
+    LaneVocabulary, MixMatrix, MixReport, mix_wav_files, parse_named_audio_map,
+};
 
 use crate::channel_map::channel_map_7_1;
 
@@ -19,94 +21,36 @@ const MCA_SYMBOL_PREFIX: &str = "ch";
 /// What the mapped WAV is called under the job's work directory.
 pub const MAPPED_AUDIO_NAME: &str = "audio_mapped.wav";
 
-const SPEC_ENTRY_SEPARATOR: char = ',';
-const SPEC_CHANNEL_SEPARATOR: char = ':';
-const SPEC_GAIN_SEPARATOR: char = '@';
-const FIRST_CHANNEL_NUMBER: usize = 1;
+/// The 7.1 lanes under every spelling `channel_map` carries, each listed under
+/// the symbol without its prefix.
+fn lane_vocabulary() -> LaneVocabulary {
+    LaneVocabulary {
+        lane_names: channel_map_7_1()
+            .channels
+            .into_iter()
+            .map(|channel| {
+                let short_symbol = channel
+                    .mca_tag_symbol
+                    .strip_prefix(MCA_SYMBOL_PREFIX)
+                    .unwrap_or(&channel.mca_tag_symbol)
+                    .to_string();
+                vec![short_symbol, channel.label, channel.mca_tag_symbol]
+            })
+            .collect(),
+        output_channel_count: |highest_destination| highest_destination,
+    }
+}
 
 /// Read a map whose destinations may be channel names, against an input of
 /// `input_channels` channels. The output carries as many channels as the highest
 /// destination lane.
 pub fn parse_audio_map(spec: &str, input_channels: usize) -> Result<MixMatrix, String> {
-    if spec.trim().is_empty() {
-        return Err("audio map is empty".to_string());
-    }
-    let mut numbered = Vec::new();
-    let mut output_channels = 0;
-    for entry in spec.split(SPEC_ENTRY_SEPARATOR) {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            return Err("audio map has an empty entry".to_string());
-        }
-        let (channels, gain) = match entry.split_once(SPEC_GAIN_SEPARATOR) {
-            Some((channels, gain)) => (channels, Some(gain)),
-            None => (entry, None),
-        };
-        let (input, output) = channels
-            .split_once(SPEC_CHANNEL_SEPARATOR)
-            .ok_or_else(|| format!("audio map entry \"{entry}\" is not IN:OUT or IN:OUT@GAIN"))?;
-        let lane = destination_lane(output.trim(), entry)?;
-        output_channels = output_channels.max(lane + 1);
-        let numbered_entry = match gain {
-            Some(gain) => format!(
-                "{}{SPEC_CHANNEL_SEPARATOR}{}{SPEC_GAIN_SEPARATOR}{gain}",
-                input.trim(),
-                lane + FIRST_CHANNEL_NUMBER
-            ),
-            None => format!(
-                "{}{SPEC_CHANNEL_SEPARATOR}{}",
-                input.trim(),
-                lane + FIRST_CHANNEL_NUMBER
-            ),
-        };
-        numbered.push(numbered_entry);
-    }
-    MixMatrix::parse(
-        &numbered.join(&SPEC_ENTRY_SEPARATOR.to_string()),
-        input_channels,
-        output_channels,
-    )
+    parse_named_audio_map(spec, input_channels, &lane_vocabulary())
 }
 
 /// Every destination name, in lane order, as a GUI matrix labels its columns.
 pub fn destination_names() -> Vec<String> {
-    channel_map_7_1()
-        .channels
-        .into_iter()
-        .map(|channel| short_name(&channel.mca_tag_symbol))
-        .collect()
-}
-
-/// The 0-based lane a destination names, whether it is a number or a name.
-fn destination_lane(output: &str, entry: &str) -> Result<usize, String> {
-    if let Ok(number) = output.parse::<usize>() {
-        if number < FIRST_CHANNEL_NUMBER {
-            return Err(format!(
-                "audio map entry \"{entry}\" names output channel {number}, and channels count from {FIRST_CHANNEL_NUMBER}"
-            ));
-        }
-        return Ok(number - FIRST_CHANNEL_NUMBER);
-    }
-    let map = channel_map_7_1();
-    let found = map.channels.iter().find(|channel| {
-        channel.label.eq_ignore_ascii_case(output)
-            || channel.mca_tag_symbol.eq_ignore_ascii_case(output)
-            || short_name(&channel.mca_tag_symbol).eq_ignore_ascii_case(output)
-    });
-    match found {
-        Some(channel) => Ok(channel.index as usize),
-        None => Err(format!(
-            "audio map entry \"{entry}\" names output channel \"{output}\", which is neither a channel number nor one of {}",
-            destination_names().join(", ")
-        )),
-    }
-}
-
-fn short_name(mca_tag_symbol: &str) -> String {
-    mca_tag_symbol
-        .strip_prefix(MCA_SYMBOL_PREFIX)
-        .unwrap_or(mca_tag_symbol)
-        .to_string()
+    lane_vocabulary().listed_names()
 }
 
 /// One line for a log: what the map did and whether it changed any sample.
