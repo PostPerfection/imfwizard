@@ -24,8 +24,6 @@ pub struct Preferences {
     pub default_bandwidth_mbps: u32,
     #[serde(default = "default_colour_space")]
     pub default_colour_space: String,
-    #[serde(default = "default_gpu_device")]
-    pub gpu_device: i32,
     #[serde(default = "default_hdr_mode")]
     pub default_hdr_mode: String,
     #[serde(default = "default_channel_config")]
@@ -64,9 +62,6 @@ fn default_bandwidth() -> u32 {
 fn default_colour_space() -> String {
     "Rec.709".to_string()
 }
-fn default_gpu_device() -> i32 {
-    -1
-}
 fn default_hdr_mode() -> String {
     "SDR".to_string()
 }
@@ -90,7 +85,6 @@ impl Default for Preferences {
             preferred_encoder: default_encoder(),
             default_bandwidth_mbps: default_bandwidth(),
             default_colour_space: default_colour_space(),
-            gpu_device: default_gpu_device(),
             default_hdr_mode: default_hdr_mode(),
             default_channel_config: default_channel_config(),
             loudness_target_lufs: default_loudness(),
@@ -150,7 +144,6 @@ mod tests {
         assert_eq!(prefs.preferred_encoder, "grok");
         assert_eq!(prefs.default_bandwidth_mbps, 250);
         assert_eq!(prefs.default_colour_space, "Rec.709");
-        assert_eq!(prefs.gpu_device, -1);
         assert_eq!(prefs.default_hdr_mode, "SDR");
         assert_eq!(prefs.default_channel_config, "5.1");
         assert!((prefs.loudness_target_lufs - (-24.0)).abs() < 0.01);
@@ -224,7 +217,6 @@ mod tests {
             preferred_encoder: "kakadu".to_string(),
             default_bandwidth_mbps: 100,
             default_colour_space: "P3-D65".to_string(),
-            gpu_device: 2,
             default_hdr_mode: "PQ".to_string(),
             default_channel_config: "7.1".to_string(),
             loudness_target_lufs: -23.0,
@@ -245,7 +237,6 @@ mod tests {
         assert_eq!(loaded.preferred_encoder, "kakadu");
         assert_eq!(loaded.default_bandwidth_mbps, 100);
         assert_eq!(loaded.default_colour_space, "P3-D65");
-        assert_eq!(loaded.gpu_device, 2);
         assert_eq!(loaded.default_hdr_mode, "PQ");
         assert_eq!(loaded.default_channel_config, "7.1");
         assert!((loaded.loudness_target_lufs - (-23.0)).abs() < 0.01);

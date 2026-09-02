@@ -14,6 +14,10 @@ struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
+
+    /// Encode and decode on grok's accelerator plugin
+    #[arg(long, global = true)]
+    gpu: bool,
 }
 
 /// postkit's `KdmFormat` carries no clap or `FromStr` impl, so the command line
@@ -1510,6 +1514,15 @@ fn run() {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| level.into()),
         )
         .init();
+
+    postkit::grok_encoder::initialize(0);
+
+    if cli.gpu
+        && let Err(e) = postkit::grok_encoder::use_gpu()
+    {
+        tracing::error!("{e}");
+        std::process::exit(1);
+    }
 
     match cli.command {
         Commands::Create {
@@ -4017,6 +4030,13 @@ fn run() {
                 }
             }
         }
+    }
+
+    if cli.gpu {
+        tracing::info!(
+            "grok's accelerator plugin ran {} frames on the device",
+            postkit::grok_encoder::accelerated_frames()
+        );
     }
 }
 

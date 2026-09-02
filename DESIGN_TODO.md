@@ -94,12 +94,6 @@ has the entry).
 
 ## Open: smaller gaps in the source edits (2026-08-16)
 
-- GPU J2K encoding. The grok library has no GPU encode path of its own: it is a
-  separately licensed accelerator plugin (`grk_plugin_load` and
-  `grk_plugin_init` with a device id and a licence key), which is what
-  DCP-o-matic's `config grok-licence` drives. postkit's DESIGN_TODO has the
-  scoping. Shared with dcpwizard, one postkit change plus a device and licence
-  setting in each wizard.
 - Burn sources are narrower than dcpwizard's: SRT, ASS/SSA, SCC, FCPXML and
   MKS/MKV, the formats there is a cue reader for. TTML/IMSC, the one `--subtitle`
   packages, has no reader anywhere and is refused by name. PAC and Interop

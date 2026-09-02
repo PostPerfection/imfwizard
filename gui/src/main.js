@@ -116,7 +116,7 @@ const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
   bandwidth: 250, colourspace: "Rec.709", hdr: "SDR",
   signingCert: "", signingKey: "", outputDir: "",
-  showHintsBeforeBuild: true,
+  showHintsBeforeBuild: true, gpu: false,
 };
 
 function getPrefs() {
@@ -150,10 +150,25 @@ function loadSettings() {
   }
   const showHints = document.getElementById("set-show-hints");
   if (showHints) showHints.checked = prefs.showHintsBeforeBuild;
+  const gpu = document.getElementById("set-gpu-enable");
+  if (gpu) gpu.checked = prefs.gpu;
+}
+
+// grok routes every compress and decompress in the process
+async function applyGpuSetting(enabled) {
+  try {
+    await invoke("set_gpu", { enabled });
+  } catch (error) {
+    setStatus(`GPU encoding unavailable: ${error}`);
+    const gpu = document.getElementById("set-gpu-enable");
+    if (gpu) gpu.checked = false;
+    savePrefs({ ...getPrefs(), gpu: false });
+  }
 }
 
 document.getElementById("settings-form")?.addEventListener("submit", (e) => {
   e.preventDefault();
+  const gpu = !!document.getElementById("set-gpu-enable")?.checked;
   savePrefs({
     profile: document.getElementById("set-profile")?.value,
     creator: document.getElementById("set-creator")?.value,
@@ -165,8 +180,10 @@ document.getElementById("settings-form")?.addEventListener("submit", (e) => {
     signingKey: document.getElementById("set-signing-key")?.value,
     outputDir: document.getElementById("set-output-dir")?.value,
     showHintsBeforeBuild: !!document.getElementById("set-show-hints")?.checked,
+    gpu,
   });
   setStatus("Settings saved");
+  applyGpuSetting(gpu);
 });
 
 // Advisory findings the pre-build check made. Returns true to build anyway.
@@ -207,6 +224,7 @@ document.getElementById("set-reset")?.addEventListener("click", () => {
 });
 
 loadSettings();
+applyGpuSetting(getPrefs().gpu);
 
 // === Project State ===
 const project = {
