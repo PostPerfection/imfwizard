@@ -692,7 +692,7 @@ enum Commands {
     /// Measure audio loudness (EBU R128), or adjust to a target with --adjust-to
     #[command(allow_negative_numbers = true)]
     Loudness {
-        /// Audio file to measure (WAV required for --adjust-to)
+        /// Audio file to measure: a WAV or a PCM MXF (--adjust-to needs a WAV)
         audio_file: String,
         /// Adjust integrated loudness to this target in LUFS, writing --output
         #[arg(long)]
@@ -1890,13 +1890,12 @@ fn run() {
                                 p.bitrate_mbps
                             );
                         }
-                        let compression_ratio = imfwizard_core::encode::compression_ratio_for_job(
-                            bitrate,
-                            preset_bitrate_mbps,
-                            picture.encode_width,
-                            picture.encode_height,
-                            encode_fps.as_f64(),
-                        );
+                        let target_codestream_bytes =
+                            imfwizard_core::encode::target_codestream_bytes_for_job(
+                                bitrate,
+                                preset_bitrate_mbps,
+                                encode_fps.as_f64(),
+                            );
                         // the codestreams declare an IMF profile, not the cinema
                         // one a DCP carries: the levels come from this raster,
                         // this rate and the bits a second the job allows
@@ -1930,10 +1929,14 @@ fn run() {
                                 codestream_byte_cap.unwrap_or_default()
                             ),
                             (Some(db), None) => tracing::info!("PSNR {db} dB (no byte cap)"),
-                            (None, Some(mbps)) => {
-                                tracing::info!("Bitrate {mbps} Mbps (ratio {compression_ratio:.1})")
-                            }
-                            (None, None) => tracing::info!("Ratio {compression_ratio:.1}"),
+                            (None, Some(mbps)) => tracing::info!(
+                                "Bitrate {mbps} Mbps ({} bytes a frame)",
+                                target_codestream_bytes.unwrap_or_default()
+                            ),
+                            (None, None) => tracing::info!(
+                                "Ratio {:.1}",
+                                imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO
+                            ),
                         }
 
                         // the picture MXF is written as the frames finish where the
@@ -1981,7 +1984,9 @@ fn run() {
                             &video_path,
                             &output,
                             &postkit::pipeline::EncodeRunOptions {
-                                compression_ratio,
+                                compression_ratio:
+                                    imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
+                                target_codestream_bytes,
                                 quality_psnr,
                                 codestream_byte_cap,
                                 fps: encode_fps,

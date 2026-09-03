@@ -849,9 +849,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
         );
 
-        // Map the target bandwidth (Mbps) to a J2K compression ratio, matching the
-        // dcpwizard CLI convention (raw = w*h*36 bits/frame). Only honoured for video
-        // input; image/J2K sequences fall back to the encoder default.
+        // the bandwidth is only honoured for video input, an image or J2K
+        // sequence falls back to the encoder default
         let probe_started = Instant::now();
         let probed = imfwizard_core::probe::probe_video(&video_path);
         let input_type = postkit::encode::detect_input_type(&video_path);
@@ -878,14 +877,12 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 Some(resolved)
             }
         };
-        let compression_ratio = match (&probed, &picture) {
-            (Some(info), Some(picture)) => imfwizard_core::encode::compression_ratio_for_bitrate(
-                picture.encode_width,
-                picture.encode_height,
-                info.fps_num as f64 / info.fps_den.max(1) as f64,
+        let target_codestream_bytes = match (&probed, &picture) {
+            (Some(_), Some(_)) => Some(imfwizard_core::encode::codestream_byte_cap_for_bitrate(
+                encode_fps.as_f64(),
                 job.bandwidth as f64,
-            ),
-            _ => imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
+            )),
+            _ => None,
         };
         // the codestreams declare an IMF profile, not the cinema one a DCP
         // carries. A J2K sequence skips the encode, so no profile is chosen for
@@ -919,6 +916,15 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 job.bandwidth as f64,
             )
         });
+        if let (None, Some(target)) = (job.quality_psnr, target_codestream_bytes) {
+            log_to(
+                &log_file,
+                &format!(
+                    "[ENCODE] Target: {target} bytes a frame ({} Mbit/s)",
+                    job.bandwidth
+                ),
+            );
+        }
         log_to(
             &log_file,
             &format_stage_timing(
@@ -1025,7 +1031,8 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             }
             None => {
                 let encode_options = postkit::pipeline::EncodeRunOptions {
-                    compression_ratio,
+                    compression_ratio: imfwizard_core::encode::DEFAULT_COMPRESSION_RATIO,
+                    target_codestream_bytes,
                     quality_psnr: job.quality_psnr,
                     codestream_byte_cap,
                     fps: encode_fps,
