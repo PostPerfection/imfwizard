@@ -347,6 +347,7 @@ mod tests {
             height: H,
             precision: 16,
             index,
+            order: postkit::grok_encoder::SampleOrder::Big,
         }
     }
 

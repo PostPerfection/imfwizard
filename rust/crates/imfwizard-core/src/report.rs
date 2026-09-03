@@ -177,6 +177,7 @@ mod tests {
             height: HEIGHT,
             precision: 16,
             index: 0,
+            order: postkit::grok_encoder::SampleOrder::Big,
         });
         let encoded = postkit::grok_encoder::encode_pipeline(
             &frames,
