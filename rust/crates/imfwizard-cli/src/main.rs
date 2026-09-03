@@ -1713,14 +1713,20 @@ fn run() {
             };
             imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
 
-            let hints = imfwizard_core::hints::gather_hints(&plan);
-            for hint in &hints {
-                tracing::warn!("hint: {}", hint.text);
-            }
+            // the audio level hint measures the whole WAV, minutes on a feature
+            let hints_pass = std::thread::spawn(move || imfwizard_core::hints::gather_hints(&plan));
+            let print_hints =
+                |hints_pass: std::thread::JoinHandle<Vec<postkit::hints::Hint>>| -> usize {
+                    let hints = hints_pass.join().expect("the hint pass does not panic");
+                    for hint in &hints {
+                        tracing::warn!("hint: {}", hint.text);
+                    }
+                    hints.len()
+                };
             if check {
                 println!(
                     "Pre-build check passed with {} hint(s); nothing was encoded or written",
-                    hints.len()
+                    print_hints(hints_pass)
                 );
                 return;
             }
@@ -2113,6 +2119,8 @@ fn run() {
                 fps_den,
                 ..Default::default()
             };
+            // the picture wrap's hash ran while the hints finished, so this waits less
+            print_hints(hints_pass);
             let result = imfwizard_core::imp::create_imp(&opts);
             if result.success {
                 println!("IMP created at {}", result.output_dir.display());
