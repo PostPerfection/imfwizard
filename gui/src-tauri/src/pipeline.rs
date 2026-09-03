@@ -740,10 +740,18 @@ async fn run_queue_worker(app: AppHandle) {
 
 // ─── Job execution ─────────────────────────────────────────────────────────
 
-fn log_to(log_file: &Arc<Mutex<Option<std::fs::File>>>, msg: &str) {
+fn log_to(log_file: &Arc<Mutex<std::fs::File>>, msg: &str) {
     eprintln!("[pipeline] {msg}");
-    if let Some(f) = log_file.lock().unwrap().as_mut() {
-        let _ = writeln!(f, "{msg}");
+    let _ = writeln!(log_file.lock().unwrap(), "{msg}");
+}
+
+fn accelerator_summary() -> String {
+    let status = guikit::gpu::accelerator_status();
+    match (status.requested, status.active, status.error) {
+        (false, _, _) => "off".to_string(),
+        (true, true, _) => "requested, active".to_string(),
+        (true, false, Some(error)) => format!("requested, inactive: {error}"),
+        (true, false, None) => "requested, inactive".to_string(),
     }
 }
 
@@ -780,14 +788,21 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     let pause = queue.pause_flag();
 
     let output = &job.output_dir;
+    std::fs::create_dir_all(output)
+        .map_err(|e| format!("Cannot create the output folder {}: {e}", output.display()))?;
     let log_path = output.join("imfwizard.log");
-    let log_file: Arc<Mutex<Option<std::fs::File>>> =
-        Arc::new(Mutex::new(std::fs::File::create(&log_path).ok()));
+    let log_file = Arc::new(Mutex::new(std::fs::File::create(&log_path).map_err(
+        |e| format!("Cannot create the job log {}: {e}", log_path.display()),
+    )?));
 
     log_to(&log_file, "=== IMF Wizard Pipeline ===");
     log_to(&log_file, &format!("Job ID: {}", job.id));
     log_to(&log_file, &format!("Title: {}", job.title));
     log_to(&log_file, &format!("Output: {}", output.display()));
+    log_to(
+        &log_file,
+        &format!("Accelerator: {}", accelerator_summary()),
+    );
     log_to(
         &log_file,
         &format!("Compositions: {}", job.compositions.len()),
@@ -1054,6 +1069,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     }
                 };
                 let on_log = |msg: &str| log_to(&log_ref, msg);
+                let device_frames_before = postkit::grok_encoder::accelerated_frames();
                 let encode_result = match wrap_target {
                     Some(target) => {
                         let (encode, track) =
@@ -1089,6 +1105,21 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     )?,
                 };
                 total_elapsed += encode_result.elapsed_secs;
+                let device_frames = postkit::grok_encoder::accelerated_frames()
+                    .saturating_sub(device_frames_before);
+                log_to(
+                    &log_file,
+                    &format!(
+                        "[ENCODE] Frames on the device: {device_frames} of {}",
+                        encode_result.frames_encoded
+                    ),
+                );
+                if device_frames == 0 && guikit::gpu::accelerator_status().requested {
+                    log_to(
+                        &log_file,
+                        "[ENCODE] WARNING: the GPU was requested and no frame ran on the device",
+                    );
+                }
                 for finding in encode_result.picture_findings.describe(encode_fps.as_f64()) {
                     log_to(&log_file, &format!("[ENCODE] {finding}"));
                 }
