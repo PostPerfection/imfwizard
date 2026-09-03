@@ -55,8 +55,7 @@ pub const MINIMUM_QUALITY_PSNR_DB: f64 = 20.0;
 /// without changing the picture.
 pub const MAXIMUM_QUALITY_PSNR_DB: f64 = 80.0;
 
-/// The per-frame codestream size a target bitrate allows, in bytes: what the
-/// allocation aims at, and the cap the encoder holds to under a PSNR target.
+/// The per-frame codestream size a target bitrate allows, in bytes.
 pub fn codestream_byte_cap_for_bitrate(fps: f64, bitrate_mbps: f64) -> u64 {
     let fps = fps.max(1.0);
     (bitrate_mbps * 1_000_000.0 / 8.0 / fps) as u64
@@ -72,9 +71,7 @@ pub fn target_codestream_bytes_for_job(
         .map(|bitrate_mbps| codestream_byte_cap_for_bitrate(fps, bitrate_mbps))
 }
 
-/// The bits a second a `create` job's picture is allowed. Named the same way
-/// [`target_codestream_bytes_for_job`] picks its target, so the two describe one
-/// encode: without a bitrate it is what the default ratio leaves of the raw frame.
+/// The bits a second a `create` job's picture is allowed, the default ratio's share without one.
 pub fn bitrate_mbps_for_job(
     explicit_bitrate_mbps: Option<f64>,
     profile_bitrate_mbps: Option<f64>,
@@ -125,14 +122,11 @@ mod tests {
             target_codestream_bytes_for_job(None, Some(250.0), 24.0),
             Some(1_302_083)
         );
-        // no bitrate anywhere, so the encode keeps the default ratio and aims
-        // at no target
+        // no bitrate anywhere
         assert_eq!(target_codestream_bytes_for_job(None, None, 24.0), None);
     }
 
-    /// The bitrate the Rsiz sub level is composed from and the bitrate the
-    /// frames are allocated to have to be one bitrate, or the Rsiz declares a
-    /// sub level the essence does not hold to.
+    /// The Rsiz sub level and the byte target have to name one bitrate.
     #[test]
     fn the_job_bitrate_and_the_byte_target_come_from_one_bitrate() {
         for (explicit, profile) in [(Some(100.0), Some(250.0)), (None, Some(250.0))] {

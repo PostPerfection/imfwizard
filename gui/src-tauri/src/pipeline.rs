@@ -849,8 +849,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
         );
 
-        // the bandwidth is only honoured for video input, an image or J2K
-        // sequence falls back to the encoder default
+        // only video input carries a bandwidth, an image or J2K sequence has none
         let probe_started = Instant::now();
         let probed = imfwizard_core::probe::probe_video(&video_path);
         let input_type = postkit::encode::detect_input_type(&video_path);
