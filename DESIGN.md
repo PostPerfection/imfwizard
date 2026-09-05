@@ -45,25 +45,26 @@ IMF package creation tool. Rust core with CLI, Tauri GUI, and python bindings.
 - Accessibility audio (`create --audio-role ad|hi`): emits an MCA EssenceDescriptor (WAVEPCMDescriptor + SoundfieldGroup + chVIN/chHI AudioChannelLabel + RFC5646SpokenLanguage) linked to the audio resource via SourceEncoding. Audio language is also expressed at the composition level (LocaleList). SL stays a video overlay with no MCA audio descriptor (see DESIGN_TODO).
 - SCC conversion handles pop-on captions only; roll-up, paint-on, and text-mode fail loud.
 - Source colour space (`create --source-colourspace`, `create --source-lut`):
-  an App 2E picture ships the RGB its essence descriptor declares, so the encode
-  compresses the decoded frames untouched and `rec709` is the only one of the
-  seven `ColourSpace` values that encodes. It maps to `SourceColour::KeepRgb`,
-  the variant whose whole effect is that neither the compressor's own X'Y'Z'
-  transform nor a per-frame matrix runs. `xyz` is refused because a DCI
-  codestream is a DCP picture that postkit's AS-02 wrap will not carry at all.
-  `p3`, `rec2020`, `logc`, `aces` and `acescg` are refused because the only
-  transform postkit has for each of them lands on X'Y'Z': there is no
-  RGB-to-RGB gamut conversion that would reach Rec.709 from them, and the
-  scene-referred pair also names the `aces` subcommand's ctlrender IDT/ODT
-  pipeline as the route that does convert them. `--source-lut <file.cube>` is
-  refused by `reject_dci_lut` in `preflight::check_before_encode` for the same
-  reason: the `lut3d` filter lands the frames on X'Y'Z' and nothing transforms
-  them again, so the codestreams would contradict the descriptor. `--hdr` no
-  longer conflicts with any source colour, since nothing the encoder is given
-  transforms the frames. The CLI keeps all seven spellings so the six that
-  cannot encode fail with an explanation rather than an unknown-value error, and
-  keeps `--source-lut` for the same reason. The GUI select offers `rec709`
-  alone.
+  an App 2E picture ships the Rec.709 RGB its essence descriptor declares.
+  `rec709` maps to `SourceColour::KeepRgb`, the variant whose whole effect is
+  that neither the compressor's own X'Y'Z' transform nor a per-frame matrix
+  runs. `p3d65`, `rec2020` and `logc` map to `SourceColour::KeepRgbFrom`, which
+  runs postkit's `Rec709Transform` over every frame: the source's own curve
+  linearises it, the inverse Rec.709 matrix takes it to linear Rec.709, each
+  channel clips to the gamut and gamma 2.2 encodes it. `xyz` is refused because
+  a DCI codestream is a DCP picture that postkit's AS-02 wrap will not carry at
+  all, `p3` because its white is DCI rather than D65 and nothing here adapts the
+  white point, and `aces` and `acescg` because a rendering transform is not a
+  matrix, naming the `aces` subcommand's ctlrender IDT/ODT pipeline as the route
+  that does convert them. `--source-lut <file.cube>` maps to
+  `SourceColour::KeepRgbAfterLut`: ffmpeg's `lut3d` filter runs during the
+  decode and its output is taken as Rec.709 RGB. It needs a decode to run in, so
+  `preflight::check_before_encode` refuses it on a held still. That preflight
+  also refuses every converting source under `--hdr`, since the conversion lands
+  on Rec.709 SDR and the preset's descriptor declares PQ. The CLI keeps all
+  eight spellings so the four that cannot encode fail with an explanation rather
+  than an unknown-value error. The GUI select offers `rec709`, `p3d65`,
+  `rec2020` and `logc`.
 - Timed text trim (`source_edits.rs`) reads both TTML time shapes, clock times
   (`00:00:01.500`, `00:00:01:12`) and offset times (`0.8s`, `900ms`, `24f`), and
   writes each cue back in the metric it arrived in. A time it cannot read, ticks

@@ -390,6 +390,7 @@ pub async fn submit_job(
             burn_style: burn_style.clone(),
             picture_options: picture_options.clone(),
             source_colour: source_colour.clone(),
+            hdr: None,
             still_frames,
         };
         imfwizard_core::preflight::check_before_encode(&plan)?;
@@ -1015,7 +1016,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     filters: &plan.plan.filters,
                     apply_xyz_transform: job.source_colour.applies_xyz_transform(),
                     rsiz: still_rsiz,
-                    colour_transform: None,
+                    colour_transform: job.source_colour.frame_transform()?,
                     burn: subtitle_burn.clone(),
                     out_dir: &held,
                 })?;

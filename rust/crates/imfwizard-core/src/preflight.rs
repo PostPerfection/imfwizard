@@ -31,6 +31,9 @@ pub struct CreatePlan {
     pub burn_style: BurnStyleOverrides,
     pub picture_options: SourcePictureOptions,
     pub source_colour: SourceColour,
+    /// The `--hdr` preset's metadata, which makes the picture's descriptor
+    /// declare PQ. None is an SDR Rec.709 picture.
+    pub hdr: Option<crate::hdr_wcg::HdrWcg>,
     /// Frames to hold a still for; None when the picture is not a still.
     pub still_frames: Option<u64>,
 }
@@ -65,7 +68,18 @@ pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
 /// two faults names the one a reader can act on.
 pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     plan.picture_options.check()?;
-    crate::source_colourspace::reject_dci_lut(&plan.source_colour)?;
+    if plan.hdr.is_some() {
+        crate::source_colourspace::reject_converting_source_under_hdr(&plan.source_colour)?;
+    }
+    if plan.still_frames.is_some()
+        && let Some(lut) = plan.source_colour.decode_lut()
+    {
+        return Err(format!(
+            "--source-lut {} runs inside the decode, and a held still is encoded without \
+             one: apply the LUT to the image first",
+            lut.display()
+        ));
+    }
     if let Some(picture) = &plan.picture {
         if plan.still_frames.is_none() && detect_input_type(picture) == InputType::Unknown {
             return Err(unclassified_picture_refusal(picture));
@@ -202,24 +216,57 @@ mod tests {
         assert!(error.contains("tif, tiff, dpx, exr, bmp"), "{error}");
     }
 
-    /// A LUT landing on X'Y'Z' would fill an App 2E track file with samples its
-    /// descriptor says are Rec.709 RGB, so it is refused before the encode.
+    /// A LUT whose output is Rec.709 RGB is exactly what the descriptor declares,
+    /// so it runs in the decode and the plan passes.
     #[test]
-    fn a_source_lut_is_refused_before_the_encode() {
+    fn a_source_lut_reaches_the_encode_as_a_rec709_conversion() {
         let dir = tempfile::tempdir().unwrap();
-        let lut = dir.path().join("hdr_to_xyz.cube");
+        let lut = dir.path().join("to_rec709.cube");
         std::fs::write(&lut, "LUT_3D_SIZE 2\n").unwrap();
 
         let plan = CreatePlan {
             fps_num: 24,
             fps_den: 1,
-            source_colour: SourceColour::DciLut(lut.clone()),
+            source_colour: SourceColour::KeepRgbAfterLut(lut.clone()),
             ..Default::default()
         };
-        let error = check_before_encode(&plan).unwrap_err();
+        assert_eq!(check_before_encode(&plan), Ok(()));
+        assert_eq!(
+            plan.source_colour.decode_lut(),
+            Some(lut.as_path()),
+            "the LUT has to reach ffmpeg's decode"
+        );
+    }
 
-        assert!(error.contains(&lut.display().to_string()), "{error}");
-        assert!(error.contains("X'Y'Z'"), "{error}");
+    /// An `--hdr` picture's descriptor declares PQ, and every converting source
+    /// lands on Rec.709 SDR, so the pair is refused before the encode.
+    #[test]
+    fn an_hdr_picture_refuses_a_converting_source() {
+        let hdr = crate::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None).unwrap();
+        let lut = std::path::PathBuf::from("/luts/to_rec709.cube");
+        for source_colour in [
+            SourceColour::KeepRgbFrom(postkit::colour::ColourSpace::P3D65),
+            SourceColour::KeepRgbAfterLut(lut),
+        ] {
+            let plan = CreatePlan {
+                fps_num: 24,
+                fps_den: 1,
+                source_colour,
+                hdr: Some(hdr.clone()),
+                ..Default::default()
+            };
+            let error = check_before_encode(&plan).unwrap_err();
+            assert!(error.contains("--hdr"), "{error}");
+            assert!(error.contains("Rec.709 SDR"), "{error}");
+        }
+
+        let sdr = CreatePlan {
+            fps_num: 24,
+            fps_den: 1,
+            source_colour: SourceColour::KeepRgbFrom(postkit::colour::ColourSpace::P3D65),
+            ..Default::default()
+        };
+        assert_eq!(check_before_encode(&sdr), Ok(()));
     }
 
     #[test]

@@ -2,14 +2,14 @@
 //!
 //! An App 2E picture ships RGB samples in the space its essence descriptor
 //! names, and the descriptor imfwizard writes names Rec.709 (or the `--hdr`
-//! preset's PQ primaries). So the encode compresses the decoded RGB untouched:
-//! Rec.709 is `SourceColour::KeepRgb`, and every other spelling is refused by
-//! name rather than encoded into essence whose descriptor lies about it.
+//! preset's PQ primaries). Rec.709 is `SourceColour::KeepRgb` and is compressed
+//! untouched. P3-D65, Rec.2020 and LogC are `SourceColour::KeepRgbFrom`, which
+//! converts every frame to Rec.709 RGB before compression.
 //!
 //! X'Y'Z' is refused because a DCI codestream is a DCP picture, which the AS-02
-//! wrap will not carry at all. P3, Rec.2020, LogC, ACES and ACEScg are refused
-//! because the only transform postkit has for them lands on X'Y'Z': there is no
-//! RGB-to-RGB gamut conversion that would reach Rec.709 from them.
+//! wrap will not carry at all. ACES and ACEScg are refused because reaching
+//! Rec.709 from them needs a rendering transform, and P3 with the DCI white is
+//! refused because nothing here adapts the white point.
 
 use postkit::colour::ColourSpace;
 use postkit::encode::SourceColour;
@@ -17,22 +17,13 @@ use postkit::encode::SourceColour;
 /// Spell a colour space as the CLI and GUI take it. The set is postkit's
 /// `ColourSpace`; dcpwizard spells the values the same way.
 pub fn parse(value: &str) -> Result<ColourSpace, String> {
-    match value.to_lowercase().as_str() {
-        "rec709" => Ok(ColourSpace::Rec709),
-        "p3" => Ok(ColourSpace::P3),
-        "xyz" => Ok(ColourSpace::Xyz),
-        "rec2020" => Ok(ColourSpace::Rec2020),
-        "aces" => Ok(ColourSpace::Aces),
-        "acescg" => Ok(ColourSpace::AcesCg),
-        "logc" => Ok(ColourSpace::LogC),
-        _ => Err(format!(
-            "unknown source colour space '{value}' (expected {VALUES})"
-        )),
-    }
+    postkit::colour::parse_colour_space(value)
+        .ok_or_else(|| format!("unknown source colour space '{value}' (expected {VALUES})"))
 }
 
 /// Every value `parse` accepts, in the order the help text lists them.
-pub const VALUES: &str = "rec709, p3, xyz, rec2020, aces, acescg or logc";
+pub const VALUES: &str =
+    "rec709, p3d65, rec2020 or logc, with p3, xyz, aces and acescg refused by name";
 
 /// The colour an App 2E picture essence descriptor declares, and therefore the
 /// only space a source may already be in.
@@ -50,35 +41,33 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
              first, or package it as a DCP with dcpwizard"
                 .to_string(),
         ),
-        ColourSpace::P3 | ColourSpace::P3D65 | ColourSpace::Rec2020 | ColourSpace::LogC => {
-            Err(format!(
-                "{space:?} would have to be converted to the Rec.709 RGB an App 2E picture \
-                 declares, and the only transform postkit has for it lands on X'Y'Z'. Convert \
-                 the source to Rec.709 RGB first"
-            ))
+        // converted to the Rec.709 RGB the essence descriptor declares
+        ColourSpace::P3D65 | ColourSpace::Rec2020 | ColourSpace::LogC => {
+            Ok(SourceColour::KeepRgbFrom(space))
         }
+        ColourSpace::P3 => Err(
+            "p3 is P3 with the DCI white point, and converting it to Rec.709 without \
+             adapting the white leaves a green cast: name p3d65 for a D65 master, or \
+             convert the source first"
+                .to_string(),
+        ),
         ColourSpace::Aces | ColourSpace::AcesCg => Err(format!(
-            "{space:?} is scene-referred: it needs a rendering transform, and the one \
-             postkit has lands on X'Y'Z' rather than the Rec.709 RGB an App 2E picture \
-             declares. Convert the source first with `imfwizard aces --idt <IDT> --odt <ODT>`"
+            "{space:?} is scene-referred: reaching the Rec.709 RGB an App 2E picture \
+             declares needs a rendering transform, which is not a matrix. Convert the \
+             source first with `imfwizard aces --idt <IDT> --odt <ODT>`"
         )),
     }
 }
 
-/// Refuse `--source-lut`, which lands the decoded frames on DCI X'Y'Z'.
-///
-/// The LUT runs in the decode and nothing transforms the frames again, so the
-/// codestreams would hold X'Y'Z' samples under a descriptor declaring Rec.709
-/// RGB. Kept as a refusal rather than dropped so the flag says why.
-pub fn reject_dci_lut(colour: &SourceColour) -> Result<(), String> {
-    let SourceColour::DciLut(lut) = colour else {
-        return Ok(());
+pub fn reject_converting_source_under_hdr(colour: &SourceColour) -> Result<(), String> {
+    let flag = match colour {
+        SourceColour::KeepRgbFrom(space) => format!("--source-colourspace {space:?}"),
+        SourceColour::KeepRgbAfterLut(lut) => format!("--source-lut {}", lut.display()),
+        _ => return Ok(()),
     };
     Err(format!(
-        "--source-lut {} converts the source to DCI X'Y'Z', which an App 2E picture \
-         cannot carry: its essence descriptor declares Rec.709 RGB. Apply the LUT to the \
-         source first, or package the result as a DCP with dcpwizard",
-        lut.display()
+        "{flag} converts the source to Rec.709 SDR, which an --hdr picture is not: \
+         convert the source to the preset's colour first"
     ))
 }
 
@@ -138,6 +127,9 @@ mod tests {
         for (value, space) in [
             ("rec709", ColourSpace::Rec709),
             ("p3", ColourSpace::P3),
+            ("p3d65", ColourSpace::P3D65),
+            ("p3-d65", ColourSpace::P3D65),
+            ("displayp3", ColourSpace::P3D65),
             ("xyz", ColourSpace::Xyz),
             ("rec2020", ColourSpace::Rec2020),
             ("aces", ColourSpace::Aces),
@@ -177,44 +169,54 @@ mod tests {
         assert!(error.contains("App 2E"), "{error}");
     }
 
-    /// Every space whose only postkit transform lands on X'Y'Z' is refused by
-    /// name, since nothing here converts it to the Rec.709 RGB the descriptor
-    /// declares.
+    /// Every space postkit can matrix into Rec.709 reaches the encoder as a
+    /// conversion, with the encoder's own X'Y'Z' transform off.
     #[test]
-    fn a_space_with_no_route_to_rec709_rgb_is_refused_by_name() {
-        for space in [
-            ColourSpace::P3,
-            ColourSpace::Rec2020,
-            ColourSpace::LogC,
-            ColourSpace::Aces,
-            ColourSpace::AcesCg,
-        ] {
-            let error = to_source_colour(space).unwrap_err();
-            assert!(error.contains(&format!("{space:?}")), "{error}");
-            assert!(error.contains("Rec.709 RGB"), "{error}");
+    fn a_wide_gamut_space_is_converted_to_rec709_rgb() {
+        for space in [ColourSpace::P3D65, ColourSpace::Rec2020, ColourSpace::LogC] {
+            let colour = to_source_colour(space).unwrap();
+            assert_eq!(colour, SourceColour::KeepRgbFrom(space));
+            assert!(!colour.applies_xyz_transform());
+            assert!(colour.frame_transform().unwrap().is_some());
         }
+    }
+
+    /// P3-DCI's white is not D65, and nothing here adapts it, so the refusal has
+    /// to send a D65 master to the spelling that works.
+    #[test]
+    fn p3_with_the_dci_white_is_refused_naming_p3d65() {
+        let error = to_source_colour(ColourSpace::P3).unwrap_err();
+        assert!(error.contains("p3d65"), "{error}");
+        assert!(error.contains("white"), "{error}");
     }
 
     #[test]
     fn the_scene_referred_spaces_name_the_route_that_converts_them() {
         for space in [ColourSpace::Aces, ColourSpace::AcesCg] {
             let error = to_source_colour(space).unwrap_err();
+            assert!(error.contains(&format!("{space:?}")), "{error}");
+            assert!(error.contains("rendering transform"), "{error}");
             assert!(error.contains("imfwizard aces"), "{error}");
         }
     }
 
-    /// The LUT lands the frames on X'Y'Z' and nothing transforms them again, so
-    /// the codestreams would contradict the descriptor.
+    /// Both converting routes land on Rec.709 SDR, which contradicts the PQ an
+    /// `--hdr` picture's descriptor declares.
     #[test]
-    fn a_dci_lut_is_refused_by_path() {
-        let directory = tempfile::tempdir().unwrap();
-        let lut = directory.path().join("hdr_to_dci.cube");
-        std::fs::write(&lut, "LUT_3D_SIZE 2\n").unwrap();
-        let error = reject_dci_lut(&SourceColour::DciLut(lut.clone())).unwrap_err();
-        assert!(error.contains(&lut.display().to_string()), "{error}");
-        assert!(error.contains("X'Y'Z'"), "{error}");
+    fn a_converting_source_is_refused_under_hdr() {
+        let error =
+            reject_converting_source_under_hdr(&SourceColour::KeepRgbFrom(ColourSpace::P3D65))
+                .unwrap_err();
+        assert!(error.contains("--source-colourspace P3D65"), "{error}");
+        assert!(error.contains("--hdr"), "{error}");
 
-        assert!(reject_dci_lut(&SourceColour::KeepRgb).is_ok());
+        let lut = std::path::PathBuf::from("/luts/to_rec709.cube");
+        let error = reject_converting_source_under_hdr(&SourceColour::KeepRgbAfterLut(lut.clone()))
+            .unwrap_err();
+        assert!(error.contains(&lut.display().to_string()), "{error}");
+
+        assert!(reject_converting_source_under_hdr(&SourceColour::KeepRgb).is_ok());
+        assert!(reject_converting_source_under_hdr(&SourceColour::AlreadyPq).is_ok());
     }
 
     /// A J2K directory never decodes, so a colour that asks the encoder for

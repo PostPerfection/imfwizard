@@ -166,20 +166,17 @@ fn a_negative_audio_delay_reaches_the_delay() {
         .stderr(predicate::str::contains("audio delay of -5000 ms"));
 }
 
-/// An App 2E picture carries the RGB its descriptor declares, so a source in any
-/// other space is refused by name before anything is encoded.
+/// An App 2E picture carries Rec.709 RGB, and no matrix reaches it from a DCI
+/// X'Y'Z' source or from P3 with the DCI white, so both are refused by name
+/// before anything is encoded.
 #[test]
-fn a_source_colourspace_that_is_not_rec709_is_refused_by_name() {
+fn a_source_colourspace_with_no_route_to_rec709_is_refused_by_name() {
     let dir = TempDir::new().unwrap();
     let frames = dir.path().join("j2k");
     std::fs::create_dir_all(&frames).unwrap();
     std::fs::write(frames.join("frame_00000000.j2c"), b"codestream").unwrap();
 
-    for (space, needle) in [
-        ("xyz", "X'Y'Z'"),
-        ("p3", "Rec.709 RGB"),
-        ("rec2020", "Rec.709 RGB"),
-    ] {
+    for (space, needle) in [("xyz", "X'Y'Z'"), ("p3", "p3d65")] {
         cmd()
             .args([
                 "create",
@@ -263,13 +260,15 @@ fn a_source_lut_and_a_source_colourspace_together_are_refused() {
         .stderr(predicate::str::contains("cannot be used with"));
 }
 
-/// The LUT lands the frames on X'Y'Z', which an App 2E picture cannot carry, so
-/// `create` refuses it by path before anything is encoded.
+/// The LUT's output is the Rec.709 RGB the descriptor declares, so the plan
+/// passes and the LUT reaches the decode.
 #[test]
-fn a_source_lut_is_refused_by_path() {
+fn a_source_lut_passes_the_pre_build_check() {
     let dir = TempDir::new().unwrap();
-    let lut = dir.path().join("hdr_to_xyz.cube");
+    let lut = dir.path().join("to_rec709.cube");
     std::fs::write(&lut, IDENTITY_CUBE).unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_solid_clip(&clip, "red", 2, "24");
 
     cmd()
         .args([
@@ -278,14 +277,44 @@ fn a_source_lut_is_refused_by_path() {
             &dir.path().join("out").to_string_lossy(),
             "-t",
             "Test",
+            "--video",
+            &clip.to_string_lossy(),
+            "--source-lut",
+            &lut.to_string_lossy(),
+            "--check",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Pre-build check passed"));
+}
+
+/// A held still is encoded without a decode for the LUT to run in, so the pair
+/// is refused rather than dropping the LUT.
+#[test]
+fn a_source_lut_on_a_held_still_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let lut = dir.path().join("to_rec709.cube");
+    std::fs::write(&lut, IDENTITY_CUBE).unwrap();
+    let image = dir.path().join("slate.tif");
+    std::fs::write(&image, b"not really a tiff").unwrap();
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("out").to_string_lossy(),
+            "-t",
+            "Test",
+            "--video",
+            &image.to_string_lossy(),
+            "--still-length",
+            "2f",
             "--source-lut",
             &lut.to_string_lossy(),
         ])
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("hdr_to_xyz.cube").and(predicate::str::contains("X'Y'Z'")),
-        );
+        .stderr(predicate::str::contains("to_rec709.cube").and(predicate::str::contains("still")));
 }
 
 /// The smallest legal .cube: a 2x2x2 grid whose entries are the cube corners, so
@@ -322,6 +351,11 @@ fn hdr_composes_with_the_only_source_colourspace_that_encodes() {
     }
     // xyz is a DCP picture whatever the HDR label says
     create(&["--source-colourspace", "xyz"]).stderr(predicate::str::contains("X'Y'Z'"));
+    // a conversion lands on Rec.709 SDR, which the PQ descriptor contradicts
+    create(&["--source-colourspace", "p3d65"]).stderr(
+        predicate::str::contains("--source-colourspace P3D65")
+            .and(predicate::str::contains("Rec.709 SDR")),
+    );
 }
 
 #[test]
@@ -1789,7 +1823,7 @@ const CINEMA_TRACK_FILE_UUID: [u8; 16] = [
     0x21, 0x1a, 0x4f, 0x0c, 0x7b, 0x33, 0x4e, 0x18, 0x9c, 0x5d, 0x60, 0x2f, 0xa1, 0x88, 0x0e, 0x74,
 ];
 
-fn synthesize_solid_red_clip(path: &Path, frames: u32, rate: &str) {
+fn synthesize_solid_clip(path: &Path, colour: &str, frames: u32, rate: &str) {
     let output = std::process::Command::new("ffmpeg")
         .args([
             "-y",
@@ -1798,7 +1832,7 @@ fn synthesize_solid_red_clip(path: &Path, frames: u32, rate: &str) {
             "-f",
             "lavfi",
             "-i",
-            &format!("color=c=red:s=1920x1080:r={rate}"),
+            &format!("color=c={colour}:s=1920x1080:r={rate}"),
             "-frames:v",
             &frames.to_string(),
             "-pix_fmt",
@@ -1815,9 +1849,7 @@ fn synthesize_solid_red_clip(path: &Path, frames: u32, rate: &str) {
     );
 }
 
-fn create_red_imp(dir: &Path, name: &str, rate: &str, extra: &[&str]) -> PathBuf {
-    let clip = dir.join(format!("{name}.mov"));
-    synthesize_solid_red_clip(&clip, 4, rate);
+fn create_imp(dir: &Path, name: &str, clip: &Path, extra: &[&str]) -> PathBuf {
     let imp = dir.join(name);
     let mut command = cmd();
     command.args([
@@ -1832,6 +1864,12 @@ fn create_red_imp(dir: &Path, name: &str, rate: &str, extra: &[&str]) -> PathBuf
     command.args(extra);
     command.assert().success();
     imp
+}
+
+fn create_red_imp(dir: &Path, name: &str, rate: &str, extra: &[&str]) -> PathBuf {
+    let clip = dir.join(format!("{name}.mov"));
+    synthesize_solid_clip(&clip, "red", 4, rate);
+    create_imp(dir, name, &clip, extra)
 }
 
 fn read_frame(mxf: &Path, index: u32) -> Vec<u8> {
@@ -2013,4 +2051,120 @@ fn to_dcp_refuses_pq_picture_by_name() {
         .failure()
         .stderr(predicate::str::contains("ST 2084"))
         .stderr(predicate::str::contains("tone map"));
+}
+
+// ─── source colour conversion ─────────────────────────────────────────────
+
+// how far a centre pixel may drift after a yuv420p round trip and a lossy encode
+const CONVERTED_CODE_TOLERANCE: i32 = 60;
+// how far the three channels of a converted neutral may drift apart
+const NEUTRAL_CODE_TOLERANCE: i32 = 8;
+// the 16-bit code ffmpeg's color=c=gray decodes back to
+const GREY_SOURCE_CODE: u16 = 32_896;
+const EIGHT_TO_SIXTEEN_BIT: u16 = 257;
+
+fn imp_centre_pixel(imp: &Path) -> [i32; 3] {
+    let mxf = std::fs::read_dir(imp)
+        .unwrap()
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(imfwizard_core::imp::PICTURE_PREFIX))
+        })
+        .expect("the IMP has a picture track file");
+
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&mxf.to_string_lossy())
+        .expect("open the IMP picture");
+    let mut buf = vec![0u8; FRAME_READ_BUFFER_BYTES];
+    let read = reader
+        .read_frame(0, &mut buf, None, None)
+        .expect("read the first IMP picture frame");
+    buf.truncate(read);
+
+    let decoded = postkit::grok_decoder::decode(buf, 0).expect("decode the IMP frame");
+    let centre =
+        (decoded.height as usize / 2) * decoded.width as usize + decoded.width as usize / 2;
+    [
+        decoded.components[0][centre],
+        decoded.components[1][centre],
+        decoded.components[2][centre],
+    ]
+}
+
+/// The essence descriptor declares Rec.709 RGB, so a P3-D65 master has to reach
+/// the codestream converted. P3 red is outside the Rec.709 gamut and lands on
+/// Rec.709 red; the brown sits inside it and every channel moves.
+#[test]
+fn a_p3d65_source_is_converted_to_rec709_rgb() {
+    let dir = TempDir::new().unwrap();
+    let transform =
+        postkit::colour::Rec709Transform::from_space(postkit::colour::ColourSpace::P3D65).unwrap();
+
+    for (name, source) in [
+        ("red", [u16::MAX, 0, 0]),
+        (
+            "0x996633",
+            [
+                0x99 * EIGHT_TO_SIXTEEN_BIT,
+                0x66 * EIGHT_TO_SIXTEEN_BIT,
+                0x33 * EIGHT_TO_SIXTEEN_BIT,
+            ],
+        ),
+    ] {
+        let clip = dir.path().join(format!("p3d65_{name}.mov"));
+        synthesize_solid_clip(&clip, name, 2, "24");
+        let imp = create_imp(
+            dir.path(),
+            &format!("p3d65_{name}"),
+            &clip,
+            &["--source-colourspace", "p3d65"],
+        );
+
+        let expected = transform.pixel(source, MAX_12_BIT_CODE);
+        let centre = imp_centre_pixel(&imp);
+        for (component, (got, want)) in centre.iter().zip(expected).enumerate() {
+            assert!(
+                (got - want as i32).abs() <= CONVERTED_CODE_TOLERANCE,
+                "component {component} of {name} is {got}, not the Rec.709 of the P3-D65 \
+                 source ({want}); centre {centre:?}"
+            );
+        }
+    }
+}
+
+/// Rec.2020 is linearised at gamma 2.4 and re-encoded at 2.2, so a neutral stays
+/// neutral but sits at a different level: the level is what proves the transform
+/// ran.
+#[test]
+fn a_rec2020_source_keeps_a_neutral_neutral_at_the_converted_level() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("rec2020_grey.mov");
+    synthesize_solid_clip(&clip, "gray", 2, "24");
+    let imp = create_imp(
+        dir.path(),
+        "rec2020",
+        &clip,
+        &["--source-colourspace", "rec2020"],
+    );
+
+    let expected =
+        postkit::colour::Rec709Transform::from_space(postkit::colour::ColourSpace::Rec2020)
+            .unwrap()
+            .pixel([GREY_SOURCE_CODE; 3], MAX_12_BIT_CODE);
+    let centre = imp_centre_pixel(&imp);
+    let spread = centre.iter().max().unwrap() - centre.iter().min().unwrap();
+    assert!(
+        spread <= NEUTRAL_CODE_TOLERANCE,
+        "the converted grey is not neutral: {centre:?}"
+    );
+    for (component, (got, want)) in centre.iter().zip(expected).enumerate() {
+        assert!(
+            (got - want as i32).abs() <= CONVERTED_CODE_TOLERANCE,
+            "component {component} is {got}, not the Rec.709 of Rec.2020 grey ({want}); \
+             centre {centre:?}"
+        );
+    }
 }

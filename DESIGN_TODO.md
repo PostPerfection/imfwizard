@@ -21,19 +21,19 @@ gamut conversion and ST 2084 needs a tone map, and `to-dcp` has neither, so an
 IMP made with `--hdr pq-bt2020` or `--hdr pq-p3d65` is refused by name. A DCI 3D
 LUT applied during the decode is the shape dcpwizard already uses for the tone
 map, and the gamut conversion is the same matrix work as
-`--source-colourspace p3`.
+`--source-colourspace p3d65`.
 
-## Open: no gamut conversion for a source that is not Rec.709
+## Open: three sources still reach no Rec.709 RGB
 
-`create --source-colourspace` takes `rec709` alone. P3, Rec.2020, LogC, ACES and
-ACEScg parse and are refused by name, because the only transform postkit has for
-each of them is `DcdmTransform`, which lands on X'Y'Z'. An App 2E picture carries
-the RGB its essence descriptor declares, so what those sources need is an
-RGB-to-RGB conversion into Rec.709 (or into the `--hdr` preset's primaries),
-which nothing here or in postkit has. `--source-lut` is refused for the same
-reason and would be the cheapest route back: a `lut3d` landing on Rec.709 RGB
-rather than X'Y'Z' works today if the flag could say which space it targets.
-Shared with postkit, whose `colour.rs` is where the matrix would go.
+`create --source-colourspace` converts P3-D65, Rec.2020 and LogC with postkit's
+`Rec709Transform`. ACES and ACEScg stay refused: reaching a display space from
+scene-referred picture needs a rendering transform, and `imfwizard aces --idt
+<IDT> --odt <ODT>` is the route that runs one. `p3` stays refused because its
+white is DCI rather than D65 and neither this repo nor postkit adapts a white
+point. An `--hdr` picture takes no converting source at all, since every
+conversion lands on Rec.709 SDR while the preset's descriptor declares PQ:
+converting into the preset's own primaries and transfer is the matrix and curve
+postkit does not have.
 
 ## Open: a subsampled App 2E track file has no decode path
 
@@ -107,9 +107,9 @@ has the entry).
 - Not every pre-encode check moved into `preflight::check_before_encode`. The
   ones still in the front ends are the flag and control shape checks, each of
   which names the flag or control that carried it and so cannot share one
-  message: the HDR detail flags requiring `--hdr`, the `--hdr` plus transforming
-  source colour space guard, the spelling parsers (hdr preset, audio role,
-  delivery profile, source colour space, duration specs, rotation, flip, raster),
+  message: the HDR detail flags requiring `--hdr`, the spelling parsers (hdr
+  preset, audio role, delivery profile, source colour space, duration specs,
+  rotation, flip, raster),
   the GUI's per-composition `--audio-map` without an audio file,
   `--still-length` without a still and a still without one, an appearance flag
   without `--burn-subtitle`, `--burn-subtitle` without `--video`, and the GUI's

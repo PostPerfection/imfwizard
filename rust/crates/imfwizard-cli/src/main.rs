@@ -501,16 +501,14 @@ enum Commands {
         audio_delay: Option<i64>,
 
         /// Colour space the picture source carries. An App 2E picture ships the
-        /// RGB its essence descriptor declares, so rec709 (the default) is the
-        /// only one that encodes: it is compressed untransformed. xyz, p3,
-        /// rec2020, logc, aces and acescg are refused by name, since the only
-        /// transform there is for them lands on X'Y'Z'.
+        /// Rec.709 RGB its essence descriptor declares: rec709 (the default) is
+        /// compressed untransformed, and p3d65, rec2020 and logc are converted
+        /// to Rec.709 RGB during the encode. xyz, p3, aces and acescg are
+        /// refused by name.
         #[arg(long = "source-colourspace")]
         source_colourspace: Option<String>,
 
-        /// 3D LUT (.cube) that converts the source to X'Y'Z' during decode.
-        /// Refused: an App 2E picture carries RGB, so apply the LUT to the
-        /// source first or package the result as a DCP.
+        /// 3D LUT (.cube) applied during decode, whose output must be Rec.709 RGB.
         #[arg(long = "source-lut", conflicts_with = "source_colourspace")]
         source_lut: Option<PathBuf>,
 
@@ -1627,13 +1625,12 @@ fn run() {
                 ));
             }
             // a spelling the encode cannot take has to fail before anything is
-            // encoded. The LUT is refused in the preflight instead, so its path
-            // reaches the message
+            // encoded
             let colourspace = source_colourspace
                 .as_deref()
                 .map(|s| imfwizard_core::source_colourspace::parse(s).unwrap_or_else(|e| fail(e)));
             let source_colour = match source_lut {
-                Some(lut) => postkit::encode::SourceColour::DciLut(lut),
+                Some(lut) => postkit::encode::SourceColour::KeepRgbAfterLut(lut),
                 None => imfwizard_core::source_colourspace::to_source_colour(
                     colourspace.unwrap_or(imfwizard_core::source_colourspace::APP2E_SOURCE_SPACE),
                 )
@@ -1713,6 +1710,7 @@ fn run() {
                 burn_style: burn_style.clone(),
                 picture_options: picture_options.clone(),
                 source_colour: source_colour.clone(),
+                hdr: hdr.clone(),
                 still_frames,
             };
             imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
@@ -1803,7 +1801,7 @@ fn run() {
                     filters: &picture.plan.filters,
                     apply_xyz_transform: source_colour.applies_xyz_transform(),
                     rsiz,
-                    colour_transform: None,
+                    colour_transform: source_colour.frame_transform().unwrap_or_else(|e| fail(e)),
                     burn: build_subtitle_burn(fps),
                     out_dir: &held,
                 })
