@@ -46,6 +46,12 @@ pub fn spec_for_target(target: &str) -> Result<DeliverySpec, String> {
     })
 }
 
+fn delivery_fit_filter(width: u32, height: u32) -> String {
+    format!(
+        "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+    )
+}
+
 /// Deliver an IMP to a target specification.
 pub fn deliver(
     imp_dir: &std::path::Path,
@@ -131,8 +137,8 @@ pub fn deliver(
 
     // Resolution
     if spec.resolution.0 > 0 && spec.resolution.1 > 0 {
-        cmd.arg("-s")
-            .arg(format!("{}x{}", spec.resolution.0, spec.resolution.1));
+        cmd.arg("-vf")
+            .arg(delivery_fit_filter(spec.resolution.0, spec.resolution.1));
     }
 
     // Frame rate
@@ -177,4 +183,17 @@ pub fn deliver(
 
     tracing::info!("Delivery complete: {}", output_file.display());
     Ok(output_file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_filter_pads_instead_of_stretching() {
+        assert_eq!(
+            delivery_fit_filter(2048, 858),
+            "scale=2048:858:force_original_aspect_ratio=decrease,pad=2048:858:(ow-iw)/2:(oh-ih)/2"
+        );
+    }
 }

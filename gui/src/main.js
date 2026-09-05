@@ -1606,34 +1606,3 @@ initJobsPanel({
   refreshButton: document.getElementById("jobs-refresh"),
 });
 setStatus("Ready");
-
-// === Target Conversion (Scale/Crop/Letterbox) ===
-document.getElementById("convert-browse-input")?.addEventListener("click", async () => {
-  const path = await open({ filters: [
-    { name: "Video", extensions: ["mp4", "mkv", "mov", "mxf"] },
-    { name: "All", extensions: ["*"] }
-  ]});
-  if (path) {
-    document.getElementById("convert-input").value = path;
-    document.getElementById("convert-start").disabled = false;
-  }
-});
-document.getElementById("convert-browse-output")?.addEventListener("click", async () => {
-  const path = await open({ directory: true });
-  if (path) document.getElementById("convert-output").value = path;
-});
-document.getElementById("convert-start")?.addEventListener("click", async () => {
-  const input = document.getElementById("convert-input").value;
-  const output = document.getElementById("convert-output").value;
-  const target = document.getElementById("convert-target").value;
-  if (!input) return;
-
-  const resultsEl = document.getElementById("convert-results");
-  resultsEl.textContent = "Converting...";
-  resultsEl.classList.add("visible");
-  const args = ["target-convert", "-i", input, "-t", target];
-  if (output) args.push("-o", output);
-  const cmd = Command.sidecar("imfwizard", args);
-  const result = await cmd.execute();
-  resultsEl.textContent = result.code === 0 ? "✓ Conversion complete\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
-});
