@@ -829,9 +829,7 @@ fn an_illegal_raster_is_refused_before_any_encode() {
         ])
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("2048x872").and(predicate::str::contains("target-convert")),
-        );
+        .stderr(predicate::str::contains("2048x872").and(predicate::str::contains("--raster")));
 
     assert!(
         !output.join("j2k").exists(),

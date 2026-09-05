@@ -240,8 +240,8 @@ pub fn validate_app2e_raster(width: u32, height: u32) -> Result<(), String> {
         .join(", ");
     Err(format!(
         "App 2E requires one of {allowed} picture essence, got {width}x{height}. \
-         Run `imfwizard target-convert` on the source to scale, crop or letterbox it \
-         to a legal raster"
+         Pass `--raster` (the Raster control in the GUI) to letterbox it into one, \
+         with `--fill-crop` to crop instead of pad"
     ))
 }
 
@@ -353,12 +353,12 @@ mod tests {
     }
 
     /// `create` runs this on the probed source before the encode, so the message
-    /// has to name the command that fixes the source.
+    /// has to name the flag that fits the source into a legal raster.
     #[test]
-    fn an_illegal_raster_names_the_command_that_fixes_it() {
+    fn an_illegal_raster_names_the_flag_that_fixes_it() {
         let error = validate_app2e_raster(2048, 872).unwrap_err();
         assert!(error.contains("2048x872"), "{error}");
-        assert!(error.contains("target-convert"), "{error}");
+        assert!(error.contains("--raster"), "{error}");
         assert!(validate_app2e_raster(4096, 2160).is_ok());
     }
 
