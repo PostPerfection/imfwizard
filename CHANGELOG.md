@@ -57,6 +57,7 @@
 - **Still image with duration**: `create --still-length <DURATION>` holds a single image file (dpx, tif, exr, png or bmp) for that long. The image is encoded once and the codestream repeated, so an hour-long slate costs one encode. `--still-length` without a still input and a still input without `--still-length` are both refused. The Properties panel carries a Still Length field.
 
 ### Fixed
+- **Closing the window during a build stops the build first**: the GUI exited with the encoder threads still compressing, which crashed in grok's teardown, and the seconds the core dump of a multi-gigabyte process took to write looked like the app hanging on close. The close now cancels the running job, records the queued ones cancelled and waits for the worker to stop before the process exits.
 - **The file dialogs forgot the last folder between launches**: the GUI kept the folder of the last pick in a variable, so every launch opened the first dialog at the system default again. The folder is stored in localStorage now and the first dialog after a launch opens where the last one closed.
 - **Cancelling a build and then closing the app froze it**: postkit's encoder threads left on cancel without closing the frame queue, so the producer waited forever to push into the full queue and the GUI hung on exit behind the blocked job.
 - dcpdoctor 34b7c4f -> 0e38987 (v0.5.1): the MXF checks opened every track file with the PCM reader, so asdcplib wrote `PCM file EditRate is not a supported value: 0/0` to stderr for each picture MXF.
