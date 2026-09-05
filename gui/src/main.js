@@ -113,28 +113,62 @@ refreshButtonTooltips();
 
 // === Preferences ===
 const PREFS_KEY = "imfwizard-preferences";
-const PREFS_VERSION = 2;
 const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
   bandwidth: 250, colourspace: "Rec.709", hdr: "SDR",
   signingCert: "", signingKey: "", outputDir: "",
   showHintsBeforeBuild: true, gpu: false,
+  gpuLicense: "", gpuRegistrationUrl: "",
+  preferredEncoder: "grok", channelConfig: "5.1",
+  loudnessTargetLufs: -24, namingTemplate: "", theme: "dark",
+  showAdvancedOptions: false,
 };
 
+let currentPreferences = { ...PREF_DEFAULTS };
+
 function getPrefs() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
-    if ((stored._version || 0) < PREFS_VERSION) {
-      const migrated = { ...PREF_DEFAULTS, ...stored, _version: PREFS_VERSION };
-      savePrefs(migrated); return migrated;
-    }
-    return { ...PREF_DEFAULTS, ...stored };
-  } catch { return { ...PREF_DEFAULTS, _version: PREFS_VERSION }; }
+  return { ...currentPreferences };
 }
 
-function savePrefs(prefs) {
-  prefs._version = PREFS_VERSION;
-  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+async function savePrefs(prefs) {
+  currentPreferences = { ...PREF_DEFAULTS, ...prefs };
+  try {
+    await invoke("save_preferences", { preferences: currentPreferences });
+    return true;
+  } catch (error) {
+    setStatus(`Could not save settings: ${error}`);
+    return false;
+  }
+}
+
+async function initializePreferences() {
+  try {
+    const loaded = await invoke("load_preferences");
+    let legacy = {};
+    try {
+      legacy = JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
+    } catch {
+      localStorage.removeItem(PREFS_KEY);
+    }
+    if (Object.keys(legacy).length > 0) {
+      const migrated = { ...PREF_DEFAULTS, ...loaded, ...legacy };
+      delete migrated._version;
+      currentPreferences = migrated;
+      if (await savePrefs(migrated)) localStorage.removeItem(PREFS_KEY);
+    } else {
+      currentPreferences = { ...PREF_DEFAULTS, ...loaded };
+    }
+  } catch (error) {
+    setStatus(`Could not load settings: ${error}`);
+  }
+
+  loadSettings();
+  const preferences = getPrefs();
+  applyGpuSetting(
+    preferences.gpu,
+    preferences.gpuLicense,
+    preferences.gpuRegistrationUrl,
+  );
 }
 
 function loadSettings() {
@@ -145,6 +179,8 @@ function loadSettings() {
     "set-colourspace": prefs.colourspace, "set-hdr": prefs.hdr,
     "set-signing-cert": prefs.signingCert, "set-signing-key": prefs.signingKey,
     "set-output-dir": prefs.outputDir,
+    "set-gpu-license": prefs.gpuLicense,
+    "set-gpu-registration-url": prefs.gpuRegistrationUrl,
   };
   for (const [id, val] of Object.entries(map)) {
     const el = document.getElementById(id);
@@ -157,9 +193,13 @@ function loadSettings() {
 }
 
 // grok routes every compress and decompress in the process
-async function applyGpuSetting(enabled) {
+async function applyGpuSetting(enabled, license, registrationUrl) {
   try {
-    await invoke("set_gpu", { enabled });
+    await invoke("set_gpu", {
+      enabled,
+      license: license || null,
+      registrationUrl: registrationUrl || null,
+    });
   } catch (error) {
     setStatus(`GPU encoding unavailable: ${error}`);
     const gpu = document.getElementById("set-gpu-enable");
@@ -168,10 +208,11 @@ async function applyGpuSetting(enabled) {
   }
 }
 
-document.getElementById("settings-form")?.addEventListener("submit", (e) => {
+document.getElementById("settings-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const gpu = !!document.getElementById("set-gpu-enable")?.checked;
-  savePrefs({
+  const prefs = {
+    ...getPrefs(),
     profile: document.getElementById("set-profile")?.value,
     creator: document.getElementById("set-creator")?.value,
     language: document.getElementById("set-language")?.value,
@@ -183,9 +224,12 @@ document.getElementById("settings-form")?.addEventListener("submit", (e) => {
     outputDir: document.getElementById("set-output-dir")?.value,
     showHintsBeforeBuild: !!document.getElementById("set-show-hints")?.checked,
     gpu,
-  });
+    gpuLicense: document.getElementById("set-gpu-license")?.value.trim() || "",
+    gpuRegistrationUrl: document.getElementById("set-gpu-registration-url")?.value.trim() || "",
+  };
+  if (!await savePrefs(prefs)) return;
   setStatus("Settings saved");
-  applyGpuSetting(gpu);
+  applyGpuSetting(gpu, prefs.gpuLicense, prefs.gpuRegistrationUrl);
 });
 
 // Advisory findings the pre-build check made. Returns true to build anyway.
@@ -220,13 +264,17 @@ function showHintsDialog(hints) {
   });
 }
 
-document.getElementById("set-reset")?.addEventListener("click", () => {
-  localStorage.removeItem(PREFS_KEY);
-  location.reload();
+document.getElementById("set-reset")?.addEventListener("click", async () => {
+  try {
+    await invoke("reset_preferences");
+    localStorage.removeItem(PREFS_KEY);
+    location.reload();
+  } catch (error) {
+    setStatus(`Could not reset settings: ${error}`);
+  }
 });
 
-loadSettings();
-applyGpuSetting(getPrefs().gpu);
+initializePreferences();
 
 // === Project State ===
 const project = {

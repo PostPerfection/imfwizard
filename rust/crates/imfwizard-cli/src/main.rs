@@ -18,6 +18,32 @@ struct Cli {
     /// Encode and decode on grok's accelerator plugin
     #[arg(long, global = true)]
     gpu: bool,
+
+    #[arg(long, global = true, conflicts_with = "gpu")]
+    no_gpu: bool,
+
+    #[arg(long, global = true, help = "Grok accelerator plugin license")]
+    license: Option<String>,
+
+    #[arg(long, global = true, help = "Grok license registration URL")]
+    registration_url: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum PreferencesCommand {
+    #[command(about = "Print every preference as JSON")]
+    Show,
+    #[command(about = "Print the preferences file path")]
+    Path,
+    #[command(about = "Restore every preference to its default")]
+    Reset,
+    #[command(about = "Set one preference")]
+    Set {
+        #[arg(help = "JSON field name, with camelCase, kebab-case, or snake_case accepted")]
+        name: String,
+        #[arg(help = "New value")]
+        value: String,
+    },
 }
 
 /// postkit's `KdmFormat` carries no clap or `FromStr` impl, so the command line
@@ -423,6 +449,11 @@ impl BurnArguments {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Show or change saved preferences")]
+    Preferences {
+        #[command(subcommand)]
+        action: PreferencesCommand,
+    },
     /// Create a new IMP (Interoperable Master Package)
     #[command(allow_negative_numbers = true)]
     Create {
@@ -1471,6 +1502,44 @@ enum Commands {
     },
 }
 
+fn nonempty(value: &str) -> Option<&str> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn run_preferences_command(action: &PreferencesCommand) -> i32 {
+    let result = match action {
+        PreferencesCommand::Show => imfwizard_core::preferences::load_preferences()
+            .map_err(|error| error.to_string())
+            .and_then(|preferences| {
+                serde_json::to_string_pretty(&preferences).map_err(|error| error.to_string())
+            }),
+        PreferencesCommand::Path => Ok(imfwizard_core::preferences::preferences_path()
+            .display()
+            .to_string()),
+        PreferencesCommand::Reset => imfwizard_core::preferences::reset_preferences()
+            .map_err(|error| error.to_string())
+            .and_then(|preferences| {
+                serde_json::to_string_pretty(&preferences).map_err(|error| error.to_string())
+            }),
+        PreferencesCommand::Set { name, value } => {
+            imfwizard_core::preferences::set_preference(name, value).and_then(|preferences| {
+                serde_json::to_string_pretty(&preferences).map_err(|error| error.to_string())
+            })
+        }
+    };
+
+    match result {
+        Ok(output) => {
+            println!("{output}");
+            0
+        }
+        Err(error) => {
+            tracing::error!("{error}");
+            1
+        }
+    }
+}
+
 fn main() {
     // Windows debug builds overflow the default 1MB stack due to large clap
     // derive enum (many subcommands with args). Spawn with 8MB stack.
@@ -1517,16 +1586,52 @@ fn run() {
         )
         .init();
 
+    if let Commands::Preferences { action } = &cli.command {
+        std::process::exit(run_preferences_command(action));
+    }
+
+    let preferences = match imfwizard_core::preferences::load_preferences() {
+        Ok(preferences) => preferences,
+        Err(error) => {
+            tracing::error!("could not load preferences: {error}");
+            std::process::exit(1);
+        }
+    };
+    let gpu_enabled = if cli.no_gpu {
+        false
+    } else {
+        cli.gpu || preferences.gpu
+    };
+    let license = cli
+        .license
+        .as_deref()
+        .or_else(|| nonempty(&preferences.gpu_license));
+    let registration_url = cli
+        .registration_url
+        .as_deref()
+        .or_else(|| nonempty(&preferences.gpu_registration_url));
+
+    if (cli.license.is_some() || cli.registration_url.is_some()) && !gpu_enabled {
+        eprintln!("--license and --registration-url require GPU encoding");
+        std::process::exit(2);
+    }
+    if registration_url.is_some() && license.is_none() {
+        eprintln!("--registration-url requires --license");
+        std::process::exit(2);
+    }
+
     postkit::grok_encoder::initialize(0);
 
-    if cli.gpu
-        && let Err(e) = postkit::grok_encoder::use_gpu()
+    if gpu_enabled
+        && let Err(e) =
+            postkit::grok_encoder::use_gpu_with_authentication(license, registration_url)
     {
         tracing::error!("{e}");
         std::process::exit(1);
     }
 
     match cli.command {
+        Commands::Preferences { .. } => unreachable!(),
         Commands::Create {
             output,
             title,
@@ -4050,7 +4155,7 @@ fn run() {
         }
     }
 
-    if cli.gpu {
+    if gpu_enabled {
         tracing::info!(
             "grok's accelerator plugin ran {} frames on the device",
             postkit::grok_encoder::accelerated_frames()

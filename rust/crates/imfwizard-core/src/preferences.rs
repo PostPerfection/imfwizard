@@ -1,134 +1,139 @@
-//! User preferences management with platform-specific paths and schema migration.
-
-use std::fs;
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::io;
+use std::path::{Path, PathBuf};
 
-const CURRENT_PREFS_VERSION: u32 = 1;
+pub const CURRENT_PREFERENCES_VERSION: u32 = 2;
 
-/// User preferences for IMF Wizard.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
-    #[serde(default = "default_version")]
     pub version: u32,
-    #[serde(default = "default_app_profile")]
-    pub default_app_profile: String,
-    #[serde(default)]
-    pub creator_name: String,
-    #[serde(default = "default_language")]
-    pub default_language: String,
-    #[serde(default = "default_encoder")]
+    #[serde(alias = "default_app_profile")]
+    pub profile: String,
+    #[serde(alias = "creator_name")]
+    pub creator: String,
+    #[serde(alias = "default_language")]
+    pub language: String,
+    #[serde(alias = "preferred_encoder")]
     pub preferred_encoder: String,
-    #[serde(default = "default_bandwidth")]
-    pub default_bandwidth_mbps: u32,
-    #[serde(default = "default_colour_space")]
-    pub default_colour_space: String,
-    #[serde(default = "default_hdr_mode")]
-    pub default_hdr_mode: String,
-    #[serde(default = "default_channel_config")]
-    pub default_channel_config: String,
-    #[serde(default = "default_loudness")]
+    #[serde(alias = "default_bandwidth_mbps")]
+    pub bandwidth: u32,
+    #[serde(alias = "default_colour_space")]
+    pub colourspace: String,
+    #[serde(alias = "default_hdr_mode")]
+    pub hdr: String,
+    #[serde(alias = "default_channel_config")]
+    pub channel_config: String,
+    #[serde(alias = "loudness_target_lufs")]
     pub loudness_target_lufs: f64,
-    #[serde(default)]
-    pub signing_certificate_path: String,
-    #[serde(default)]
-    pub signing_key_path: String,
-    #[serde(default)]
-    pub default_output_dir: String,
-    #[serde(default)]
+    #[serde(alias = "signing_certificate_path")]
+    pub signing_cert: String,
+    #[serde(alias = "signing_key_path")]
+    pub signing_key: String,
+    #[serde(alias = "default_output_dir")]
+    pub output_dir: String,
+    #[serde(alias = "naming_template")]
     pub naming_template: String,
-    #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(default)]
+    #[serde(alias = "show_advanced_options")]
     pub show_advanced_options: bool,
-}
-
-fn default_version() -> u32 {
-    CURRENT_PREFS_VERSION
-}
-fn default_app_profile() -> String {
-    "App2e".to_string()
-}
-fn default_language() -> String {
-    "en".to_string()
-}
-fn default_encoder() -> String {
-    "grok".to_string()
-}
-fn default_bandwidth() -> u32 {
-    250
-}
-fn default_colour_space() -> String {
-    "Rec.709".to_string()
-}
-fn default_hdr_mode() -> String {
-    "SDR".to_string()
-}
-fn default_channel_config() -> String {
-    "5.1".to_string()
-}
-fn default_loudness() -> f64 {
-    -24.0
-}
-fn default_theme() -> String {
-    "dark".to_string()
+    pub show_hints_before_build: bool,
+    pub gpu: bool,
+    pub gpu_license: String,
+    pub gpu_registration_url: String,
+    #[serde(flatten)]
+    pub additional: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            version: CURRENT_PREFS_VERSION,
-            default_app_profile: default_app_profile(),
-            creator_name: String::new(),
-            default_language: default_language(),
-            preferred_encoder: default_encoder(),
-            default_bandwidth_mbps: default_bandwidth(),
-            default_colour_space: default_colour_space(),
-            default_hdr_mode: default_hdr_mode(),
-            default_channel_config: default_channel_config(),
-            loudness_target_lufs: default_loudness(),
-            signing_certificate_path: String::new(),
-            signing_key_path: String::new(),
-            default_output_dir: String::new(),
+            version: CURRENT_PREFERENCES_VERSION,
+            profile: "App2e".to_string(),
+            creator: String::new(),
+            language: "en".to_string(),
+            preferred_encoder: "grok".to_string(),
+            bandwidth: 250,
+            colourspace: "Rec.709".to_string(),
+            hdr: "SDR".to_string(),
+            channel_config: "5.1".to_string(),
+            loudness_target_lufs: -24.0,
+            signing_cert: String::new(),
+            signing_key: String::new(),
+            output_dir: String::new(),
             naming_template: String::new(),
-            theme: default_theme(),
+            theme: "dark".to_string(),
             show_advanced_options: false,
+            show_hints_before_build: true,
+            gpu: false,
+            gpu_license: String::new(),
+            gpu_registration_url: String::new(),
+            additional: BTreeMap::new(),
         }
     }
 }
 
-/// Get the platform-specific preferences file path.
 pub fn preferences_path() -> PathBuf {
-    crate::store::data_dir().join("preferences.json")
+    postkit::preferences::config_dir("imfwizard").join("preferences.json")
 }
 
-/// Load preferences from disk. Returns defaults if file doesn't exist.
-pub fn load_preferences() -> Preferences {
+pub fn load_preferences() -> io::Result<Preferences> {
+    Ok(load_preferences_if_present()?.unwrap_or_default())
+}
+
+pub fn load_preferences_if_present() -> io::Result<Option<Preferences>> {
     load_preferences_from(&preferences_path())
 }
 
-/// Load preferences from a specific path.
-pub fn load_preferences_from(path: &PathBuf) -> Preferences {
-    let Ok(content) = fs::read_to_string(path) else {
-        return Preferences::default();
+pub fn load_preferences_from(path: &Path) -> io::Result<Option<Preferences>> {
+    let Some(contents) = postkit::preferences::read_preferences_file(path)? else {
+        return Ok(None);
     };
+    let stored_version = postkit::preferences::prefs_version(&contents);
+    let mut preferences: Preferences = serde_json::from_str(&contents)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-    serde_json::from_str(&content).unwrap_or_default()
-}
-
-/// Save preferences to disk.
-pub fn save_preferences(prefs: &Preferences) -> std::io::Result<()> {
-    save_preferences_to(prefs, &preferences_path())
-}
-
-/// Save preferences to a specific path.
-pub fn save_preferences_to(prefs: &Preferences, path: &PathBuf) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    if stored_version < CURRENT_PREFERENCES_VERSION {
+        preferences.version = CURRENT_PREFERENCES_VERSION;
+        save_preferences_to(&preferences, path)?;
     }
-    let json = serde_json::to_string_pretty(prefs).map_err(std::io::Error::other)?;
-    fs::write(path, json)
+
+    Ok(Some(preferences))
+}
+
+pub fn save_preferences(preferences: &Preferences) -> io::Result<()> {
+    save_preferences_to(preferences, &preferences_path())
+}
+
+pub fn save_preferences_to(preferences: &Preferences, path: &Path) -> io::Result<()> {
+    if preferences.version > CURRENT_PREFERENCES_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "preferences version {} is newer than supported version {}",
+                preferences.version, CURRENT_PREFERENCES_VERSION
+            ),
+        ));
+    }
+
+    let mut current = preferences.clone();
+    current.version = CURRENT_PREFERENCES_VERSION;
+    let contents = serde_json::to_string_pretty(&current).map_err(io::Error::other)?;
+    postkit::preferences::write_preferences_file(path, &contents)
+}
+
+pub fn reset_preferences() -> io::Result<Preferences> {
+    let preferences = Preferences::default();
+    save_preferences(&preferences)?;
+    Ok(preferences)
+}
+
+pub fn set_preference(name: &str, value: &str) -> Result<Preferences, String> {
+    let preferences = load_preferences().map_err(|error| error.to_string())?;
+    let preferences = postkit::preferences::set_json_preference(&preferences, name, value)?;
+    save_preferences(&preferences).map_err(|error| error.to_string())?;
+    Ok(preferences)
 }
 
 #[cfg(test)]
@@ -137,121 +142,69 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_default_preferences() {
-        let prefs = Preferences::default();
-        assert_eq!(prefs.version, 1);
-        assert_eq!(prefs.default_app_profile, "App2e");
-        assert_eq!(prefs.preferred_encoder, "grok");
-        assert_eq!(prefs.default_bandwidth_mbps, 250);
-        assert_eq!(prefs.default_colour_space, "Rec.709");
-        assert_eq!(prefs.default_hdr_mode, "SDR");
-        assert_eq!(prefs.default_channel_config, "5.1");
-        assert!((prefs.loudness_target_lufs - (-24.0)).abs() < 0.01);
-        assert_eq!(prefs.theme, "dark");
-        assert!(!prefs.show_advanced_options);
+    fn defaults_match_the_settings_form() {
+        let preferences = Preferences::default();
+
+        assert_eq!(preferences.version, CURRENT_PREFERENCES_VERSION);
+        assert_eq!(preferences.profile, "App2e");
+        assert_eq!(preferences.bandwidth, 250);
+        assert_eq!(preferences.colourspace, "Rec.709");
+        assert_eq!(preferences.hdr, "SDR");
+        assert!(preferences.show_hints_before_build);
+        assert!(!preferences.gpu);
     }
 
     #[test]
-    fn test_save_and_load() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("prefs.json");
+    fn version_one_file_adds_auth_defaults_and_updates_version() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("preferences.json");
+        let contents =
+            r#"{"version":1,"creator_name":"Studio","default_bandwidth_mbps":180,"gpu_device":-1}"#;
+        postkit::preferences::write_preferences_file(&path, contents).unwrap();
 
-        let prefs = Preferences {
-            creator_name: "Test Creator".to_string(),
-            default_bandwidth_mbps: 500,
-            theme: "light".to_string(),
-            ..Default::default()
-        };
+        let preferences = load_preferences_from(&path).unwrap().unwrap();
 
-        save_preferences_to(&prefs, &path).unwrap();
-
-        let loaded = load_preferences_from(&path);
-        assert_eq!(loaded.creator_name, "Test Creator");
-        assert_eq!(loaded.default_bandwidth_mbps, 500);
-        assert_eq!(loaded.theme, "light");
+        assert_eq!(preferences.creator, "Studio");
+        assert_eq!(preferences.bandwidth, 180);
+        assert_eq!(preferences.gpu_license, "");
+        assert_eq!(preferences.additional["gpu_device"], -1);
+        assert_eq!(preferences.version, CURRENT_PREFERENCES_VERSION);
+        let saved = postkit::preferences::read_preferences_file(&path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            postkit::preferences::prefs_version(&saved),
+            CURRENT_PREFERENCES_VERSION
+        );
+        assert!(saved.contains("gpuRegistrationUrl"));
+        assert!(saved.contains("gpu_device"));
     }
 
     #[test]
-    fn test_load_missing_file() {
-        let path = PathBuf::from("/nonexistent/prefs.json");
-        let prefs = load_preferences_from(&path);
-        assert_eq!(prefs.default_app_profile, "App2e");
+    fn newer_file_is_not_rewritten() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("preferences.json");
+        let contents = r#"{"version":99,"creator":"Future","futureField":true}"#;
+        postkit::preferences::write_preferences_file(&path, contents).unwrap();
+
+        let preferences = load_preferences_from(&path).unwrap().unwrap();
+
+        assert_eq!(preferences.version, 99);
+        assert_eq!(
+            postkit::preferences::read_preferences_file(&path)
+                .unwrap()
+                .unwrap(),
+            contents
+        );
+        assert!(save_preferences_to(&preferences, &path).is_err());
     }
 
     #[test]
-    fn test_load_partial_json() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("prefs.json");
+    fn invalid_json_returns_an_error() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("preferences.json");
+        postkit::preferences::write_preferences_file(&path, "invalid").unwrap();
 
-        // Write minimal JSON — serde should fill in defaults
-        fs::write(&path, r#"{"creator_name": "Partial", "theme": "blue"}"#).unwrap();
-
-        let prefs = load_preferences_from(&path);
-        assert_eq!(prefs.creator_name, "Partial");
-        assert_eq!(prefs.theme, "blue");
-        assert_eq!(prefs.default_bandwidth_mbps, 250); // default
-        assert_eq!(prefs.preferred_encoder, "grok"); // default
-    }
-
-    #[test]
-    fn test_load_invalid_json() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("prefs.json");
-        fs::write(&path, "not json at all").unwrap();
-
-        let prefs = load_preferences_from(&path);
-        // Should return defaults
-        assert_eq!(prefs.default_app_profile, "App2e");
-    }
-
-    #[test]
-    fn test_roundtrip_all_fields() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("prefs.json");
-
-        let prefs = Preferences {
-            version: 1,
-            default_app_profile: "App4".to_string(),
-            creator_name: "Studio X".to_string(),
-            default_language: "fr".to_string(),
-            preferred_encoder: "kakadu".to_string(),
-            default_bandwidth_mbps: 100,
-            default_colour_space: "P3-D65".to_string(),
-            default_hdr_mode: "PQ".to_string(),
-            default_channel_config: "7.1".to_string(),
-            loudness_target_lufs: -23.0,
-            signing_certificate_path: "/certs/cert.pem".to_string(),
-            signing_key_path: "/certs/key.pem".to_string(),
-            default_output_dir: "/output".to_string(),
-            naming_template: "{title}_{version}".to_string(),
-            theme: "system".to_string(),
-            show_advanced_options: true,
-        };
-
-        save_preferences_to(&prefs, &path).unwrap();
-        let loaded = load_preferences_from(&path);
-
-        assert_eq!(loaded.default_app_profile, "App4");
-        assert_eq!(loaded.creator_name, "Studio X");
-        assert_eq!(loaded.default_language, "fr");
-        assert_eq!(loaded.preferred_encoder, "kakadu");
-        assert_eq!(loaded.default_bandwidth_mbps, 100);
-        assert_eq!(loaded.default_colour_space, "P3-D65");
-        assert_eq!(loaded.default_hdr_mode, "PQ");
-        assert_eq!(loaded.default_channel_config, "7.1");
-        assert!((loaded.loudness_target_lufs - (-23.0)).abs() < 0.01);
-        assert_eq!(loaded.signing_certificate_path, "/certs/cert.pem");
-        assert_eq!(loaded.signing_key_path, "/certs/key.pem");
-        assert_eq!(loaded.default_output_dir, "/output");
-        assert_eq!(loaded.naming_template, "{title}_{version}");
-        assert_eq!(loaded.theme, "system");
-        assert!(loaded.show_advanced_options);
-    }
-
-    #[test]
-    fn test_preferences_path_not_empty() {
-        let path = preferences_path();
-        assert!(!path.as_os_str().is_empty());
-        assert!(path.to_string_lossy().contains("imfwizard"));
+        assert!(load_preferences_from(&path).is_err());
     }
 }

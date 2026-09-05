@@ -6,7 +6,11 @@ use std::sync::OnceLock;
 use tempfile::TempDir;
 
 fn cmd() -> Command {
-    Command::cargo_bin("imfwizard").unwrap()
+    static CONFIG_DIRECTORY: OnceLock<TempDir> = OnceLock::new();
+    let directory = CONFIG_DIRECTORY.get_or_init(|| TempDir::new().unwrap());
+    let mut command = Command::cargo_bin("imfwizard").unwrap();
+    command.env("XDG_CONFIG_HOME", directory.path());
+    command
 }
 
 #[test]
@@ -27,7 +31,46 @@ fn help_flag() {
         .stdout(predicate::str::contains("create"))
         .stdout(predicate::str::contains("encode"))
         .stdout(predicate::str::contains("analytics"))
-        .stdout(predicate::str::contains("profiles"));
+        .stdout(predicate::str::contains("profiles"))
+        .stdout(predicate::str::contains("preferences"))
+        .stdout(predicate::str::contains("--license"))
+        .stdout(predicate::str::contains("--registration-url"));
+}
+
+#[test]
+fn a_registration_url_requires_a_license() {
+    let directory = TempDir::new().unwrap();
+    cmd()
+        .env("XDG_CONFIG_HOME", directory.path())
+        .args([
+            "--gpu",
+            "--registration-url",
+            "https://example.com/register",
+            "profiles",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--license"));
+}
+
+#[test]
+fn preferences_are_shared_between_invocations() {
+    let directory = TempDir::new().unwrap();
+
+    cmd()
+        .env("XDG_CONFIG_HOME", directory.path())
+        .args(["preferences", "set", "gpu-license", "test-license"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"gpuLicense\": \"test-license\""));
+
+    cmd()
+        .env("XDG_CONFIG_HOME", directory.path())
+        .args(["preferences", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"gpuLicense\": \"test-license\""))
+        .stdout(predicate::str::contains("\"version\": 2"));
 }
 
 #[test]
