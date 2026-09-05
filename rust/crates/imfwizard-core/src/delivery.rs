@@ -17,7 +17,7 @@ pub struct DeliverySpec {
 
 /// Resolve a target-convert preset to a delivery spec, or error on an unknown target.
 ///
-/// Presets scale/crop to a standard cinema container and rewrap to a ProRes .mov master;
+/// Presets fit and pad into a standard cinema container and rewrap to a ProRes .mov master;
 /// fps 0 keeps the source rate. Errors rather than silently falling back to 1080p.
 pub fn spec_for_target(target: &str) -> Result<DeliverySpec, String> {
     let resolution = match target {

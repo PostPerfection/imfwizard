@@ -23,7 +23,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
-- **IMF to DCP**, rewrap a single-composition IMP (one picture, optional one sound) to a DCP. It rewraps only, so it takes a DCI X'Y'Z' cinema picture: an IMP imfwizard made carries RGB IMF essence and is refused naming the transcode it would need
+- **IMF to DCP**, convert a single-composition IMP (one picture, optional one sound) to a DCP. Picture already in a DCI 2K/4K cinema profile is rewrapped as it stands. Picture in an IMF profile, which is what `create` writes, is decoded, converted from Rec.709 RGB to DCI X'Y'Z' and re-encoded under the cinema profile at `--bitrate` Mb/s, up to the DCI maximum of 250. The command prints which of the two it did. P3-D65, BT.2020 and PQ picture is refused naming the gamut conversion or tone map it would need, and so is an edit rate outside the DCI set (24, 25, 30, 48, 50, 60, 96, 100, 120)
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
@@ -527,17 +527,19 @@ imfwizard burn-in \
   -o /path/to/output_burned.mp4
 ```
 
-### Scale/crop an IMP to a target resolution
+### Export an IMP as a ProRes delivery master
 
 ```bash
-# Rewrap an IMP's essence to a 4K-scope ProRes .mov master
+# Transcode an IMP's essence to a ProRes 4444 .mov, fitted and padded into 4K scope
 imfwizard target-convert \
   -i /path/to/imp/ \
   -o /path/to/delivery/ \
   -t 4k-scope
 
-# Targets: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
-#          4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
+# The IMP is not modified: the picture keeps its aspect ratio and is padded
+# to fill the container.
+# Containers: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
+#             4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
 # An unknown target errors instead of falling back to 1080p.
 ```
 

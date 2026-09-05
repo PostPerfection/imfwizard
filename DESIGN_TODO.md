@@ -13,19 +13,15 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
-## Open: `to-dcp` cannot take an IMP imfwizard made
+## Open: `to-dcp` takes Rec.709 picture only
 
-`to_dcp.rs`'s `check_j2k_dci` accepts only a DCI 2K/4K cinema profile, since the
-command rewraps essence rather than transcoding it. Every IMP `create` writes now
-carries RGB IMF codestreams, so `to-dcp` refuses its own output naming the
-transcode it would need. Making it work means decoding each frame, converting
-Rec.709 (or the `--hdr` preset's PQ primaries) to DCI X'Y'Z', and re-encoding
-under the cinema profile, which is the whole grok encode again rather than a
-rewrap. The pieces exist: `postkit::grok_decoder::decode`,
-`postkit::colour::DcdmTransform`, and `grok_encoder` with `apply_xyz_transform`
-on and the cinema Rsiz. What is missing is the command deciding between a rewrap
-and a transcode and reporting which it did. Until then `to-dcp` serves only an
-IMP whose picture is already DCI cinema essence.
+`to_dcp.rs` transcodes an IMF profile picture whose track file signals Rec.709
+primaries and transfer, or signals neither. P3-D65 and BT.2020 primaries need a
+gamut conversion and ST 2084 needs a tone map, and `to-dcp` has neither, so an
+IMP made with `--hdr pq-bt2020` or `--hdr pq-p3d65` is refused by name. A DCI 3D
+LUT applied during the decode is the shape dcpwizard already uses for the tone
+map, and the gamut conversion is the same matrix work as
+`--source-colourspace p3`.
 
 ## Open: no gamut conversion for a source that is not Rec.709
 
