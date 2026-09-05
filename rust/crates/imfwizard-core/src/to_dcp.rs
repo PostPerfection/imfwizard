@@ -1,21 +1,29 @@
-//! IMP to DCP conversion by rewrapping DCI-compatible essence.
+//! IMP to DCP conversion, by rewrapping DCI-compatible essence or transcoding
+//! Rec.709 IMF picture into it.
 //!
-//! The tractable path: IMF essence that already meets DCI constraints (JPEG 2000
-//! in a DCI 2K/4K profile, 12-bit, within the DCI bitrate; and linear PCM) is
-//! unwrapped from its AS-02 (ST 2067) MXF and rewrapped as AS-DCP (ST 429) MXF
-//! via postkit, then a DCP (ST 429-7 CPL, 429-8 PKL, 429-9 ASSETMAP/VOLINDEX) is
-//! written around it. Anything needing a real transcode (wrong J2K profile or bit
-//! depth, over the DCI bitrate, non-J2K video, or a colour/transfer change) is a
-//! hard error naming what is unsupported, never a silent essence copy.
+//! Picture already in a DCI 2K/4K cinema profile at 12 bits and within the DCI
+//! bitrate is unwrapped from its AS-02 (ST 2067) MXF and rewrapped as AS-DCP
+//! (ST 429) MXF via postkit. Picture in an IMF profile, which is Rec.709 RGB, is
+//! decoded, converted to DCI X'Y'Z' and re-encoded under the cinema profile.
+//! Sound is linear PCM either way and is always rewrapped. A DCP (ST 429-7 CPL,
+//! 429-8 PKL, 429-9 ASSETMAP/VOLINDEX) is written around the result.
 //!
-//! Colour space and transfer characteristics cannot be read from a J2K codestream
-//! or from the AS-02 descriptors asdcplib exposes, so this tool cannot gate on
-//! them; it assumes the picture essence is already DCI (XYZ) colorimetry, as a
-//! rewrap contract. It never converts colour.
+//! Anything else is a hard error naming what is unsupported: a picture whose
+//! primaries or transfer characteristic need a gamut conversion or a tone map,
+//! non-J2K video, and an edit rate outside the DCI set.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use asdcplib::Rational;
+
+// the DCI set plus the HFR addendum's rates
+const DCP_EDIT_RATES: [u32; 9] = [24, 25, 30, 48, 50, 60, 96, 100, 120];
+
+const PROGRESS_FRAME_INTERVAL: u64 = 100;
+
+const FRAME_READ_BUFFER_BYTES: usize = 16 * 1024 * 1024;
 
 /// Options for IMP to DCP conversion.
 pub struct ToDcpOptions {
@@ -23,6 +31,8 @@ pub struct ToDcpOptions {
     pub output_dir: PathBuf,
     pub title: Option<String>,
     pub content_kind: String,
+    // defaults to the DCI maximum, is refused above it, and the rewrap path ignores it
+    pub bitrate_mbps: Option<f64>,
 }
 
 /// Result of IMP to DCP conversion.
@@ -30,6 +40,7 @@ pub struct ToDcpResult {
     pub success: bool,
     pub error: String,
     pub output_dir: PathBuf,
+    pub picture_report: String,
 }
 
 /// A track file that will go into the DCP: its DCP-side asset id, filename, hash
@@ -53,20 +64,25 @@ enum AssetKind {
 /// Convert an IMP to a DCP. See the module docs for what is rewrapped vs errored.
 pub fn imp_to_dcp(opts: &ToDcpOptions) -> ToDcpResult {
     match convert(opts) {
-        Ok(()) => ToDcpResult {
-            success: true,
-            error: String::new(),
-            output_dir: opts.output_dir.clone(),
-        },
+        Ok(picture_report) => {
+            tracing::info!("{picture_report}");
+            ToDcpResult {
+                success: true,
+                error: String::new(),
+                output_dir: opts.output_dir.clone(),
+                picture_report,
+            }
+        }
         Err(e) => ToDcpResult {
             success: false,
             error: e,
             output_dir: opts.output_dir.clone(),
+            picture_report: String::new(),
         },
     }
 }
 
-fn convert(opts: &ToDcpOptions) -> Result<(), String> {
+fn convert(opts: &ToDcpOptions) -> Result<String, String> {
     if !opts.imp_dir.is_dir() {
         return Err(format!("IMP not found: {}", opts.imp_dir.display()));
     }
@@ -110,14 +126,38 @@ fn build_dcp(
     pictures: &[(PathBuf, PictureInfo)],
     sounds: &[(PathBuf, SoundInfo)],
     tmp: &Path,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut assets: Vec<DcpAsset> = Vec::new();
 
-    // Picture: unwrap AS-02 J2K frames, DCI-check them, rewrap as AS-DCP.
     let (pic_path, pic) = &pictures[0];
+    let edit_rate = check_dcp_edit_rate(pic.fps_num, pic.fps_den)?;
     let frame_dir = tmp.join("j2k");
     std::fs::create_dir_all(&frame_dir).map_err(|e| format!("temp: {e}"))?;
-    let frames = extract_j2k_frames(pic_path, pic, &frame_dir)?;
+    let (frames, picture_report) = match picture_route(pic_path)? {
+        PictureRoute::Rewrap => (
+            extract_j2k_frames(pic_path, pic, &frame_dir)?,
+            "picture: rewrapped, DCI cinema codestreams".to_string(),
+        ),
+        PictureRoute::Transcode => {
+            let bitrate_mbps = opts
+                .bitrate_mbps
+                .unwrap_or(postkit::j2k::DCI_MAX_BITRATE_MBPS);
+            let rsiz =
+                transcode_picture_to_cinema(pic_path, pic, edit_rate, bitrate_mbps, &frame_dir)?;
+            let container = match rsiz {
+                postkit::j2k::CINEMA_4K_RSIZ => "4K",
+                _ => "2K",
+            };
+            (
+                cinema_frame_paths(&frame_dir, pic.frame_count)?,
+                format!(
+                    "picture: transcoded Rec.709 RGB to X'Y'Z' cinema {container} at \
+                     {bitrate_mbps} Mbps, {} frames",
+                    pic.frame_count
+                ),
+            )
+        }
+    };
     let out_mxf = opts.output_dir.join("picture.mxf");
     let wrapped = postkit::mxf_wrap::mxf_wrap(&postkit::mxf_wrap::MxfWrapOptions {
         input_files: frames,
@@ -227,7 +267,22 @@ fn build_dcp(
         &assets,
     )?;
     write_volindex(&opts.output_dir.join("VOLINDEX.xml"))?;
-    Ok(())
+    Ok(picture_report)
+}
+
+fn check_dcp_edit_rate(fps_num: u32, fps_den: u32) -> Result<u32, String> {
+    if fps_den == 1 && DCP_EDIT_RATES.contains(&fps_num) {
+        return Ok(fps_num);
+    }
+    let allowed = DCP_EDIT_RATES
+        .iter()
+        .map(|rate| rate.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "the picture edit rate is {fps_num}/{fps_den}, and a DCP carries one of {allowed}; \
+         retime the composition before converting it"
+    ))
 }
 
 fn dcp_asset(
@@ -327,6 +382,221 @@ fn classify(mxf: &Path) -> Result<Track, String> {
          conversion is not implemented)",
         mxf.display()
     ))
+}
+
+enum PictureRoute {
+    Rewrap,
+    Transcode,
+}
+
+fn picture_route(mxf: &Path) -> Result<PictureRoute, String> {
+    let frame = read_j2k_frame(mxf, 0)?;
+    let header = postkit::j2k::parse_j2k_header(&frame)
+        .ok_or("picture essence is not a JPEG 2000 codestream")?;
+    match postkit::j2k::J2kProfile::from(header.profile) {
+        postkit::j2k::J2kProfile::Cinema2k | postkit::j2k::J2kProfile::Cinema4k => {
+            Ok(PictureRoute::Rewrap)
+        }
+        postkit::j2k::J2kProfile::Imf => Ok(PictureRoute::Transcode),
+        other => Err(format!(
+            "J2K is a {other:?} profile, neither a DCI 2K/4K cinema profile to rewrap nor an \
+             IMF profile to transcode"
+        )),
+    }
+}
+
+fn read_j2k_frame(mxf: &Path, index: u32) -> Result<Vec<u8>, String> {
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&mxf.to_string_lossy())
+        .map_err(|e| format!("opening picture {}: {e}", mxf.display()))?;
+    let mut buf = vec![0u8; FRAME_READ_BUFFER_BYTES];
+    let read = reader
+        .read_frame(index, &mut buf, None, None)
+        .map_err(|e| format!("reading J2K frame {index}: {e}"))?;
+    buf.truncate(read);
+    Ok(buf)
+}
+
+fn check_rec709_source_colour(mxf: &Path) -> Result<(), String> {
+    use asdcplib::jp2k::{
+        COLOR_PRIMARIES_BT709, COLOR_PRIMARIES_BT2020, COLOR_PRIMARIES_P3D65,
+        TRANSFER_CHARACTERISTIC_BT709, TRANSFER_CHARACTERISTIC_BT2020,
+        TRANSFER_CHARACTERISTIC_ST2084,
+    };
+    const REC709_ONLY: &str = "to-dcp converts Rec.709 picture only";
+
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&mxf.to_string_lossy())
+        .map_err(|e| format!("opening picture {}: {e}", mxf.display()))?;
+    // a descriptor with no colour items is not an error, it reads as unsignalled
+    let colour = reader.hdr_metadata().unwrap_or_default();
+    let file = mxf.display();
+
+    match colour.transfer_characteristic {
+        None => tracing::warn!(
+            "{file} signals no transfer characteristic, so the transcode assumes Rec.709"
+        ),
+        Some(ul) if ul == TRANSFER_CHARACTERISTIC_BT709 => {}
+        Some(ul) if ul == TRANSFER_CHARACTERISTIC_ST2084 => {
+            return Err(format!(
+                "{file} signals the ST 2084 (PQ) transfer characteristic, and a DCP needs a \
+                 tone map"
+            ));
+        }
+        Some(ul) if ul == TRANSFER_CHARACTERISTIC_BT2020 => {
+            return Err(format!(
+                "{file} signals the BT.2020 transfer characteristic, and a DCP needs a tone map"
+            ));
+        }
+        Some(ul) => {
+            return Err(format!(
+                "{file} signals the unrecognised transfer characteristic {ul:02x?}, and \
+                 {REC709_ONLY}"
+            ));
+        }
+    }
+
+    match colour.color_primaries {
+        None => {
+            tracing::warn!("{file} signals no colour primaries, so the transcode assumes Rec.709")
+        }
+        Some(ul) if ul == COLOR_PRIMARIES_BT709 => {}
+        Some(ul) if ul == COLOR_PRIMARIES_P3D65 => {
+            return Err(format!(
+                "{file} signals P3-D65 colour primaries, and a DCP needs a gamut conversion"
+            ));
+        }
+        Some(ul) if ul == COLOR_PRIMARIES_BT2020 => {
+            return Err(format!(
+                "{file} signals BT.2020 colour primaries, and a DCP needs a gamut conversion"
+            ));
+        }
+        Some(ul) => {
+            return Err(format!(
+                "{file} signals the unrecognised colour primaries {ul:02x?}, and {REC709_ONLY}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+// the Rsiz it returns says whether the DCP is a 2K or a 4K one
+fn transcode_picture_to_cinema(
+    mxf: &Path,
+    pic: &PictureInfo,
+    edit_rate: u32,
+    bitrate_mbps: f64,
+    j2k_dir: &Path,
+) -> Result<u16, String> {
+    let dci_max = postkit::j2k::DCI_MAX_BITRATE_MBPS;
+    if bitrate_mbps > dci_max {
+        return Err(format!(
+            "--bitrate {bitrate_mbps} Mbps is over the DCI limit of {dci_max:.0} Mbps"
+        ));
+    }
+    check_rec709_source_colour(mxf)?;
+    // rsiz_for_raster promotes the 2K cinema profile to the 4K one by raster
+    let rsiz = postkit::j2k::rsiz_for_raster(postkit::j2k::CINEMA_2K_RSIZ, pic.width, pic.height)?;
+    if pic.frame_count == 0 {
+        return Err("picture track has no frames".into());
+    }
+
+    let fps = crate::encode::FrameRate::new(pic.fps_num, pic.fps_den);
+    let options = postkit::encode::StreamEncodeOptions {
+        output_dir: j2k_dir.to_path_buf(),
+        target_codestream_bytes: Some(crate::encode::codestream_byte_cap_for_bitrate(
+            fps.as_f64(),
+            bitrate_mbps,
+        )),
+        codestream_byte_cap: Some(postkit::j2k::dci_codestream_byte_cap(edit_rate)),
+        fps,
+        source_colour: postkit::encode::SourceColour::DisplayRgb,
+        rsiz,
+        ..Default::default()
+    };
+
+    let open_loader = || -> Result<postkit::encode::FrameLoader<'_>, String> {
+        let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+        reader
+            .open_read(&mxf.to_string_lossy())
+            .map_err(|e| format!("opening picture {}: {e}", mxf.display()))?;
+        let mut buf = vec![0u8; FRAME_READ_BUFFER_BYTES];
+        Ok(Box::new(move |index: u64| {
+            let read = reader
+                .read_frame(index as u32, &mut buf, None, None)
+                .map_err(|e| format!("reading J2K frame {index}: {e}"))?;
+            let decoded = postkit::grok_decoder::decode(buf[..read].to_vec(), 0)
+                .map_err(|e| format!("decoding J2K frame {index}: {e}"))?;
+            raw_frame(decoded, index)
+        }))
+    };
+
+    let mut last_reported = 0u64;
+    let on_progress = |progress: postkit::encode::StreamProgress| {
+        let done = progress.frame >= progress.total_frames;
+        if !done && progress.frame < last_reported + PROGRESS_FRAME_INTERVAL {
+            return;
+        }
+        last_reported = progress.frame;
+        eprintln!(
+            "[to-dcp] transcoded {}/{} frames",
+            progress.frame, progress.total_frames
+        );
+    };
+
+    let result = postkit::encode::encode_loaded_frames(
+        pic.frame_count as u64,
+        open_loader,
+        &options,
+        &Arc::new(AtomicBool::new(false)),
+        &Arc::new(AtomicBool::new(false)),
+        None,
+        on_progress,
+    );
+    if !result.success {
+        return Err(format!(
+            "transcoding picture to X'Y'Z' failed: {}",
+            result.error
+        ));
+    }
+    Ok(rsiz)
+}
+
+fn raw_frame(
+    decoded: postkit::grok_decoder::DecodedFrame,
+    index: u64,
+) -> Result<postkit::grok_encoder::RawFrame, String> {
+    let (width, height, precision) = (decoded.width, decoded.height, decoded.precision);
+    let components: [Vec<i32>; 3] = decoded.components.try_into().map_err(|c: Vec<Vec<i32>>| {
+        format!(
+            "picture frame {index} decodes to {} components; a DCP picture has 3",
+            c.len()
+        )
+    })?;
+    Ok(postkit::grok_encoder::RawFrame::Planar {
+        components,
+        width,
+        height,
+        precision,
+        index,
+    })
+}
+
+fn cinema_frame_paths(j2k_dir: &Path, frame_count: u32) -> Result<Vec<PathBuf>, String> {
+    (0..frame_count)
+        .map(|index| {
+            let path = j2k_dir.join(format!("frame_{index:08}.j2c"));
+            if !path.is_file() {
+                return Err(format!(
+                    "the transcode wrote no codestream for frame {index} at {}",
+                    path.display()
+                ));
+            }
+            Ok(path)
+        })
+        .collect()
 }
 
 /// Read every J2K frame from an AS-02 picture MXF, DCI-check it, and write the

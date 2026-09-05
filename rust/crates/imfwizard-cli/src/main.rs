@@ -768,6 +768,10 @@ enum Commands {
         /// Title override
         #[arg(short, long)]
         title: Option<String>,
+
+        /// Mb/s the transcode path compresses at, up to the DCI maximum of 250
+        #[arg(long)]
+        bitrate: Option<f64>,
     },
 
     /// Export a composition's picture track to a numbered image sequence
@@ -2540,15 +2544,18 @@ fn run() {
             output,
             kind,
             title,
+            bitrate,
         } => {
             let opts = imfwizard_core::to_dcp::ToDcpOptions {
                 imp_dir: PathBuf::from(input),
                 output_dir: PathBuf::from(output),
                 title,
                 content_kind: kind,
+                bitrate_mbps: bitrate,
             };
             let result = imfwizard_core::to_dcp::imp_to_dcp(&opts);
             if result.success {
+                println!("{}", result.picture_report);
                 println!("DCP created at {}", result.output_dir.display());
             } else {
                 eprintln!("Error: {}", result.error);
