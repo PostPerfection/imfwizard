@@ -35,22 +35,17 @@ conversion lands on Rec.709 SDR while the preset's descriptor declares PQ:
 converting into the preset's own primaries and transfer is the matrix and curve
 postkit does not have.
 
-## Open: a subsampled App 2E track file has no decode path
+## Open: a 4:4:4 YCbCr App 2E track file previews as RGB
 
-`postkit::grok_decoder` refuses a component that is not 4:4:4 by name, so a
-frame-extract or a preview of an App 2E track file carrying 4:2:2 chroma has
-nowhere to go. Every picture `create` writes is 4:4:4, so this is only about
-essence from elsewhere. Chroma upsampling belongs in postkit's decoder, which is
-where its DESIGN_TODO carries the entry.
-
-## Open: an HDR IMP has no preview
-
-`frame-extract` and the embedded preview show Rec.709 SDR picture only.
-postkit's `render_imf_frame` refuses ST 2084, HLG, BT.2020 and P3-D65 by name,
-so an IMP made with `--hdr pq-bt2020` encodes and wraps but cannot be looked at
-here: the display transform for it is a tone map plus a gamut conversion into
-sRGB, and neither exists in postkit's `colour` yet. The fix is postkit's, and
-its DESIGN_TODO carries the entry with the fixture it wants first.
+postkit's `grok_decoder` upsamples a subsampled codestream and reads it as
+YCbCr, which ST 2067-21 allows only as CDCI, and `render_imf_frame` tone maps PQ
+and HLG and converts P3-D65 and BT.2020 into Rec.709, so `frame-extract` and
+the stepped preview show every IMP `create` writes. A 4:4:4 codestream could be
+RGB or YCbCr and only the CDCI descriptor says which, which the AS-02 reader
+binding does not expose, so a 4:4:4 CDCI master from elsewhere shows with its
+chroma planes taken for green and blue. The embedded player still hands the
+file to libmpv, whose own tone map need not match the stepped frame. Same
+entries in postkit's DESIGN_TODO.
 
 ## Open: dcpdoctor does not decode an App 2E frame
 
