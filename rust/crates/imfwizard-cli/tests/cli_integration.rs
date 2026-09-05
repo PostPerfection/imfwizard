@@ -1777,3 +1777,240 @@ fn the_pre_build_check_is_quiet_on_a_clean_job() {
 
     assert!(!output.exists(), "the check must write nothing");
 }
+
+// ─── to-dcp ───────────────────────────────────────────────────────────────
+
+const FRAME_READ_BUFFER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_12_BIT_CODE: u16 = 4095;
+// how far a centre pixel may drift after two lossy encodes and a yuv420p round trip
+const XYZ_CODE_TOLERANCE: i32 = 60;
+const MXF_HEADER_SIZE: u32 = 16384;
+const CINEMA_TRACK_FILE_UUID: [u8; 16] = [
+    0x21, 0x1a, 0x4f, 0x0c, 0x7b, 0x33, 0x4e, 0x18, 0x9c, 0x5d, 0x60, 0x2f, 0xa1, 0x88, 0x0e, 0x74,
+];
+
+fn synthesize_solid_red_clip(path: &Path, frames: u32, rate: &str) {
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("color=c=red:s=1920x1080:r={rate}"),
+            "-frames:v",
+            &frames.to_string(),
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+        ])
+        .arg(path)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn create_red_imp(dir: &Path, name: &str, rate: &str, extra: &[&str]) -> PathBuf {
+    let clip = dir.join(format!("{name}.mov"));
+    synthesize_solid_red_clip(&clip, 4, rate);
+    let imp = dir.join(name);
+    let mut command = cmd();
+    command.args([
+        "create",
+        "-o",
+        &imp.to_string_lossy(),
+        "-t",
+        name,
+        "--video",
+        &clip.to_string_lossy(),
+    ]);
+    command.args(extra);
+    command.assert().success();
+    imp
+}
+
+fn read_frame(mxf: &Path, index: u32) -> Vec<u8> {
+    let mut reader = asdcplib::jp2k::MxfReader::new();
+    reader
+        .open_read(&mxf.to_string_lossy())
+        .expect("open DCP picture");
+    let mut buf = vec![0u8; FRAME_READ_BUFFER_BYTES];
+    let read = reader
+        .read_frame(index, &mut buf, None, None)
+        .expect("read DCP picture frame");
+    buf.truncate(read);
+    buf
+}
+
+fn cpl_text(dcp: &Path) -> String {
+    let cpl = std::fs::read_dir(dcp)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("CPL_"))
+        })
+        .expect("the DCP has a CPL");
+    std::fs::read_to_string(cpl).unwrap()
+}
+
+/// An IMP imfwizard made carries IMF profile Rec.709 RGB, which no projector
+/// takes, so `to-dcp` has to decode it, convert it to X'Y'Z' and re-encode it
+/// under the cinema profile.
+#[test]
+fn to_dcp_transcodes_an_imf_picture_to_cinema_xyz() {
+    let dir = TempDir::new().unwrap();
+    let imp = create_red_imp(dir.path(), "red", "24", &[]);
+    let dcp = dir.path().join("dcp");
+
+    cmd()
+        .args([
+            "to-dcp",
+            "-i",
+            &imp.to_string_lossy(),
+            "-o",
+            &dcp.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("transcoded"))
+        .stdout(predicate::str::contains("2K"));
+
+    let codestream = read_frame(&dcp.join("picture.mxf"), 0);
+    let header = postkit::j2k::parse_j2k_header(&codestream).expect("a JPEG 2000 codestream");
+    assert_eq!(
+        postkit::j2k::J2kProfile::from(header.profile),
+        postkit::j2k::J2kProfile::Cinema2k,
+        "RSIZ {:#06x} is not the 2K cinema profile",
+        header.profile
+    );
+
+    let decoded = postkit::grok_decoder::decode(codestream, 0).expect("decode the DCP frame");
+    let centre =
+        (decoded.height as usize / 2) * decoded.width as usize + decoded.width as usize / 2;
+    let expected = postkit::colour::DcdmTransform::to_xyz(postkit::colour::ColourSpace::Rec709)
+        .unwrap()
+        .pixel([u16::MAX, 0, 0], MAX_12_BIT_CODE);
+    for (component, (samples, want)) in decoded.components.iter().zip(expected).enumerate() {
+        let got = samples[centre];
+        assert!(
+            (got - want as i32).abs() <= XYZ_CODE_TOLERANCE,
+            "component {component} is {got}, not the X'Y'Z' of Rec.709 red ({want})"
+        );
+    }
+
+    assert!(
+        cpl_text(&dcp).contains("<EditRate>24 1</EditRate>"),
+        "the DCP edit rate must match the IMP's"
+    );
+}
+
+/// Picture already in a cinema profile is copied, not compressed again.
+#[test]
+fn to_dcp_rewraps_dci_cinema_picture_unchanged() {
+    let dir = TempDir::new().unwrap();
+    let imp = create_red_imp(dir.path(), "red", "24", &[]);
+    let dcp = dir.path().join("dcp");
+    cmd()
+        .args([
+            "to-dcp",
+            "-i",
+            &imp.to_string_lossy(),
+            "-o",
+            &dcp.to_string_lossy(),
+        ])
+        .assert()
+        .success();
+
+    // rewrap the DCP's own cinema codestreams into an AS-02 track file with
+    // asdcplib, because postkit refuses to put X'Y'Z' essence in an IMF wrap
+    let cinema_imp = dir.path().join("cinema_imp");
+    std::fs::create_dir_all(&cinema_imp).unwrap();
+    let mut reader = asdcplib::jp2k::MxfReader::new();
+    reader
+        .open_read(&dcp.join("picture.mxf").to_string_lossy())
+        .unwrap();
+    let descriptor = reader.picture_descriptor().unwrap();
+    let mut writer = asdcplib::as02::jp2k::MxfWriter::new();
+    writer
+        .open_write_hdr(
+            &cinema_imp.join("picture.mxf").to_string_lossy(),
+            &asdcplib::WriterInfo {
+                asset_uuid: CINEMA_TRACK_FILE_UUID,
+                ..Default::default()
+            },
+            &descriptor,
+            &postkit::mxf_wrap::rec709_sdr_picture_colour(),
+            MXF_HEADER_SIZE,
+        )
+        .unwrap();
+    for index in 0..descriptor.container_duration {
+        writer
+            .write_frame(&read_frame(&dcp.join("picture.mxf"), index), None, None)
+            .unwrap();
+    }
+    writer.finalize().unwrap();
+
+    cmd()
+        .args([
+            "to-dcp",
+            "-i",
+            &cinema_imp.to_string_lossy(),
+            "-o",
+            &dir.path().join("dcp_rewrapped").to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rewrapped"));
+}
+
+/// A DCP edit rate is an integer from the DCI set, so 24000/1001 has to be
+/// refused rather than written into the CPL as it stands.
+#[test]
+fn to_dcp_refuses_a_fractional_edit_rate() {
+    let dir = TempDir::new().unwrap();
+    let imp = create_red_imp(
+        dir.path(),
+        "ntsc",
+        "24000/1001",
+        &["--fps-num", "24000", "--fps-den", "1001"],
+    );
+
+    cmd()
+        .args([
+            "to-dcp",
+            "-i",
+            &imp.to_string_lossy(),
+            "-o",
+            &dir.path().join("dcp").to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("24000/1001"));
+}
+
+/// PQ picture needs a tone map before it is cinema colour, and there is none.
+#[test]
+fn to_dcp_refuses_pq_picture_by_name() {
+    let dir = TempDir::new().unwrap();
+    let imp = create_red_imp(dir.path(), "pq", "24", &["--hdr", "pq-bt2020"]);
+
+    cmd()
+        .args([
+            "to-dcp",
+            "-i",
+            &imp.to_string_lossy(),
+            "-o",
+            &dir.path().join("dcp").to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ST 2084"))
+        .stderr(predicate::str::contains("tone map"));
+}
