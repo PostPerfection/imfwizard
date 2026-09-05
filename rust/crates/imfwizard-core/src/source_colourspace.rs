@@ -50,11 +50,13 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
              first, or package it as a DCP with dcpwizard"
                 .to_string(),
         ),
-        ColourSpace::P3 | ColourSpace::Rec2020 | ColourSpace::LogC => Err(format!(
-            "{space:?} would have to be converted to the Rec.709 RGB an App 2E picture \
-             declares, and the only transform postkit has for it lands on X'Y'Z'. Convert \
-             the source to Rec.709 RGB first"
-        )),
+        ColourSpace::P3 | ColourSpace::P3D65 | ColourSpace::Rec2020 | ColourSpace::LogC => {
+            Err(format!(
+                "{space:?} would have to be converted to the Rec.709 RGB an App 2E picture \
+                 declares, and the only transform postkit has for it lands on X'Y'Z'. Convert \
+                 the source to Rec.709 RGB first"
+            ))
+        }
         ColourSpace::Aces | ColourSpace::AcesCg => Err(format!(
             "{space:?} is scene-referred: it needs a rendering transform, and the one \
              postkit has lands on X'Y'Z' rather than the Rec.709 RGB an App 2E picture \
@@ -87,7 +89,11 @@ pub fn reject_dci_lut(colour: &SourceColour) -> Result<(), String> {
 /// display RGB when the text is drawn.
 pub fn frames_reach_the_compressor_as_xyz(colour: &SourceColour) -> bool {
     match colour {
-        SourceColour::KeepRgb | SourceColour::DisplayRgb | SourceColour::DisplayRgbIn(_) => false,
+        SourceColour::KeepRgb
+        | SourceColour::DisplayRgb
+        | SourceColour::DisplayRgbIn(_)
+        | SourceColour::KeepRgbFrom(_)
+        | SourceColour::KeepRgbAfterLut(_) => false,
         SourceColour::AlreadyPq | SourceColour::DciLut(_) => true,
     }
 }
@@ -108,7 +114,11 @@ pub fn reject_on_precompressed_picture(
     // rather than silently counting as "asks the encoder for nothing"
     let asks_the_encoder_for_something = match colour {
         SourceColour::KeepRgb | SourceColour::DisplayRgb => false,
-        SourceColour::DisplayRgbIn(_) | SourceColour::DciLut(_) | SourceColour::AlreadyPq => true,
+        SourceColour::DisplayRgbIn(_)
+        | SourceColour::DciLut(_)
+        | SourceColour::AlreadyPq
+        | SourceColour::KeepRgbFrom(_)
+        | SourceColour::KeepRgbAfterLut(_) => true,
     };
     if asks_the_encoder_for_something {
         return Err(format!(
