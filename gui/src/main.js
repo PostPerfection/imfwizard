@@ -207,6 +207,7 @@ async function applyGpuSetting(enabled, license, registrationUrl) {
       license: license || null,
       registrationUrl: registrationUrl || null,
     });
+    if (enabled) setStatus("GPU encoding on");
   } catch (error) {
     setStatus(`GPU encoding unavailable: ${error}`);
     const gpu = document.getElementById("set-gpu-enable");
@@ -214,6 +215,15 @@ async function applyGpuSetting(enabled, license, registrationUrl) {
     savePrefs({ ...getPrefs(), gpu: false });
   }
 }
+
+document.getElementById("set-gpu-enable")?.addEventListener("change", (event) => {
+  if (!event.target.checked) return;
+  applyGpuSetting(
+    true,
+    document.getElementById("set-gpu-license")?.value.trim() || "",
+    document.getElementById("set-gpu-registration-url")?.value.trim() || "",
+  );
+});
 
 document.getElementById("settings-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
