@@ -43,8 +43,8 @@ and HLG and converts P3-D65 and BT.2020 into Rec.709, so `frame-extract` and
 the stepped preview show every IMP `create` writes. A 4:4:4 codestream could be
 RGB or YCbCr and only the CDCI descriptor says which, which the AS-02 reader
 binding does not expose, so a 4:4:4 CDCI master from elsewhere shows with its
-chroma planes taken for green and blue. The embedded player still hands the
-file to libmpv, whose own tone map need not match the stepped frame. Same
+chroma planes taken for green and blue. The embedded player decodes through the
+same function, so it shows the same misread rather than a second one. Same
 entries in postkit's DESIGN_TODO.
 
 ## Open: dcpdoctor does not decode an App 2E frame
@@ -68,9 +68,10 @@ of that here.
   with the card to build and prove.
 - SL (sign language) accessibility: a video-overlay track, not audio, so it gets no
   MCA audio descriptor. Composition-level LocaleList still carries languages.
-- Honest-scope tools: slate is a black text slate only; preview plays via mpv (no
-  thumbnails); partial-version copies files by CPL uuid (no reel logic); loudness
-  measures and adjusts to a target (no other processing). Docs describe these as-is.
+- Honest-scope tools: slate is a black text slate only, preview plays JPEG 2000
+  through grok and every other source through mpv (no thumbnails), partial-version
+  copies files by CPL uuid (no reel logic), loudness measures and adjusts to a
+  target (no other processing). Docs describe these as-is.
 
 ## Open: a full GUI pass has never been done (2026-08-17)
 
@@ -114,7 +115,9 @@ has the entry).
   dcpwizard's DESIGN_TODO): the playback overlays, decode resolution control,
   player HUD, crop overlay and subtitle/CC toggles in guikit's preview header
   are verified with the mpv CLI and not yet clicked through in the running
-  window, which is part of the GUI pass above.
+  window, which is part of the GUI pass above. That pass owes both backends: an
+  IMP loads the grok player, an MP4 source loads mpv, and each draws the overlays
+  its own way.
 
 ## Open: DCP-o-matic hints not ported (2026-08-16)
 

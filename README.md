@@ -105,7 +105,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Keyboard shortcuts**, Ctrl+N/O/B/P/I, Ctrl+Shift+S, Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
-- **Preview player**, mpv-based playback with timeline scrubber (click-to-seek, drag-to-scrub, timecode display)
+- **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through grok, in process, at 2K real time. Everything else plays through mpv
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
@@ -198,7 +198,7 @@ cargo build --release
 | Dependency | Purpose | Install |
 |-----------|---------|---------|
 | `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
-| `mpv` | GUI preview player | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
+| `mpv` | GUI preview player for sources that are not JPEG 2000 | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
 | `ctlrender` | ACES CTL transforms (IDT/RRT/ODT) | [GitHub](https://github.com/ampas/CTL) |
