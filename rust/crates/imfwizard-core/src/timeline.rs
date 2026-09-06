@@ -173,6 +173,9 @@ pub fn list_cpls(imp_dir: &Path) -> Vec<CplInfo> {
         .into_iter()
         .filter_map(|(id, rel_path)| {
             let full_path = imp_dir.join(&rel_path);
+            if !is_xml_file(&full_path) {
+                return None;
+            }
             let file_content = std::fs::read_to_string(&full_path).ok()?;
             if !file_content.contains("CompositionPlaylist") {
                 return None;
@@ -184,6 +187,14 @@ pub fn list_cpls(imp_dir: &Path) -> Vec<CplInfo> {
             })
         })
         .collect()
+}
+
+// a picture mxf is an asset too, and reading one whole to look for a cpl tag takes gigabytes
+fn is_xml_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"))
 }
 
 /// Asset id to the path it names, relative to the IMP directory.
@@ -286,16 +297,23 @@ mod tests {
             r#"<?xml version="1.0"?><CompositionPlaylist><ContentTitle>My &amp; Film</ContentTitle></CompositionPlaylist>"#,
         )
         .unwrap();
+        // essence that happens to carry the tag must never be read for it
+        std::fs::write(
+            dir.path().join("video.mxf"),
+            b"\x06\x0e\x2bCompositionPlaylist",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("ASSETMAP.xml"),
             r#"<?xml version="1.0"?><AssetMap><AssetList>
                 <Asset><Id>urn:uuid:1111</Id><ChunkList><Chunk><Path>CPL_abc.xml</Path></Chunk></ChunkList></Asset>
+                <Asset><Id>urn:uuid:2222</Id><ChunkList><Chunk><Path>video.mxf</Path></Chunk></ChunkList></Asset>
             </AssetList></AssetMap>"#,
         )
         .unwrap();
 
         let cpls = list_cpls(dir.path());
-        assert_eq!(cpls.len(), 1);
+        assert_eq!(cpls.len(), 1, "{cpls:?}");
         assert_eq!(cpls[0].id, "1111");
         assert_eq!(cpls[0].file_path, "CPL_abc.xml");
         assert_eq!(cpls[0].title, "My & Film");
