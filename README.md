@@ -19,7 +19,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Original Version IMP creation** from J2K + WAV
 - **TTML / IMSC subtitle** packaging as AS-02 timed text MXF
 - **Subtitle conversion** to IMSC/TTML from SRT, SCC (CEA-608 pop-on captions), ASS/SSA, FCPXML, and MKS (Matroska); ASS/FCPXML/MKS keep styling and placement (italic/bold/underline/colour, alignment, position) in the TTML output
-- **App 2E picture essence**, the codestreams declare an IMF JPEG 2000 profile (RSIZ 0x0400 to 0x09ff, the profile the raster picks with the levels its rate and bitrate ask for) and carry 12-bit RGB 4:4:4. The picture MXF signals ColorPrimaries and TransferCharacteristic on its RGBA essence descriptor, Rec.709 without `--hdr` and the preset's PQ primaries with it
+- **App 2E picture essence**, the codestreams declare an IMF JPEG 2000 profile (RSIZ 0x0400 to 0x09ff, the profile the raster picks with the levels its rate and bitrate ask for) and carry 12-bit RGB 4:4:4. The picture MXF signals ColorPrimaries and TransferCharacteristic on its RGBA essence descriptor, Rec.709 without `--hdr` and the preset's PQ or HLG transfer with it
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
 - **SHA-1 hashing** for PKL/ASSETMAP asset integrity
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
@@ -38,7 +38,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
 ### HDR & Advanced
-- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
+- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65|hlg-bt2020` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. `hlg-bt2020` is App 2E COLOR.8, the BT.2020 primaries with the HLG OETF. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
 - **Dolby Vision** RPU metadata injection (via dovi_tool)
 - **HDR10+ dynamic metadata** injection, re-encodes with libx265 to write SEI (via hdr10plus_tool)
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
@@ -327,8 +327,9 @@ imfwizard create \
 ### Package HDR/WCG picture (ST 2067-21)
 
 ```bash
-# --hdr sets the transfer characteristic + colour primaries (pq-bt2020 or pq-p3d65),
-# written onto the picture MXF RGBA descriptor and the matching CPL EssenceDescriptor.
+# --hdr sets the transfer characteristic + colour primaries (pq-bt2020, pq-p3d65 or
+# hlg-bt2020), written onto the picture MXF RGBA descriptor and the matching CPL
+# EssenceDescriptor.
 # --mastering-display (optional, requires --hdr) adds the ST 2086 block. The string is
 # the x265 master-display format: G,B,R,WP in 0.00002 units, L(max,min) in 0.0001 cd/m^2.
 imfwizard create \
@@ -343,7 +344,17 @@ imfwizard create \
 
 `--max-cll` and `--max-fall` take nits (0-65535) and require `--hdr`. ST 2067-21 carries
 them as CPL ExtensionProperties, not as MXF descriptor metadata, so they go in the CPL
-next to ApplicationIdentification and nowhere else.
+next to ApplicationIdentification and nowhere else. Clause 7.5 defines both for the PQ
+colour systems only, so either flag with `hlg-bt2020` is refused. A Dolby Vision profile
+8.1 source fills them from its RPU when neither flag is given, and profile 5 is refused
+by name.
+
+The picture's own signalling has to agree with the preset. A source tagged PQ
+(`smpte2084`) under `hlg-bt2020`, or one tagged HLG (`arib-std-b67`) under a PQ preset, is
+refused naming both, and an HDR source (either tag, or a Dolby Vision RPU) packaged
+without `--hdr` is refused naming the preset to pass rather than written as Rec.709 SDR. A
+source with no transfer tag says nothing about its colour, so the preset is taken at its
+word.
 
 The CLI writes one CPL per `create`. The GUI packages multiple compositions
 (one CPL tab each) into a single IMP that shares one PKL and ASSETMAP.
