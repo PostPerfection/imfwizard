@@ -86,13 +86,10 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
         }
         crate::source_colourspace::reject_on_precompressed_picture(picture, &plan.source_colour)?;
         crate::source_picture::reject_on_precompressed_picture(picture, &plan.picture_options)?;
-        crate::hdr_source::check_source_matches_preset(
-            crate::hdr_source::probe(picture)?,
-            plan.hdr.as_ref(),
-        )?;
     }
     check_burn(plan)?;
     check_app2e_picture(plan)?;
+    check_hdr_signalling(plan)?;
     check_audio_map(plan)?;
     check_source_edits(plan)
 }
@@ -137,6 +134,17 @@ fn check_app2e_picture(plan: &CreatePlan) -> Result<(), String> {
     let (width, height) =
         crate::source_picture::encode_raster(&plan.picture_options, source_width, source_height);
     crate::mxf_wrap::validate_app2e_raster(width, height)
+}
+
+// runs after the raster check, which is what names a picture ffprobe cannot read
+fn check_hdr_signalling(plan: &CreatePlan) -> Result<(), String> {
+    let Some(picture) = &plan.picture else {
+        return Ok(());
+    };
+    crate::hdr_source::check_source_matches_preset(
+        crate::hdr_source::probe(picture)?,
+        plan.hdr.as_ref(),
+    )
 }
 
 fn check_audio_map(plan: &CreatePlan) -> Result<(), String> {
