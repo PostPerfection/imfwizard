@@ -349,17 +349,6 @@
         .compare-table .no { color: var(--text-tertiary); }
         .compare-table .partial { color: var(--amber); font-weight: 500; }
         .compare-table tr:hover td { background: var(--bg-card); }
-        .compare-price {
-            display: inline-block;
-            margin-top: 1rem;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 1.1rem;
-        }
-        .compare-price.free { background: rgba(74,222,128,0.15); color: var(--green); }
-        .compare-price.paid { background: rgba(251,113,133,0.1); color: var(--rose); }
-
         @media (max-width: 768px) {
             .nav-links { display: none; }
             .hero { padding: 120px 20px 60px; }
@@ -451,7 +440,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
             <h3>CPU or GPU JPEG 2000</h3>
-            <p>Encode App 2E picture through Grok on all available CPU cores, or enable its accelerator plugin from the app or with <code>--gpu</code>. The job log records whether the device started and how many frames it encoded.</p>
+            <p>Encode App 2E picture through Grok on all available CPU cores, or enable its accelerator plugin from the app or with <code>--gpu</code>. GPU encode and preview decode are available on Linux, Windows, and macOS. The job log records how many frames the device encoded.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
@@ -559,12 +548,7 @@
 
 <section class="section" id="compare">
     <h2 class="section-title">How does IMF Wizard compare?</h2>
-    <p class="section-subtitle">Feature comparison with easyDCP IMF Studio, the industry-standard commercial tool.</p>
-
-    <div style="display:flex; gap:24px; justify-content:center; margin-bottom:1.5rem; flex-wrap:wrap;">
-        <span class="compare-price free">IMF Wizard: Free &amp; Open Source</span>
-        <span class="compare-price paid">easyDCP IMF Studio: Commercial</span>
-    </div>
+    <p class="section-subtitle">Feature comparison with easyDCP IMF Studio.</p>
 
     <div style="overflow-x:auto;">
     <table class="compare-table">
@@ -585,7 +569,7 @@
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Subtitle burn-in during encode</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Preview playback with QC overlays</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>GPU JPEG 2000 encode and preview decode</td><td class="yes">&#10003;</td><td class="yes">&#10003; (Windows)</td></tr>
+            <tr><td>GPU JPEG 2000 encode and preview decode</td><td class="yes">Linux, Windows, macOS</td><td class="yes">&#10003; (Windows)</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard advantages</td></tr>
             <tr><td>HDR10+ metadata packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>

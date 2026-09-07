@@ -27,7 +27,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
-- **CPU and GPU encoding**, CPU encoding uses the available cores by default. `--gpu` or the desktop GPU setting enables Grok's accelerator plugin for JPEG 2000 encode and decode. An explicit `--gpu` fails if the plugin cannot start, while a saved desktop preference warns and continues on the CPU. `--no-gpu` forces the CPU
+- **CPU and GPU encoding on Linux, Windows, and macOS**, CPU encoding uses the available cores by default. `--gpu` or the desktop GPU setting enables Grok's accelerator plugin for JPEG 2000 encode and decode. An explicit `--gpu` fails if the plugin cannot start, while a saved desktop preference warns and continues on the CPU. `--no-gpu` forces the CPU
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
@@ -107,7 +107,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
 - **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through Grok in process. A CPU worker pool handles software decode. GPU mode uses device decode plus the App 2E tone map and gamut conversion. Everything else plays through mpv
-- **GPU encoding toggle**, enables Grok acceleration for the whole app and stores the license and registration URL when the plugin requires them. The job log records whether the device started and how many frames it encoded
+- **GPU encoding toggle on Linux, Windows, and macOS**, enables Grok acceleration for the whole app and stores the license and registration URL when the plugin requires them. The job log records whether the device started and how many frames it encoded
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
