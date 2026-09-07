@@ -677,10 +677,32 @@ enum Commands {
         algorithm: String,
     },
 
-    /// Watch directory for changes
+    /// Build an IMP from every master that lands in a watched folder
     Watch {
-        /// Directory to watch
+        /// Directory to watch for masters
         dir: PathBuf,
+
+        /// Directory each package is written to, under the master's file stem
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// POST a JSON notification to this URL when a package is built or fails
+        #[arg(long)]
+        webhook_url: Option<String>,
+
+        /// Seconds between polls
+        #[arg(
+            long,
+            default_value_t = imfwizard_core::watch::DEFAULT_POLL_INTERVAL_SECONDS,
+            value_parser = clap::value_parser!(u64).range(
+                imfwizard_core::watch::MINIMUM_POLL_INTERVAL_SECONDS..
+            )
+        )]
+        interval: u64,
+
+        /// Flags passed to `create` for every package, after a `--` separator
+        #[arg(last = true)]
+        create_arguments: Vec<String>,
     },
 
     /// List delivery profiles
@@ -1480,6 +1502,72 @@ enum Commands {
         /// Target DV profile (8.1, 8.4)
         #[arg(long, default_value = "8.1")]
         target_profile: String,
+    },
+
+    /// Content version / delivery history tracker (SQLite)
+    Version {
+        #[command(subcommand)]
+        action: VersionAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum VersionAction {
+    /// Record a delivery
+    Record {
+        /// Tracker database file
+        #[arg(long, default_value = "deliveries.db")]
+        db: String,
+
+        /// Package UUID
+        #[arg(long)]
+        package_uuid: String,
+
+        /// Title
+        #[arg(long, default_value = "")]
+        title: String,
+
+        /// Version label (e.g. OV, VF)
+        #[arg(long, default_value = "")]
+        version: String,
+
+        /// Destination
+        #[arg(long, default_value = "")]
+        destination: String,
+
+        /// Delivery method (e.g. hard_drive, satellite)
+        #[arg(long, default_value = "")]
+        method: String,
+
+        /// Mark as verified
+        #[arg(long)]
+        verified: bool,
+    },
+
+    /// List recorded deliveries
+    List {
+        /// Tracker database file
+        #[arg(long, default_value = "deliveries.db")]
+        db: String,
+
+        /// Filter by package UUID
+        #[arg(long)]
+        package_uuid: Option<String>,
+
+        /// Filter by destination
+        #[arg(long)]
+        destination: Option<String>,
+    },
+
+    /// Export delivery history (format by extension: .json or .csv)
+    Export {
+        /// Tracker database file
+        #[arg(long, default_value = "deliveries.db")]
+        db: String,
+
+        /// Output file (.json or .csv)
+        #[arg(short, long)]
+        output: String,
     },
 }
 
@@ -2395,19 +2483,213 @@ fn run() {
             }
         }
 
-        Commands::Watch { dir } => {
-            println!("Watching {} for changes...", dir.display());
-            match imfwizard_core::watch::FileWatcher::new(&dir) {
-                Ok(watcher) => {
-                    while let Some(event) = watcher.next_event() {
-                        println!("{event:?}");
-                    }
+        Commands::Watch {
+            dir,
+            output,
+            webhook_url,
+            interval,
+            create_arguments,
+        } => {
+            use imfwizard_core::watch::{
+                AUDIO_SIDECAR_EXTENSION, DONE_DIRECTORY_NAME, FAILED_DIRECTORY_NAME,
+                SUBTITLE_SIDECAR_EXTENSION,
+            };
+            use std::path::Path;
+
+            fn free_destination(directory: &Path, file_name: &str) -> PathBuf {
+                let taken = directory.join(file_name);
+                if !taken.exists() {
+                    return taken;
                 }
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
+                let stem = Path::new(file_name)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(file_name);
+                let extension = Path::new(file_name).extension().and_then(|e| e.to_str());
+                let mut suffix = 1u32;
+                loop {
+                    let candidate = match extension {
+                        Some(extension) => directory.join(format!("{stem}-{suffix}.{extension}")),
+                        None => directory.join(format!("{stem}-{suffix}")),
+                    };
+                    if !candidate.exists() {
+                        return candidate;
+                    }
+                    suffix += 1;
                 }
             }
+
+            fn move_aside(source: &Path, directory: &Path) {
+                if let Err(e) = std::fs::create_dir_all(directory) {
+                    tracing::error!("cannot create {}: {e}", directory.display());
+                    return;
+                }
+                let Some(file_name) = source.file_name().and_then(|n| n.to_str()) else {
+                    tracing::error!("cannot read a file name from {}", source.display());
+                    return;
+                };
+                let destination = free_destination(directory, file_name);
+                if let Err(e) = std::fs::rename(source, &destination) {
+                    tracing::error!(
+                        "cannot move {} into {}: {e}",
+                        source.display(),
+                        directory.display()
+                    );
+                }
+            }
+
+            fn post_event(
+                webhook: Option<&postkit::webhook::WebhookConfig>,
+                event_type: &str,
+                job_id: &str,
+                payload_json: String,
+            ) {
+                let Some(config) = webhook else {
+                    return;
+                };
+                let event = postkit::webhook::WebhookEvent {
+                    event_type: event_type.to_string(),
+                    job_id: job_id.to_string(),
+                    payload_json,
+                    timestamp: String::new(),
+                };
+                let result = postkit::webhook::send_webhook(config, &event);
+                if !result.success {
+                    tracing::warn!("webhook delivery failed: {}", result.error);
+                }
+            }
+
+            if let Err(e) = std::fs::create_dir_all(&output) {
+                tracing::error!("cannot create {}: {e}", output.display());
+                std::process::exit(1);
+            }
+            let executable = match std::env::current_exe() {
+                Ok(path) => path,
+                Err(e) => {
+                    tracing::error!("cannot find the running imfwizard binary: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let webhook = webhook_url.map(|url| postkit::webhook::WebhookConfig {
+                url,
+                ..Default::default()
+            });
+
+            imfwizard_core::watch::watch_directory(
+                &dir,
+                std::time::Duration::from_secs(interval),
+                &|| false,
+                |master| {
+                    let Some(stem) = master.file_stem().and_then(|s| s.to_str()) else {
+                        tracing::error!("cannot read a file stem from {}", master.display());
+                        return;
+                    };
+                    let package_dir = output.join(stem);
+                    let log_path = output.join(format!("{stem}.log"));
+
+                    let audio = dir.join(format!("{stem}.{AUDIO_SIDECAR_EXTENSION}"));
+                    let subtitle = dir.join(format!("{stem}.{SUBTITLE_SIDECAR_EXTENSION}"));
+                    let audio = audio.is_file().then_some(audio);
+                    let subtitle = subtitle.is_file().then_some(subtitle);
+
+                    let mut arguments: Vec<std::ffi::OsString> = vec![
+                        "create".into(),
+                        "--title".into(),
+                        stem.into(),
+                        "--video".into(),
+                        master.into(),
+                        "--output".into(),
+                        package_dir.as_path().into(),
+                    ];
+                    if let Some(audio) = audio.as_deref() {
+                        arguments.push("--audio".into());
+                        arguments.push(audio.into());
+                    }
+                    if let Some(subtitle) = subtitle.as_deref() {
+                        arguments.push("--subtitle".into());
+                        arguments.push(subtitle.into());
+                    }
+                    arguments.extend(create_arguments.iter().map(std::ffi::OsString::from));
+
+                    let log = match std::fs::File::create(&log_path) {
+                        Ok(file) => file,
+                        Err(e) => {
+                            tracing::error!("cannot write {}: {e}", log_path.display());
+                            return;
+                        }
+                    };
+                    let log_for_stderr = match log.try_clone() {
+                        Ok(file) => file,
+                        Err(e) => {
+                            tracing::error!("cannot write {}: {e}", log_path.display());
+                            return;
+                        }
+                    };
+
+                    tracing::info!(
+                        "building {} from {}",
+                        package_dir.display(),
+                        master.display()
+                    );
+                    let started = std::time::Instant::now();
+                    let outcome = std::process::Command::new(&executable)
+                        .args(&arguments)
+                        .stdout(std::process::Stdio::from(log))
+                        .stderr(std::process::Stdio::from(log_for_stderr))
+                        .status();
+                    let elapsed_seconds = started.elapsed().as_secs_f64();
+
+                    let failure = match outcome {
+                        Ok(status) if status.success() => None,
+                        Ok(status) => Some(match status.code() {
+                            Some(code) => {
+                                format!("create exited {code}, log at {}", log_path.display())
+                            }
+                            None => format!(
+                                "create was killed by a signal, log at {}",
+                                log_path.display()
+                            ),
+                        }),
+                        Err(e) => Some(format!("could not run create: {e}")),
+                    };
+                    let sidecars = [audio.as_deref(), subtitle.as_deref()]
+                        .into_iter()
+                        .flatten();
+
+                    let Some(message) = failure else {
+                        let done = dir.join(DONE_DIRECTORY_NAME);
+                        move_aside(master, &done);
+                        for sidecar in sidecars {
+                            move_aside(sidecar, &done);
+                        }
+                        tracing::info!("built {} in {elapsed_seconds:.1} s", package_dir.display());
+                        post_event(
+                            webhook.as_ref(),
+                            "imp.created",
+                            stem,
+                            postkit::webhook::build_job_completed_payload(
+                                stem,
+                                &package_dir,
+                                elapsed_seconds,
+                            ),
+                        );
+                        return;
+                    };
+
+                    let failed = dir.join(FAILED_DIRECTORY_NAME);
+                    move_aside(master, &failed);
+                    for sidecar in sidecars {
+                        move_aside(sidecar, &failed);
+                    }
+                    tracing::error!("create failed for {stem}: see {}", log_path.display());
+                    post_event(
+                        webhook.as_ref(),
+                        "imp.failed",
+                        stem,
+                        postkit::webhook::build_job_failed_payload(stem, &message),
+                    );
+                },
+            );
         }
 
         Commands::Profiles => {
@@ -4116,6 +4398,93 @@ fn run() {
                 Err(e) => {
                     eprintln!("DV conversion failed: {e}");
                     std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Version { action } => {
+            use postkit::version_tracker::{DeliveryRecord, VersionQuery, VersionTracker};
+
+            fn open_tracker(db: &str) -> VersionTracker {
+                let mut tracker = VersionTracker::new();
+                if !tracker.open(std::path::Path::new(db)) {
+                    tracing::error!("Failed to open tracker database: {db}");
+                    std::process::exit(1);
+                }
+                tracker
+            }
+
+            match action {
+                VersionAction::Record {
+                    db,
+                    package_uuid,
+                    title,
+                    version,
+                    destination,
+                    method,
+                    verified,
+                } => {
+                    let tracker = open_tracker(&db);
+                    let timestamp = time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_default();
+                    let record = DeliveryRecord {
+                        package_uuid,
+                        title,
+                        version,
+                        destination,
+                        delivery_method: method,
+                        timestamp,
+                        verified,
+                    };
+                    if !tracker.record(&record) {
+                        tracing::error!("Failed to record delivery");
+                        std::process::exit(1);
+                    }
+                    println!("Recorded delivery of {}", record.package_uuid);
+                }
+
+                VersionAction::List {
+                    db,
+                    package_uuid,
+                    destination,
+                } => {
+                    let tracker = open_tracker(&db);
+                    let query = VersionQuery {
+                        package_uuid,
+                        destination,
+                        ..Default::default()
+                    };
+                    let records = tracker.query(&query);
+                    if records.is_empty() {
+                        println!("No deliveries recorded");
+                    }
+                    for record in &records {
+                        println!(
+                            "{}  {}  {}  -> {}  ({}, verified={})",
+                            record.timestamp,
+                            record.package_uuid,
+                            record.title,
+                            record.destination,
+                            record.delivery_method,
+                            record.verified
+                        );
+                    }
+                }
+
+                VersionAction::Export { db, output } => {
+                    let tracker = open_tracker(&db);
+                    let out = PathBuf::from(&output);
+                    let exported = if output.to_lowercase().ends_with(".csv") {
+                        tracker.export_csv(&out)
+                    } else {
+                        tracker.export_json(&out)
+                    };
+                    if !exported {
+                        tracing::error!("Failed to export delivery history");
+                        std::process::exit(1);
+                    }
+                    println!("Exported delivery history to {output}");
                 }
             }
         }

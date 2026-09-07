@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+### Changed
+- **`watch` builds an IMP from a master that lands in the folder**: it used to print filesystem events and build nothing. It takes `--output` and any `create` flags after `--`, waits for a dropped video file or frame folder to stop changing, runs `create` on it with the file stem as the title and a same named `.wav` and `.ttml` beside it as sound and subtitle, writes the job log beside the package, moves the source into `done/` or `failed/`, and posts `imp.created` or `imp.failed`. The sidecar subtitle is TTML because that is what `create --subtitle` packages, an SRT goes through `subtitle-convert` first.
+
 ### Removed
 - **`ingest` is gone**: it matched camera RAW (ARRIRAW, R3D, BRAW, Canon Cinema RAW Light, Sony X-OCN) by file name or MXF header and refused every match, and transcoded ProRes and DNxHR through ffmpeg. Camera RAW is graded and exported as a master before an IMP is built, and `create --video` already refuses a file ffmpeg cannot decode.
+
+### Added
+- **`version record|list|export` tracks deliveries**: the README named a version tracker the CLI did not have. It is postkit's SQLite tracker as dcpwizard exposes it, with `--db` defaulting to `deliveries.db` in the working directory.
 
 ## [1.2.0] - 2026-09-07
 

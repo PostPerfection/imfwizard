@@ -84,7 +84,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Workflow & Automation
 - **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
-- **Watch folder**, print filesystem events for a directory
+- **Watch folder** (`watch <dir> --output <dir> [--webhook-url <url>] [--interval <seconds>] [-- <create flags>]`), build an IMP from every video file or frame folder that lands in the watched directory, once it stops changing. The file stem is the title, a same-named `.wav` and `.ttml` beside it become the sound and subtitle, the job log is written beside the package, the source moves into `done/` or `failed/` and a webhook gets `imp.created` or `imp.failed`
 - **EDL conform**, import CMX3600/FCP7 edit decisions to build a CPL timeline
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
 - **Partial restore**, extract tracks from existing IMPs back to raw files (asdcp-unwrap)
@@ -127,7 +127,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **DCDM creation**, Digital Cinema Distribution Master (X'Y'Z' 12/16-bit) as intermediate format
 - **Visible watermark burn-in**, burn operator/session text into an image sequence
 - **Trailer packaging**, ratings cards (MPAA/BBFC/FSK), green/red band, countdown leaders
-- **Content version tracker**, SQLite database tracking version history and delivery destinations
+- **Content version tracker** (`version record|list|export`), SQLite database tracking version history and delivery destinations, with `--db` defaulting to `deliveries.db` in the working directory
 - **Accessibility compliance**, verify AD/HI/SL tracks against CVAA, EAA, AODA, Ofcom standards
 
 ## Installation
