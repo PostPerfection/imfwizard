@@ -105,7 +105,7 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Setup grok
-        uses: PostPerfection/setup-grok@v1
+        uses: PostPerfection/setup-grok@v1.1.0
         with:
           grok-ref: v20.4.6
 
@@ -187,7 +187,7 @@ jobs:
           cargo install cargo-deb
 
       - name: Setup grok
-        uses: PostPerfection/setup-grok@v1
+        uses: PostPerfection/setup-grok@v1.1.0
         with:
           grok-ref: v20.4.6
 
@@ -287,7 +287,7 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Setup grok
-        uses: PostPerfection/setup-grok@v1
+        uses: PostPerfection/setup-grok@v1.1.0
         with:
           grok-ref: v20.4.6
 
