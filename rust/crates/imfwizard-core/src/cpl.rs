@@ -165,7 +165,8 @@ mod tests {
         let path = dir.path().join("CPL_test.xml");
         let hdr = crate::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None)
             .unwrap()
-            .with_content_light_levels(Some(993), Some(362));
+            .with_content_light_levels(Some(993), Some(362))
+            .unwrap();
         let comp = Composition {
             title: "Test".into(),
             hdr: Some(hdr),
@@ -365,7 +366,8 @@ mod tests {
             Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
         )
         .unwrap()
-        .with_content_light_levels(Some(993), Some(362));
+        .with_content_light_levels(Some(993), Some(362))
+        .unwrap();
         let comp = Composition {
             title: "HDR Test".into(),
             content_kind: "feature".into(),

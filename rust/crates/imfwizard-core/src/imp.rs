@@ -416,7 +416,8 @@ mod tests {
             Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
         )
         .unwrap()
-        .with_content_light_levels(Some(993), Some(362));
+        .with_content_light_levels(Some(993), Some(362))
+        .unwrap();
         let opts = ImpOptions {
             output_dir: out.clone(),
             compositions: vec![Composition {

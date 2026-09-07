@@ -87,7 +87,8 @@ fn a_video_create_wraps_its_picture_during_the_encode() {
         Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
     )
     .unwrap()
-    .with_content_light_levels(Some(993), Some(362));
+    .with_content_light_levels(Some(993), Some(362))
+    .unwrap();
 
     let (encode, track) = encode_and_wrap_picture(
         &video,
