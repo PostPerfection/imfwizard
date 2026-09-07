@@ -47,6 +47,9 @@ pub struct SourceSettings {
     pub audio_delay_ms: i64,
     #[serde(default)]
     pub source_colourspace: Option<String>,
+    /// The `--hdr` preset the picture is packaged as. None or empty is SDR.
+    #[serde(default)]
+    pub hdr: Option<String>,
     #[serde(default)]
     pub trim_start: Option<String>,
     #[serde(default)]
@@ -112,6 +115,13 @@ pub struct SourceSettings {
 }
 
 impl SourceSettings {
+    fn hdr(&self) -> Result<Option<imfwizard_core::hdr_wcg::HdrWcg>, String> {
+        match self.hdr.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(preset) => imfwizard_core::hdr_wcg::HdrWcg::from_flags(preset, None).map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// Read the picture fields into the shared options.
     fn picture(&self) -> Result<imfwizard_core::source_picture::SourcePictureOptions, String> {
         let rotation = match self.rotate.as_deref().filter(|value| !value.is_empty()) {
@@ -202,6 +212,10 @@ pub struct JobConfig {
     quality_psnr: Option<f64>,
     edits: imfwizard_core::source_edits::SourceEdits,
     source_colour: postkit::encode::SourceColour,
+    /// The HDR/WCG metadata every composition's picture is packaged with. A job
+    /// queued before the setting existed has none.
+    #[serde(default)]
+    hdr: Option<imfwizard_core::hdr_wcg::HdrWcg>,
     /// Frames to hold a still input for; None when the input is not a still.
     still_frames: Option<u64>,
     burn_subtitle: Option<PathBuf>,
@@ -320,6 +334,7 @@ pub async fn submit_job(
             None => imfwizard_core::source_colourspace::APP2E_SOURCE_SPACE,
         },
     )?;
+    let hdr = settings.hdr()?;
     let frames_from_spec = |spec: &Option<String>| match spec.as_deref() {
         Some(spec) => imfwizard_core::duration_spec::parse_duration_frames(spec, fps_num, fps_den),
         None => Ok(0),
@@ -390,7 +405,7 @@ pub async fn submit_job(
             burn_style: burn_style.clone(),
             picture_options: picture_options.clone(),
             source_colour: source_colour.clone(),
-            hdr: None,
+            hdr: hdr.clone(),
             still_frames,
         };
         imfwizard_core::preflight::check_before_encode(&plan)?;
@@ -435,6 +450,7 @@ pub async fn submit_job(
         quality_psnr,
         edits,
         source_colour,
+        hdr,
         still_frames,
         burn_subtitle,
         burn_subtitle_font,
@@ -1201,7 +1217,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             picture_mxf,
             audio_files,
             timed_text_files: source.timed_text_files,
-            hdr: None,
+            hdr: job.hdr.clone(),
         });
     }
 
@@ -1284,8 +1300,37 @@ fn emit_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_encode_breakdown, format_stage_timing};
+    use super::{format_encode_breakdown, format_stage_timing, SourceSettings};
     use std::time::Duration;
+
+    fn settings(hdr: Option<&str>) -> SourceSettings {
+        SourceSettings {
+            hdr: hdr.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    // the Properties panel's HDR control carries the preset the CLI takes as --hdr
+    #[test]
+    fn the_hdr_control_builds_the_preset_the_cli_builds() {
+        let hlg = settings(Some("hlg-bt2020")).hdr().unwrap().unwrap();
+        assert_eq!(
+            hlg.transfer,
+            imfwizard_core::hdr_wcg::TRANSFER_CHARACTERISTIC_HLG
+        );
+        assert!(hlg.is_hlg());
+        assert_eq!(
+            settings(Some("pq-p3d65")).hdr().unwrap(),
+            Some(imfwizard_core::hdr_wcg::HdrWcg::from_flags("pq-p3d65", None).unwrap())
+        );
+
+        // the SDR option sends an empty string, and an older job sends nothing
+        assert_eq!(settings(Some("")).hdr(), Ok(None));
+        assert_eq!(settings(None).hdr(), Ok(None));
+
+        let error = settings(Some("hlg-p3d65")).hdr().unwrap_err();
+        assert!(error.contains("hlg-bt2020"), "{error}");
+    }
 
     #[test]
     fn stage_timing_reads_as_minutes_and_seconds() {

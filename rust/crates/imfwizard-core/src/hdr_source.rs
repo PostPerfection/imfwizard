@@ -8,6 +8,8 @@ use crate::hdr_wcg::{HdrWcg, TRANSFER_CHARACTERISTIC_HLG, presets_with_transfer}
 const PQ_TRANSFER_TAG: &str = "smpte2084";
 const HLG_TRANSFER_TAG: &str = "arib-std-b67";
 const DOLBY_VISION_SIDE_DATA: &str = "DOVI";
+// both front ends read these refusals, so each names the flag and the control that carry the preset
+const PRESET_CONTROLS: &str = "--hdr, the HDR panel control in the GUI";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceHdr {
@@ -100,7 +102,7 @@ pub fn check_source_matches_preset(source: SourceHdr, hdr: Option<&HdrWcg>) -> R
         if source.is_hdr() {
             return Err(format!(
                 "the source carries {}, which --hdr {} declares: without it the picture is \
-                 written as Rec.709 SDR",
+                 written as Rec.709 SDR ({PRESET_CONTROLS})",
                 source.describe(),
                 source.presets()
             ));
@@ -116,7 +118,8 @@ pub fn check_source_matches_preset(source: SourceHdr, hdr: Option<&HdrWcg>) -> R
         return Ok(());
     }
     Err(format!(
-        "the source carries {} and --hdr {} declares {}: package it as --hdr {} instead",
+        "the source carries {} and --hdr {} declares {}: package it as --hdr {} instead \
+         ({PRESET_CONTROLS})",
         source.describe(),
         hdr.preset_name(),
         if hdr.is_hlg() { "HLG" } else { "PQ" },
@@ -209,6 +212,11 @@ mod tests {
 
         let error = check_source_matches_preset(SourceHdr::DolbyVision, None).unwrap_err();
         assert!(error.contains("Dolby Vision RPU"), "{error}");
+        // a GUI user has no flags, so the refusal names their control too
+        assert!(
+            error.contains("the HDR panel control in the GUI"),
+            "{error}"
+        );
     }
 
     // an untagged source says nothing about its colour, so the preset is the only claim

@@ -122,7 +122,7 @@ refreshButtonTooltips();
 const PREFS_KEY = "imfwizard-preferences";
 const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
-  bandwidth: 250, colourspace: "Rec.709", hdr: "SDR",
+  bandwidth: 250, colourspace: "Rec.709",
   signingCert: "", signingKey: "", outputDir: "",
   showHintsBeforeBuild: true, gpu: false,
   gpuLicense: "", gpuRegistrationUrl: "",
@@ -183,7 +183,7 @@ function loadSettings() {
   const map = {
     "set-profile": prefs.profile, "set-creator": prefs.creator,
     "set-language": prefs.language, "set-bandwidth": prefs.bandwidth,
-    "set-colourspace": prefs.colourspace, "set-hdr": prefs.hdr,
+    "set-colourspace": prefs.colourspace,
     "set-signing-cert": prefs.signingCert, "set-signing-key": prefs.signingKey,
     "set-output-dir": prefs.outputDir,
     "set-gpu-license": prefs.gpuLicense,
@@ -235,7 +235,6 @@ document.getElementById("settings-form")?.addEventListener("submit", async (e) =
     language: document.getElementById("set-language")?.value,
     bandwidth: parseInt(document.getElementById("set-bandwidth")?.value) || 250,
     colourspace: document.getElementById("set-colourspace")?.value,
-    hdr: document.getElementById("set-hdr")?.value,
     signingCert: document.getElementById("set-signing-cert")?.value,
     signingKey: document.getElementById("set-signing-key")?.value,
     outputDir: document.getElementById("set-output-dir")?.value,
@@ -858,6 +857,7 @@ function readSourceSettings() {
   return {
     audioDelayMs: parseInt(document.getElementById("prop-audio-delay")?.value) || 0,
     sourceColourspace: document.getElementById("prop-source-colourspace")?.value || "rec709",
+    hdr: document.getElementById("prop-hdr")?.value || null,
     trimStart: duration("prop-trim-start", "Trim from start"),
     trimEnd: duration("prop-trim-end", "Trim from end"),
     stillLength: duration("prop-still-length", "Still length"),

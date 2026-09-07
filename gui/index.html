@@ -228,6 +228,15 @@
                     </select>
                   </div>
                   <div class="prop-field">
+                    <label for="prop-hdr">HDR (ST 2067-21)</label>
+                    <select id="prop-hdr">
+                      <option value="" selected>SDR (Rec. 709)</option>
+                      <option value="pq-bt2020">PQ BT.2020 (pq-bt2020)</option>
+                      <option value="pq-p3d65">PQ P3-D65 (pq-p3d65)</option>
+                      <option value="hlg-bt2020">HLG BT.2020 (hlg-bt2020)</option>
+                    </select>
+                  </div>
+                  <div class="prop-field">
                     <label for="prop-bandwidth">Bitrate (Mbps)</label>
                     <input type="number" id="prop-bandwidth" value="250" min="50" max="1000">
                   </div>
@@ -756,14 +765,6 @@
                     <option value="Rec.709">Rec.709</option>
                     <option value="P3-D65">P3-D65</option>
                     <option value="Rec.2020">Rec.2020</option>
-                  </select>
-                </div>
-                <div class="prop-field">
-                  <label for="set-hdr">HDR Mode</label>
-                  <select id="set-hdr">
-                    <option value="SDR" selected>SDR</option>
-                    <option value="HLG">HLG</option>
-                    <option value="PQ">PQ</option>
                   </select>
                 </div>
                 <div class="prop-field">

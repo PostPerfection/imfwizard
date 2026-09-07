@@ -116,6 +116,7 @@ CREATE_CONTROLS=(
   "prop-rotate=--rotate"
   "prop-flip=--flip"
   "prop-raster=--raster"
+  "prop-hdr=--hdr"
   "prop-audio-map=--audio-map"
 )
 

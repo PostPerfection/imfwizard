@@ -349,6 +349,11 @@ colour systems only, so either flag with `hlg-bt2020` is refused. A Dolby Vision
 8.1 source fills them from its RPU when neither flag is given, and profile 5 is refused
 by name.
 
+An `hlg-bt2020` CPL claims the 2020 edition of ST 2067-21 in its
+ApplicationIdentification, `http://www.smpte-ra.org/ns/2067-21/2020`, because COLOR.8 was
+not in the 2016 edition the PQ presets claim. The GUI takes the same three presets in the
+Properties panel's HDR control.
+
 The picture's own signalling has to agree with the preset. A source tagged PQ
 (`smpte2084`) under `hlg-bt2020`, or one tagged HLG (`arib-std-b67`) under a PQ preset, is
 refused naming both, and an HDR source (either tag, or a Dolby Vision RPU) packaged
