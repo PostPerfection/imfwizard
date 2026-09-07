@@ -6,7 +6,7 @@
 
 Interoperable Master Format (IMF) package creator, CLI tool and desktop GUI. Written in Rust.
 
-Version 1.1 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
+Version 1.2 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
 
 ## Overview
 
@@ -27,6 +27,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
+- **CPU and GPU encoding**, CPU encoding uses the available cores by default. `--gpu` or the desktop GPU setting enables Grok's accelerator plugin for JPEG 2000 encode and decode. An explicit `--gpu` fails if the plugin cannot start, while a saved desktop preference warns and continues on the CPU. `--no-gpu` forces the CPU
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
@@ -105,7 +106,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Keyboard shortcuts**, Ctrl+N/O/B/P/I, Ctrl+Shift+S, Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
-- **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through grok, in process, at 2K real time on the CPU and on the device when the GPU setting is on. Everything else plays through mpv
+- **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through Grok in process. A CPU worker pool handles software decode. GPU mode uses device decode plus the App 2E tone map and gamut conversion. Everything else plays through mpv
+- **GPU encoding toggle**, enables Grok acceleration for the whole app and stores the license and registration URL when the plugin requires them. The job log records whether the device started and how many frames it encoded
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
@@ -147,7 +149,7 @@ The CLI binary carries everything but the Grok JPEG 2000 codec, which it links d
 Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
 
 ```bash
-git clone --recurse-submodules --branch v20.4.4 https://github.com/GrokImageCompression/grok.git
+git clone --recurse-submodules --branch v20.4.6 https://github.com/GrokImageCompression/grok.git
 cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/bin/grok"
 cmake --build grok/build --parallel
 cmake --install grok/build
@@ -230,6 +232,16 @@ pnpm tauri build
 ```
 
 The built app will be in `gui/src-tauri/target/release/bundle/`.
+
+Grok looks for `libgrokj2k_plugin` in the directory `GRK_PLUGIN_PATH` names, then in the working directory, then beside the executable. It does not search `LD_LIBRARY_PATH` or `PATH` for the plugin. The codec library itself still needs the loader path:
+
+```bash
+export LD_LIBRARY_PATH=/path/to/grok/lib64
+export GRK_PLUGIN_PATH=/path/to/grok/lib64
+imfwizard --gpu create --title "My Film" --video master.mov --output ./imp
+```
+
+The desktop GPU setting applies to encode and preview decode. Its job log at `<output>/imfwizard.log` prints `Accelerator: requested, active` and `[ENCODE] Frames on the device: N of M` when the plugin ran. Use `--no-gpu` to override a saved GPU preference for one CLI run.
 
 ## Usage
 

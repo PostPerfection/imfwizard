@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IMF Wizard: IMF Packages for Streaming Deliveries</title>
-    <meta name="description" content="Build validated IMF App 2E packages for streaming deliveries to Netflix, Disney+, Amazon, and Apple. Crop, burn subtitles, preview, and QC. Free, open-source desktop app and command-line tool.">
+    <meta name="description" content="Build validated IMF App 2E packages for streaming delivery. Encode and preview JPEG 2000 on the CPU or GPU, crop, burn subtitles, export ProRes, and run QC. Free, open-source desktop app and command-line tool.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -392,7 +392,7 @@
 
 <section class="hero">
     <h1>Build IMF packages for<br><span>streaming deliveries</span></h1>
-    <p>Package finished masters into validated IMF deliverables for Netflix, Disney+, Amazon, and Apple, right from a desktop app.</p>
+    <p>Encode finished masters on the CPU or GPU and package them into validated IMF deliverables for Netflix, Disney+, Amazon, and Apple.</p>
     <div class="hero-buttons">
         <a href="#download" class="btn btn-primary btn-lg">Download for free</a>
         <a href="#features" class="btn btn-secondary btn-lg">See what it does</a>
@@ -449,6 +449,11 @@
             <p>One choice sets the right bitrate and constraints for Netflix, Disney+, Amazon, Apple, HBO, broadcast, and archival, so you're not cross-checking spec sheets by hand. Or name a bitrate directly.</p>
         </div>
         <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
+            <h3>CPU or GPU JPEG 2000</h3>
+            <p>Encode App 2E picture through Grok on all available CPU cores, or enable its accelerator plugin from the app or with <code>--gpu</code>. The job log records whether the device started and how many frames it encoded.</p>
+        </div>
+        <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
             <h3>Supplemental packages</h3>
             <p>Re-deliver only what changed. Swap a dub or add a subtitle track and ship a supplemental package that references the original by UUID, instead of re-sending the whole title.</p>
@@ -456,7 +461,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">🎬</div>
             <h3>IMF to DCP</h3>
-            <p>Rewrap a single-composition package into a Digital Cinema Package for theatrical, without re-encoding the picture from scratch.</p>
+            <p>Convert a single-composition IMP for theatrical delivery. Existing DCI-profile picture is rewrapped without an encode. App 2E picture is decoded from RGB, converted to cinema X'Y'Z', and re-encoded under a DCI profile.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">✅</div>
@@ -467,6 +472,11 @@
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">✂️</div>
             <h3>Crop, trim, and stills</h3>
             <p>Crop, auto-crop, fill, deinterlace, denoise, rotate, and flip on the way in, then fit the result into an App 2E raster. Trim head and tail, hold a still for a duration, or shift the sound against the picture.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(167,139,250,0.15);">🎞️</div>
+            <h3>ProRes delivery master</h3>
+            <p>Export an IMP's picture and sound as a ProRes 4444 movie, fitted into a named 2K or 4K container without changing the package.</p>
         </div>
     </div>
 
@@ -489,7 +499,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">▶️</div>
             <h3>Source and package preview</h3>
-            <p>Play the source or the finished IMP in the app. Crop bands follow the Picture panel, Sub loads the packaged timed text, and the header carries a safe-area box, an aspect mask, a centre cross, a thirds grid, decode scale, and a HUD.</p>
+            <p>Play the source or the finished IMP in the app. JPEG 2000 decodes in process through a CPU worker pool, or on the device when GPU mode is active. The App 2E tone map and gamut conversion use the same path. Other sources use libmpv.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">📋</div>
@@ -500,6 +510,11 @@
 
     <h3 class="group-title">HDR and immersive audio</h3>
     <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(74,222,128,0.15);">🎨</div>
+            <h3>Wide-gamut source conversion</h3>
+            <p>Convert P3-D65, Rec.2020, or LogC sources to the Rec.709 RGB declared by an SDR App 2E track during the encode. A 3D LUT can supply another source-to-Rec.709 transform.</p>
+        </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🌈</div>
             <h3>HDR/WCG essence metadata</h3>
@@ -548,7 +563,7 @@
 
     <div style="display:flex; gap:24px; justify-content:center; margin-bottom:1.5rem; flex-wrap:wrap;">
         <span class="compare-price free">IMF Wizard: Free &amp; Open Source</span>
-        <span class="compare-price paid">easyDCP IMF Studio: &euro;138/mo or &euro;2,998</span>
+        <span class="compare-price paid">easyDCP IMF Studio: Commercial</span>
     </div>
 
     <div style="overflow-x:auto;">
@@ -570,6 +585,7 @@
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Subtitle burn-in during encode</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Preview playback with QC overlays</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>GPU JPEG 2000 encode and preview decode</td><td class="yes">&#10003;</td><td class="yes">&#10003; (Windows)</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard advantages</td></tr>
             <tr><td>HDR10+ metadata packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
@@ -581,8 +597,6 @@
             <tr><td>Pre-build check and delivery hints</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Linux support</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Free and open source (AGPL)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
-            <tr><td colspan="3" style="color:var(--text-tertiary);font-weight:700;padding-top:20px;">easyDCP exclusives</td></tr>
-            <tr><td>GPU acceleration</td><td class="no">Planned</td><td class="yes">&#10003; (Windows)</td></tr>
         </tbody>
     </table>
     </div>
@@ -597,8 +611,8 @@
 <span class="comment"># Raise every refusal and hint before committing to the encode</span><br>
 <span class="cmd">$</span> imfwizard create <span class="flag">--title</span> <span class="val">"My Feature"</span> <span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--check</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
 <br>
-<span class="comment"># Build a Netflix delivery from a finished master</span><br>
-<span class="cmd">$</span> imfwizard create \<br>
+<span class="comment"># Build a Netflix delivery from a finished master on the Grok accelerator</span><br>
+<span class="cmd">$</span> imfwizard <span class="flag">--gpu</span> create \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--title</span> <span class="val">"My Feature"</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--audio</span> <span class="val">mix.wav</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--profile</span> <span class="val">netflix</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
