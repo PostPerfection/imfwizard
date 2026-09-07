@@ -541,7 +541,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">📂</div>
             <h3>Watch folders</h3>
-            <p>Point it at an incoming folder and print a line for every filesystem event, so a script or farm can kick off the next step.</p>
+            <p>Point it at an incoming folder and every master that lands there is built into its own IMP, with a matching .wav or .ttml beside it joining the build. Each master then moves to done or failed, and a webhook can carry the result on.</p>
         </div>
     </div>
 </section>
@@ -601,8 +601,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--audio</span> <span class="val">mix.wav</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--profile</span> <span class="val">netflix</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
 <br>
-<span class="comment"># Print filesystem events as files land in an incoming folder</span><br>
-<span class="cmd">$</span> imfwizard watch <span class="val">/incoming/</span><br>
+<span class="comment"># Build an IMP from every master that lands in an incoming folder</span><br>
+<span class="cmd">$</span> imfwizard watch <span class="val">/incoming/</span> <span class="flag">--output</span> <span class="val">./packages/</span> <span class="flag">--webhook-url</span> <span class="val">https://pipeline/hook</span><br>
 <br>
 <span class="comment"># Serve the REST API for a render farm or pipeline</span><br>
 <span class="cmd">$</span> imfwizard serve <span class="flag">--bind</span> <span class="val">0.0.0.0:9090</span>
