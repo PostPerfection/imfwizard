@@ -504,8 +504,9 @@ enum Commands {
         #[arg(long, default_value = "1")]
         fps_den: u32,
 
-        /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020 or
-        /// pq-p3d65. Writes the transfer/colour ULs into the MXF and CPL.
+        /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020,
+        /// pq-p3d65 or hlg-bt2020. Writes the transfer/colour ULs into the MXF
+        /// and CPL, and has to agree with what the source signals.
         #[arg(long)]
         hdr: Option<String>,
 
@@ -516,12 +517,12 @@ enum Commands {
         mastering_display: Option<String>,
 
         /// Maximum content light level in nits, written as a ST 2067-21 CPL
-        /// ExtensionProperty. Requires --hdr.
+        /// ExtensionProperty. Requires a PQ --hdr preset.
         #[arg(long = "max-cll")]
         max_cll: Option<u16>,
 
         /// Maximum frame-average light level in nits, same placement as
-        /// --max-cll. Requires --hdr.
+        /// --max-cll. Requires a PQ --hdr preset.
         #[arg(long = "max-fall")]
         max_fall: Option<u16>,
 
@@ -1749,19 +1750,11 @@ fn run() {
                 }
             }
             // build the HDR/WCG metadata up front so a bad preset/string fails fast
-            let hdr = match hdr.as_deref() {
-                Some(preset) => match imfwizard_core::hdr_wcg::HdrWcg::from_flags(
-                    preset,
-                    mastering_display.as_deref(),
-                ) {
-                    Ok(h) => Some(h.with_content_light_levels(max_cll, max_fall)),
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        std::process::exit(1);
-                    }
-                },
-                None => None,
-            };
+            let hdr = hdr.as_deref().map(|preset| {
+                imfwizard_core::hdr_wcg::HdrWcg::from_flags(preset, mastering_display.as_deref())
+                    .and_then(|hdr| hdr.with_content_light_levels(max_cll, max_fall))
+                    .unwrap_or_else(|e| fail(e))
+            });
             // parse the accessibility role up front so a bad value fails fast
             let audio_role = match audio_role.as_deref() {
                 Some(s) => match imfwizard_core::imp::AudioRole::from_flag(s) {
@@ -1892,6 +1885,13 @@ fn run() {
                 still_frames,
             };
             imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
+
+            // a Dolby Vision source carries its own light levels, so the flags can be left off
+            let hdr = imfwizard_core::hdr_source::resolve(
+                video.as_deref().map(std::path::Path::new),
+                hdr,
+            )
+            .unwrap_or_else(|e| fail(e));
 
             // the audio level hint measures the whole WAV, minutes on a feature
             let hints_pass = std::thread::spawn(move || imfwizard_core::hints::gather_hints(&plan));

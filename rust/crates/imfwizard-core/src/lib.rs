@@ -23,6 +23,7 @@ pub mod transcode;
 pub mod aces;
 pub mod dolby_vision;
 pub mod hdr;
+pub mod hdr_source;
 pub mod hdr_wcg;
 pub mod source_colourspace;
 

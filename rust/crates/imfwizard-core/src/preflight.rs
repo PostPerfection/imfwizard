@@ -86,6 +86,10 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
         }
         crate::source_colourspace::reject_on_precompressed_picture(picture, &plan.source_colour)?;
         crate::source_picture::reject_on_precompressed_picture(picture, &plan.picture_options)?;
+        crate::hdr_source::check_source_matches_preset(
+            crate::hdr_source::probe(picture)?,
+            plan.hdr.as_ref(),
+        )?;
     }
     check_burn(plan)?;
     check_app2e_picture(plan)?;
