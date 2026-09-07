@@ -1018,6 +1018,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     rsiz: still_rsiz,
                     colour_transform: job.source_colour.frame_transform()?,
                     burn: subtitle_burn.clone(),
+                    watermark: None,
                     out_dir: &held,
                 })?;
                 log_to(

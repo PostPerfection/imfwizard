@@ -1020,25 +1020,6 @@ enum Commands {
         json: bool,
     },
 
-    /// Ingest camera raw media
-    Ingest {
-        /// Camera card/media directory
-        #[arg(short, long)]
-        source: String,
-
-        /// Output directory
-        #[arg(short, long)]
-        output: String,
-
-        /// Output format (dpx, tiff, exr, prores)
-        #[arg(short, long, default_value = "dpx")]
-        format: String,
-
-        /// Colour space (ACES, Rec.709, P3, LogC)
-        #[arg(short, long, default_value = "ACES")]
-        colour_space: String,
-    },
-
     /// Extract a frame from video/MXF as image
     #[command(name = "frame-extract")]
     FrameExtract {
@@ -1912,6 +1893,7 @@ fn run() {
                     rsiz,
                     colour_transform: source_colour.frame_transform().unwrap_or_else(|e| fail(e)),
                     burn: build_subtitle_burn(fps),
+                    watermark: None,
                     out_dir: &held,
                 })
                 .unwrap_or_else(|e| fail(e));
@@ -2991,26 +2973,6 @@ fn run() {
                     );
                 }
             }
-        }
-
-        Commands::Ingest {
-            source,
-            output,
-            format,
-            colour_space,
-        } => {
-            let opts = postkit::ingest::IngestOptions {
-                source: PathBuf::from(&source),
-                output_dir: PathBuf::from(output),
-                output_format: format,
-                colour_space,
-                ..Default::default()
-            };
-            let exit = postkit::ingest::ingest(&opts);
-            if exit != 0 {
-                std::process::exit(exit);
-            }
-            println!("Ingest complete");
         }
 
         Commands::FrameExtract {

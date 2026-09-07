@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+- **`ingest` is gone**: it matched camera RAW (ARRIRAW, R3D, BRAW, Canon Cinema RAW Light, Sony X-OCN) by file name or MXF header and refused every match, and transcoded ProRes and DNxHR through ffmpeg. Camera RAW is graded and exported as a master before an IMP is built, and `create --video` already refuses a file ffmpeg cannot decode.
+
 ## [1.2.0] - 2026-09-07
 
 ### Changed
