@@ -385,6 +385,8 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         essence_descriptors: Vec::new(),
         max_cll: None,
         max_fall: None,
+        // a supplement carries no picture colour of its own, and neither does the OV it parsed
+        app2e_edition: postkit::packaging::App2eEdition::default(),
     };
     let cpl_path = out.join(format!("CPL_{cpl_uuid}.xml"));
     if let Err(e) = std::fs::write(&cpl_path, cpl.to_xml()) {

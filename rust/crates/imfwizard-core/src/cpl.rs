@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use postkit::packaging::{ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind, escape_xml};
+use postkit::packaging::{
+    App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind, escape_xml,
+};
 
 use crate::MxfTrackFile;
 use crate::imp::{AudioRole, Composition, ImpOptions};
@@ -94,6 +96,11 @@ pub fn write_cpl(
         essence_descriptors: descriptors,
         max_cll: comp.hdr.as_ref().and_then(|h| h.max_cll),
         max_fall: comp.hdr.as_ref().and_then(|h| h.max_fall),
+        // COLOR.8 exists from the 2020 edition on, so an HLG picture cannot claim 2016
+        app2e_edition: match comp.hdr.as_ref().is_some_and(|hdr| hdr.is_hlg()) {
+            true => App2eEdition::Edition2020,
+            false => App2eEdition::Edition2016,
+        },
     };
 
     std::fs::write(path, cpl.to_xml())
@@ -154,6 +161,38 @@ mod tests {
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<IssueDate>"));
         assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/schemas/2067-21/2016</cc:ApplicationIdentification>"));
+    }
+
+    // COLOR.8 arrived in the 2020 edition, and Photon picks its constraints validator
+    // off this string
+    #[test]
+    fn an_hlg_composition_claims_the_2020_edition() {
+        let dir = tempfile::tempdir().unwrap();
+        let identification = |preset: &str| {
+            let path = dir.path().join(format!("CPL_{preset}.xml"));
+            let comp = Composition {
+                title: "Test".into(),
+                hdr: Some(crate::hdr_wcg::HdrWcg::from_flags(preset, None).unwrap()),
+                ..Default::default()
+            };
+            write_cpl(&path, "cpl", &ImpOptions::default(), &comp, &[]).unwrap();
+            let xml = std::fs::read_to_string(&path).unwrap();
+            let start = xml.find("<cc:ApplicationIdentification>").unwrap();
+            let end = xml.find("</cc:ApplicationIdentification>").unwrap();
+            xml[start + "<cc:ApplicationIdentification>".len()..end].to_string()
+        };
+        assert_eq!(
+            identification("hlg-bt2020"),
+            "http://www.smpte-ra.org/ns/2067-21/2020"
+        );
+        assert_eq!(
+            identification("pq-bt2020"),
+            "http://www.smpte-ra.org/schemas/2067-21/2016"
+        );
+        assert_eq!(
+            identification("pq-p3d65"),
+            "http://www.smpte-ra.org/schemas/2067-21/2016"
+        );
     }
 
     /// ST 2067-21 carries MaxCLL/MaxFALL in the CPL ExtensionProperties, not on the
