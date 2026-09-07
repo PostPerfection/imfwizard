@@ -3,12 +3,43 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      project_version: ${{ steps.verify.outputs.project_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        id: verify
+        shell: bash
+        run: |
+          workspace_version=$(awk '/^\[workspace.package\]/{found=1; next} /^\[/{found=0} found && /^version = / {gsub(/[" ]/, "", $3); print $3; exit}' rust/Cargo.toml)
+          desktop_version=$(jq -r .version gui/src-tauri/tauri.conf.json)
+          frontend_version=$(jq -r .version gui/package.json)
+
+          release_version="$workspace_version"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            release_version="${GITHUB_REF_NAME#v}"
+          fi
+
+          for version in "$workspace_version" "$desktop_version" "$frontend_version"; do
+            if [ "$version" != "$release_version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match project version $version"
+              exit 1
+            fi
+          done
+
+          echo "project_version=$workspace_version" >> "$GITHUB_OUTPUT"
+
+  cli:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +58,7 @@ jobs:
             binary: imfwizard.exe
 
     runs-on: ${{ matrix.os }}
-    name: Build (${{ matrix.name }})
+    name: CLI (${{ matrix.name }})
 
     steps:
       - name: Enable long paths (Windows)
@@ -46,11 +77,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libxml2-dev \
-            libssl-dev \
-            libxerces-c-dev
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -68,8 +95,6 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $env:VCPKG_BUILD_TYPE="release"
-          # vcpkg reads curl 56 and 503 off github's archive host as permanent and
-          # refuses to retry the source download, so retry the whole install
           for ($attempt = 1; $attempt -le 5; $attempt++) {
             vcpkg install libxml2 openssl xerces-c --triplet x64-windows
             if ($LASTEXITCODE -eq 0) { break }
@@ -110,11 +135,31 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "rust/target/release/${{ matrix.binary }}" "dist/"
-          # the exe links grokj2k.dll at load time, so ship it alongside
           Copy-Item "$env:GITHUB_WORKSPACE/grok-install/bin/grokj2k.dll" "dist/"
           Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"
 
-      - name: Upload artifact
+      - name: Test packaged CLI (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir cli-test
+          tar -xzf ${{ matrix.artifact }}.tar.gz -C cli-test
+          cli-test/${{ matrix.binary }} --version | grep -F "${{ needs.version.outputs.project_version }}"
+          cli-test/${{ matrix.binary }} --help >/dev/null
+
+      - name: Test packaged CLI (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Expand-Archive "${{ matrix.artifact }}.zip" -DestinationPath cli-test
+          $version = "${{ needs.version.outputs.project_version }}"
+          $output = & "cli-test/${{ matrix.binary }}" --version
+          if ($LASTEXITCODE -ne 0 -or $output -notmatch [regex]::Escape($version)) {
+            throw "Packaged CLI version check failed: $output"
+          }
+          & "cli-test/${{ matrix.binary }}" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI help check failed" }
+
+      - name: Upload CLI package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -122,9 +167,10 @@ jobs:
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
 
-  deb:
+  cli-deb:
+    needs: version
     runs-on: ubuntu-24.04
-    name: Build .deb
+    name: CLI (.deb)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -151,26 +197,258 @@ jobs:
           OPENSSL_STATIC: "1"
         run: cargo deb -p imfwizard-cli
 
-      - name: Upload .deb artifact
+      - name: Test installed CLI
+        shell: bash
+        run: |
+          package=$(realpath "$(find rust/target/debian -name '*.deb' -print -quit)")
+          sudo apt-get install -y "$package"
+          imfwizard --version | grep -F "${{ needs.version.outputs.project_version }}"
+          imfwizard --help >/dev/null
+
+      - name: Upload .deb package
         uses: actions/upload-artifact@v4
         with:
-          name: imfwizard-deb
+          name: imfwizard-cli-deb
           path: rust/target/debian/*.deb
 
-  release:
-    needs: [build, deb]
-    runs-on: ubuntu-latest
+  gui:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+            bundles: deb,rpm,appimage
+          - os: macos-14
+            name: macos
+            bundles: dmg
+          - os: windows-2022
+            name: windows
+            bundles: msi,nsis
+
+    runs-on: ${{ matrix.os }}
+    name: GUI (${{ matrix.name }})
+
     steps:
-      - name: Download all artifacts
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        run: git config --system core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d
+        with:
+          version: 11.8.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: gui/pnpm-lock.yaml
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm xvfb xdotool
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake pkg-config libxml2 openssl@3 xerces-c
+          OPENSSL_PREFIX=$(brew --prefix openssl@3)
+          echo "OPENSSL_DIR=$OPENSSL_PREFIX" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=$OPENSSL_PREFIX/lib" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=$OPENSSL_PREFIX/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$OPENSSL_PREFIX/lib:$(brew --prefix xerces-c)/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$OPENSSL_PREFIX/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix libxml2);$(brew --prefix xerces-c)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $env:VCPKG_BUILD_TYPE="release"
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            vcpkg install libxml2 openssl xerces-c --triplet x64-windows
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 5) { throw "vcpkg install failed after $attempt attempts" }
+            Start-Sleep -Seconds (30 * $attempt)
+          }
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+
+      - name: Setup grok
+        uses: PostPerfection/setup-grok@v1
+        with:
+          grok-ref: v20.4.6
+
+      - name: Setup libmpv
+        uses: PostPerfection/setup-libmpv@v1
+        with:
+          mpv-release: 20260828
+          mpv-archive: mpv-dev-x86_64-20260828-git-182fa6ca49.7z
+
+      - name: Install frontend dependencies
+        working-directory: gui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI sidecar (Unix)
+        if: runner.os != 'Windows'
+        working-directory: rust
+        env:
+          OPENSSL_STATIC: "1"
+        run: |
+          cargo build --release -p imfwizard-cli
+          TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
+          cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
+
+      - name: Build CLI sidecar (Windows)
+        if: runner.os == 'Windows'
+        working-directory: rust
+        env:
+          OPENSSL_STATIC: "1"
+        run: |
+          cargo build --release -p imfwizard-cli
+          Copy-Item "target/release/imfwizard.exe" "../gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe"
+
+      - name: Stage grok DLL (Windows)
+        if: runner.os == 'Windows'
+        run: Copy-Item "$env:GITHUB_WORKSPACE/grok-install/bin/grokj2k.dll" "gui/src-tauri/"
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          OPENSSL_STATIC: "1"
+        with:
+          projectPath: gui
+          args: --ci --bundles ${{ matrix.bundles }}
+
+      - name: Setup uv
+        if: runner.os == 'Linux'
+        uses: astral-sh/setup-uv@v6
+
+      - name: Test installed GUI (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          installer=$(realpath "$(find gui/src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)")
+          sudo apt-get install -y "$installer"
+          package=$(dpkg-deb -f "$installer" Package)
+          binary=$(dpkg -L "$package" | awk '/^\/usr\/bin\// {print; exit}')
+          test -x "$binary"
+          IMFWIZARD_GUI="$binary" xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            uv run --no-project --with pytest --with python-xlib pytest tests/test_gui.py -q
+
+      - name: Test installed GUI (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          installer=$(find gui/src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)
+          mount_point="$RUNNER_TEMP/imfwizard-dmg"
+          installed_app="$RUNNER_TEMP/IMF Wizard.app"
+          mkdir -p "$mount_point"
+          hdiutil attach "$installer" -nobrowse -readonly -mountpoint "$mount_point"
+          source_app=$(find "$mount_point" -maxdepth 1 -name '*.app' -print -quit)
+          ditto "$source_app" "$installed_app"
+          hdiutil detach "$mount_point"
+
+          executable_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$installed_app/Contents/Info.plist")
+          executable="$installed_app/Contents/MacOS/$executable_name"
+          "$executable" >"$RUNNER_TEMP/imfwizard-gui.log" 2>&1 &
+          process_id=$!
+          for attempt in {1..15}; do
+            sleep 1
+            if ! kill -0 "$process_id" 2>/dev/null; then
+              cat "$RUNNER_TEMP/imfwizard-gui.log"
+              exit 1
+            fi
+          done
+          kill -TERM "$process_id"
+          for attempt in {1..15}; do
+            if ! kill -0 "$process_id" 2>/dev/null; then
+              wait "$process_id" || status=$?
+              if [ "${status:-0}" -ne 0 ] && [ "${status:-0}" -ne 143 ]; then
+                cat "$RUNNER_TEMP/imfwizard-gui.log"
+                exit "$status"
+              fi
+              exit 0
+            fi
+            sleep 1
+          done
+          kill -KILL "$process_id"
+          wait "$process_id" || true
+          echo "Installed application did not exit after SIGTERM"
+          exit 1
+
+      - name: Test installed GUI (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $installer = Get-ChildItem "gui/src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if ($null -eq $installer) { throw "NSIS installer not found" }
+
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+
+          $entry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+            Where-Object { $_.DisplayName -eq "IMF Wizard" } |
+            Select-Object -First 1
+          if ($null -eq $entry) { throw "Installed application was not registered" }
+
+          $installDirectory = $entry.InstallLocation.Trim('"')
+          $application = Get-ChildItem "$installDirectory/*.exe" |
+            Where-Object { $_.Name -notmatch "uninstall" } |
+            Select-Object -First 1
+          if ($null -eq $application) { throw "Installed application executable not found" }
+
+          $process = Start-Process -FilePath $application.FullName -PassThru
+          for ($attempt = 1; $attempt -le 30; $attempt++) {
+            Start-Sleep -Seconds 1
+            $process.Refresh()
+            if ($process.HasExited) { throw "Installed application exited with $($process.ExitCode)" }
+            if ($process.MainWindowHandle -ne 0) { break }
+          }
+          if ($process.MainWindowHandle -eq 0) { throw "Installed application did not open a window" }
+          Stop-Process -Id $process.Id
+
+      - name: Upload GUI packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: imfwizard-gui-${{ matrix.name }}
+          path: gui/src-tauri/target/release/bundle
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [cli, cli-deb, gui]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download tested packages
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create GitHub Release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          name: IMF Wizard ${{ github.ref_name }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.zip
             artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.AppImage
+            artifacts/**/*.dmg
+            artifacts/**/*.msi
+            artifacts/**/*-setup.exe
