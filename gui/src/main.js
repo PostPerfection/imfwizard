@@ -418,6 +418,10 @@ function renderAssets() {
   list.querySelectorAll('.asset-item').forEach(el => {
     el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.assetId); });
     el.addEventListener('contextmenu', (e) => { showContextMenu(e, parseInt(el.dataset.assetId)); });
+    el.addEventListener('click', () => {
+      const asset = project.assets.find(a => a.id === parseInt(el.dataset.assetId));
+      if (asset) selectPreview("source", asset.path);
+    });
   });
   list.querySelectorAll('.asset-remove').forEach(el => {
     el.addEventListener('click', (e) => { e.stopPropagation(); removeAsset(parseInt(el.dataset.removeId)); });
@@ -430,6 +434,8 @@ function renderAssets() {
       el.style.display = name.includes(q) ? "" : "none";
     });
   }
+
+  applyPreviewSelection();
 }
 
 function renderSegments() {
@@ -593,6 +599,8 @@ async function openImp(dir) {
   // a name given in the recent list is the label for that row, so opening it keeps it
   addRecentProject(dir, getRecentProjects().find(r => r.path === dir)?.title || name);
   setStatus(`Opened: ${dir}`);
+  openedPackage = dir;
+  selectPreview("package", dir);
 
   // Load timeline from the first CPL found
   try {
@@ -623,10 +631,52 @@ const PREVIEW_LOAD_POLL_ATTEMPTS = 30;
 // be given that track.
 let previewGeneration = 0;
 let previewShowsJobPicture = false;
+// the package last opened, which the Preview button plays when no picture is imported
+let openedPackage = null;
+
+// the row picked in the asset list or the recent list
+let selectedPreview = null;
+
+function selectPreview(kind, path) {
+  selectedPreview = { kind, path };
+  applyPreviewSelection();
+  updateToolbarState();
+}
+
+function clearPreviewSelection() {
+  selectedPreview = null;
+  applyPreviewSelection();
+  updateToolbarState();
+}
+
+// both lists rebuild their rows from innerHTML
+function applyPreviewSelection() {
+  const selectedAssetId = selectedPreview?.kind === "source"
+    ? project.assets.find(a => a.path === selectedPreview.path)?.id
+    : null;
+  document.querySelectorAll("#asset-list .asset-item").forEach(el => {
+    el.classList.toggle("selected", parseInt(el.dataset.assetId) === selectedAssetId);
+  });
+  document.querySelectorAll("#recent-list .recent-item").forEach(el => {
+    const isSelected = selectedPreview?.kind === "package" && el.dataset.path === selectedPreview.path;
+    el.classList.toggle("selected", isSelected);
+  });
+}
 
 document.getElementById("btn-preview")?.addEventListener("click", () => {
+  if (selectedPreview?.kind === "source") {
+    previewProjectFile(selectedPreview.path);
+    return;
+  }
+  if (selectedPreview?.kind === "package") {
+    previewBuiltPackage(selectedPreview.path);
+    return;
+  }
   const seg = project.segments[0];
+  const output = document.getElementById("prop-output")?.value;
   if (seg?.picture) { previewProjectFile(seg.picture.path); }
+  else if (openedPackage) { previewBuiltPackage(openedPackage); }
+  else if (output) { previewBuiltPackage(output); }
   else { tauriMessage("Import a video asset first"); }
 });
 
@@ -1482,6 +1532,7 @@ function renderRecentProjects() {
   list.querySelectorAll('.recent-item').forEach(el => {
     el.addEventListener('click', () => openImp(el.dataset.path));
   });
+  applyPreviewSelection();
 }
 
 // === Desktop Notifications ===
@@ -1516,6 +1567,7 @@ document.getElementById("btn-new-project")?.addEventListener("click", async () =
   if (titleEl) titleEl.value = "";
   document.getElementById("prop-output") && (document.getElementById("prop-output").value = "");
   document.getElementById("project-name").textContent = "Untitled IMP";
+  clearPreviewSelection();
   switchView("project");
   renderAssets();
   renderCplTabs();
@@ -1565,7 +1617,8 @@ function updateToolbarState() {
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
   if (buildBtn) buildBtn.disabled = buildInFlight || !(hasVideo && hasTitle);
-  if (previewBtn) previewBtn.disabled = !hasVideo;
+  const hasOutput = !!document.getElementById("prop-output")?.value;
+  if (previewBtn) previewBtn.disabled = !selectedPreview && !hasVideo && !openedPackage && !hasOutput;
   if (supBtn) supBtn.disabled = !hasTitle;
 }
 
@@ -1591,6 +1644,7 @@ async function removeAsset(assetId) {
   if (!asset) return;
   if (!(await tauriConfirm(`Remove "${asset.name}" from project?`))) return;
   project.assets = project.assets.filter(a => a.id !== assetId);
+  if (selectedPreview?.kind === "source" && selectedPreview.path === asset.path) clearPreviewSelection();
   project.segments.forEach(s => {
     if (s.picture?.id === assetId) s.picture = null;
     if (s.sound?.id === assetId) s.sound = null;

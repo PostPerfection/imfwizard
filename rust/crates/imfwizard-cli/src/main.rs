@@ -1626,8 +1626,12 @@ fn run() {
         && let Err(e) =
             postkit::grok_encoder::use_gpu_with_authentication(license, registration_url)
     {
-        tracing::error!("{e}");
-        std::process::exit(1);
+        // the preference file is the GUI's too
+        if cli.gpu {
+            tracing::error!("{e}");
+            std::process::exit(1);
+        }
+        tracing::warn!("{e} The GPU preference is on, so this run stays on the CPU.");
     }
 
     match cli.command {
