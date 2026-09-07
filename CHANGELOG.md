@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.2.0] - 2026-09-07
 
 ### Changed
 - **The GUI preview plays JPEG 2000 through grok**: a picture track file, an IMP directory, a CPL or a directory of codestreams loads into postkit's `GrokPlayer` instead of libmpv, so the frame the step preview draws and the frame playback draws are the same pixels, down to the App 2E tone map and gamut conversion, which both now come from `postkit::preview::display_frame_from_codestream`. A 2K picture track at 250 Mbit/s plays at its own rate where libmpv's ffmpeg jpeg2000 decoder managed a few frames a second and sat black for seconds after a load: a 2048x1080 frame costs 179 ms on one grok thread and the pool of one worker per core sustains 48 frames a second on 16 cores. With the GPU setting on, the preview decodes on the device instead, as one in-memory batch through grok's accelerator plugin whose threads pull codestreams from the player's queue. The App 2E tone map and gamut conversion run on the device too: the player hands the batch the transfer table and gamut matrix the host would have used, and a 4096x2160 12-bit IMP at 4.1 MB a frame sustains 21 frames a second on an RTX 3060 laptop where the planes coming back for the host to tone map held it at 11.8. An encode holds the device while it runs and the player gives way to it, and the app ends the batch on exit, since a batch left open stalls the process's CUDA teardown. The decode resolution menu changes how many DWT levels grok discards, so full, half and quarter no longer reload the file on this path. MP4, ProRes and every other source still play through libmpv, and so does stereoscopic or encrypted JPEG 2000 essence, which `GrokPlayer` refuses by name. Each load prints `[preview] backend: grok|mpv for <path>` to stderr. The QC overlays and the SRT and ASS subtitle tracks work on both. Shared with dcpwizard through the guikit submodule.
@@ -93,8 +93,6 @@
 - **An illegal picture raster burned a whole encode before failing** — App 2E allows four rasters and the wrapper checks them, but only at wrap time, so a 2048x872 source encoded every frame before the packaging step refused it. `create` now checks the probed raster before the encode in both the CLI and the GUI, fails in a second, and names `--raster` (the Raster control in the GUI) as the way to reach a legal raster
 - **`to-dcp` wrote a CPL missing its identity fields** — the generated CPL carried no `AnnotationText`, the PKL's was empty, and no reel asset had a `<Hash>`, all of which Bv2.1 wants and libdcp writes. The asset hashes were already computed for the PKL, so the CPL now repeats them
 - **KDMs and signatures carried DER-order distinguished names** — the vendored postkit predated the RFC 4514 ordering fix, so a projector matching a KDM recipient saw a name it did not recognise
-
-## [1.2.0] - 2026-08-13
 
 ### Added
 - **Rebindable GUI keyboard shortcuts**: every shortcut now lives in one registry. Ctrl+K opens an overlay listing them by category, where clicking a shortcut captures a new key combination (Backspace or Delete unbinds, Escape cancels, a combination already in use is refused and names its owner). Per-shortcut and global reset buttons restore the defaults, and changes persist across restarts
