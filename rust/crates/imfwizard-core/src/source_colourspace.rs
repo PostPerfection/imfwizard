@@ -83,7 +83,7 @@ pub fn frames_reach_the_compressor_as_xyz(colour: &SourceColour) -> bool {
         | SourceColour::DisplayRgbIn(_)
         | SourceColour::KeepRgbFrom(_)
         | SourceColour::KeepRgbAfterLut(_) => false,
-        SourceColour::AlreadyPq | SourceColour::DciLut(_) => true,
+        SourceColour::AlreadyPq | SourceColour::DciLut(_) | SourceColour::HdrDcdm { .. } => true,
     }
 }
 
@@ -107,7 +107,8 @@ pub fn reject_on_precompressed_picture(
         | SourceColour::DciLut(_)
         | SourceColour::AlreadyPq
         | SourceColour::KeepRgbFrom(_)
-        | SourceColour::KeepRgbAfterLut(_) => true,
+        | SourceColour::KeepRgbAfterLut(_)
+        | SourceColour::HdrDcdm { .. } => true,
     };
     if asks_the_encoder_for_something {
         return Err(format!(
