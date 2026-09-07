@@ -103,7 +103,7 @@ jobs:
 
       # the workspace links grok-ffi, so every platform needs this to compile
       - name: Setup grok
-        uses: PostPerfection/setup-grok@v1.1.1
+        uses: PostPerfection/setup-grok@v1.1.2
         with:
           grok-ref: v20.4.6
 
@@ -238,7 +238,7 @@ jobs:
           sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb xdotool
 
       - name: Setup grok
-        uses: PostPerfection/setup-grok@v1.1.1
+        uses: PostPerfection/setup-grok@v1.1.2
         with:
           grok-ref: v20.4.6
 
