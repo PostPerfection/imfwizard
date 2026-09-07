@@ -423,7 +423,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: imfwizard-gui-${{ matrix.name }}
-          path: gui/src-tauri/target/release/bundle
+          # the deb bundler leaves control.tar.gz and data.tar.gz beside the .deb
+          path: |
+            gui/src-tauri/target/release/bundle/deb/*.deb
+            gui/src-tauri/target/release/bundle/rpm/*.rpm
+            gui/src-tauri/target/release/bundle/appimage/*.AppImage
+            gui/src-tauri/target/release/bundle/dmg/*.dmg
+            gui/src-tauri/target/release/bundle/msi/*.msi
+            gui/src-tauri/target/release/bundle/nsis/*-setup.exe
 
   release:
     if: github.ref_type == 'tag'
