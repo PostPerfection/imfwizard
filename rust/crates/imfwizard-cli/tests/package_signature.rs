@@ -15,9 +15,9 @@ fn cmd() -> Command {
     Command::cargo_bin("imfwizard").unwrap()
 }
 
-// TODO: no CPL here, postkit c14n rejects the xsi:type ST 2067-3 puts on every Resource
 // TODO: a signed ASSETMAP fails ST 429-9, whose AssetMapType has no ds:Signature
 struct SignableDocuments {
+    cpl: PathBuf,
     pkl: PathBuf,
     assetmap: PathBuf,
 }
@@ -65,17 +65,23 @@ fn write_imp(directory: &Path) -> SignableDocuments {
     };
     let cpl = directory.join(format!("CPL_{CPL_ID}.xml"));
     imfwizard_core::cpl::write_cpl(&cpl, CPL_ID, &options, &composition, &tracks).unwrap();
+    assert!(
+        std::fs::read_to_string(&cpl)
+            .unwrap()
+            .contains(r#"xsi:type="TrackFileResourceType""#),
+        "the CPL must carry the namespaced attribute these tests sign over"
+    );
 
     let cpls = [CplEntry {
         uuid: CPL_ID.into(),
-        path: cpl,
+        path: cpl.clone(),
     }];
     let pkl = directory.join(format!("PKL_{PKL_ID}.xml"));
     imfwizard_core::pkl::write_pkl(&pkl, PKL_ID, &cpls, &tracks).unwrap();
     let assetmap = directory.join("ASSETMAP.xml");
     imfwizard_core::assetmap::write_assetmap(&assetmap, PKL_ID, &cpls, &tracks).unwrap();
 
-    SignableDocuments { pkl, assetmap }
+    SignableDocuments { cpl, pkl, assetmap }
 }
 
 fn signer_files(directory: &Path) -> SignerFiles {
@@ -135,12 +141,12 @@ fn tamper_with_the_recorded_hash(signed: &str) -> String {
 }
 
 #[test]
-fn sign_then_verify_sig_covers_the_pkl_and_assetmap() {
+fn sign_then_verify_sig_covers_the_cpl_pkl_and_assetmap() {
     let directory = TempDir::new().unwrap();
     let documents = write_imp(&directory.path().join("imp"));
     let signer = signer_files(&directory.path().join("certificates"));
 
-    for document in [&documents.pkl, &documents.assetmap] {
+    for document in [&documents.cpl, &documents.pkl, &documents.assetmap] {
         sign_command(document, &signer)
             .assert()
             .success()

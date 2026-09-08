@@ -13,16 +13,16 @@ const PKL_ID: &str = "55555555-5555-5555-5555-555555555555";
 const TRACK_ID: &str = "66666666-6666-6666-6666-666666666666";
 const TITLE: &str = "Signed Feature OV";
 
-// TODO: no CPL here, postkit c14n rejects the xsi:type ST 2067-3 puts on every Resource
 // TODO: a signed ASSETMAP fails ST 429-9, whose AssetMapType has no ds:Signature
 struct SignableDocuments {
+    cpl: PathBuf,
     pkl: PathBuf,
     assetmap: PathBuf,
 }
 
 impl SignableDocuments {
-    fn each(&self) -> [&PathBuf; 2] {
-        [&self.pkl, &self.assetmap]
+    fn each(&self) -> [&PathBuf; 3] {
+        [&self.cpl, &self.pkl, &self.assetmap]
     }
 }
 
@@ -70,17 +70,23 @@ fn write_imp(directory: &Path) -> SignableDocuments {
     };
     let cpl = directory.join(format!("CPL_{CPL_ID}.xml"));
     imfwizard_core::cpl::write_cpl(&cpl, CPL_ID, &options, &composition, &tracks).unwrap();
+    assert!(
+        std::fs::read_to_string(&cpl)
+            .unwrap()
+            .contains(r#"xsi:type="TrackFileResourceType""#),
+        "the CPL must carry the namespaced attribute these tests sign over"
+    );
 
     let cpls = [CplEntry {
         uuid: CPL_ID.into(),
-        path: cpl,
+        path: cpl.clone(),
     }];
     let pkl = directory.join(format!("PKL_{PKL_ID}.xml"));
     imfwizard_core::pkl::write_pkl(&pkl, PKL_ID, &cpls, &tracks).unwrap();
     let assetmap = directory.join("ASSETMAP.xml");
     imfwizard_core::assetmap::write_assetmap(&assetmap, PKL_ID, &cpls, &tracks).unwrap();
 
-    SignableDocuments { pkl, assetmap }
+    SignableDocuments { cpl, pkl, assetmap }
 }
 
 fn signer_files(directory: &Path) -> SignerFiles {
@@ -126,7 +132,7 @@ fn tamper_with_the_recorded_hash(signed: &str) -> String {
 }
 
 #[test]
-fn the_pkl_and_assetmap_carry_a_signature_xmlsec1_accepts() {
+fn the_cpl_pkl_and_assetmap_carry_a_signature_xmlsec1_accepts() {
     let directory = tempfile::tempdir().unwrap();
     let documents = write_imp(&directory.path().join("imp"));
     let signer = signer_files(&directory.path().join("certificates"));
@@ -146,6 +152,74 @@ fn the_pkl_and_assetmap_carry_a_signature_xmlsec1_accepts() {
         // an independent verifier, chaining the embedded leaf to the test root
         xmlsec_tool::assert_verifies(document, &signer.chain_directory, &[]);
     }
+}
+
+// postkit's copies of the st 2067-3 and xmldsig xsds, IMFWIZARD_IMF_XSD_DIR overrides it
+const VENDORED_IMF_XSD_DIR: &str = "../../../extern/postkit/tests/fixtures/xsd/imf";
+
+fn walk(dir: &Path, name: &str) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = walk(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|f| f.to_str()) == Some(name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+// st 2067-3 places ds:Signature last in CompositionPlaylist, where the signer inserts it
+#[test]
+fn a_signed_cpl_still_passes_the_st2067_3_schema() {
+    let directory = tempfile::tempdir().unwrap();
+    let documents = write_imp(&directory.path().join("imp"));
+    let signer = signer_files(&directory.path().join("certificates"));
+    sign_in_place(&documents.cpl, &signer);
+
+    let xsd_dir = match std::env::var("IMFWIZARD_IMF_XSD_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED_IMF_XSD_DIR),
+    };
+    let (Some(cpl_xsd), Some(dsig_xsd)) = (
+        walk(&xsd_dir, "imf-cpl-20160411.xsd"),
+        walk(&xsd_dir, "xmldsig-core-schema.xsd"),
+    ) else {
+        panic!(
+            "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {}",
+            xsd_dir.display()
+        );
+    };
+
+    let driver = directory.path().join("driver.xsd");
+    std::fs::write(
+        &driver,
+        format!(
+            r#"<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
+  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>
+</xs:schema>"#,
+            cpl = postkit::file_uri::file_uri(&cpl_xsd),
+            dsig = postkit::file_uri::file_uri(&dsig_xsd),
+        ),
+    )
+    .unwrap();
+
+    let out = std::process::Command::new("xmllint")
+        .arg("--noout")
+        .arg("--schema")
+        .arg(&driver)
+        .arg(&documents.cpl)
+        .output()
+        .expect("run xmllint");
+    assert!(
+        out.status.success(),
+        "a signed CPL must pass the ST 2067-3 XSD:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
