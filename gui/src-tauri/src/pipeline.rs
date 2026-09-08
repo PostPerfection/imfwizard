@@ -35,6 +35,9 @@ pub struct CompositionInput {
     pub audio_lang: Option<String>,
     #[serde(default)]
     pub subtitles: Vec<String>,
+    // settled at submit from the panel's preset and this source's own signalling
+    #[serde(default)]
+    pub hdr: Option<imfwizard_core::hdr_wcg::HdrWcg>,
 }
 
 /// How the Properties panel says to treat the source: where the sound sits
@@ -212,10 +215,6 @@ pub struct JobConfig {
     quality_psnr: Option<f64>,
     edits: imfwizard_core::source_edits::SourceEdits,
     source_colour: postkit::encode::SourceColour,
-    /// The HDR/WCG metadata every composition's picture is packaged with. A job
-    /// queued before the setting existed has none.
-    #[serde(default)]
-    hdr: Option<imfwizard_core::hdr_wcg::HdrWcg>,
     /// Frames to hold a still input for; None when the input is not a still.
     still_frames: Option<u64>,
     burn_subtitle: Option<PathBuf>,
@@ -269,6 +268,59 @@ pub struct SubmitResult {
     pub hints: Vec<String>,
 }
 
+// each composition brings its own source, so its hdr is settled against that source
+fn plan_compositions(
+    compositions: &mut [CompositionInput],
+    shared_plan: &imfwizard_core::preflight::CreatePlan,
+) -> Result<Vec<String>, String> {
+    let mut hints: Vec<String> = Vec::new();
+    for composition in compositions {
+        let picture = PathBuf::from(&composition.video_path);
+        if shared_plan.audio_map.is_some() && composition.audio_path.is_none() {
+            return Err(format!(
+                "{} has no sound to map: drop a WAV on its Sound track or clear the audio map",
+                composition.title
+            ));
+        }
+        match (
+            postkit::still::is_still_image(&picture),
+            shared_plan.still_frames,
+        ) {
+            (false, Some(_)) => {
+                return Err(format!(
+                    "{} is a video or a frame directory, so a still length has nothing to hold",
+                    composition.video_path
+                ));
+            }
+            (true, None) => {
+                return Err(format!(
+                    "{} is a single image; set a still length to say how long to hold it",
+                    composition.video_path
+                ));
+            }
+            _ => {}
+        }
+
+        let plan = imfwizard_core::preflight::CreatePlan {
+            picture: Some(picture.clone()),
+            audio_files: composition.audio_path.iter().map(PathBuf::from).collect(),
+            audio_language: composition.audio_lang.clone(),
+            timed_text_files: composition.subtitles.iter().map(PathBuf::from).collect(),
+            ..shared_plan.clone()
+        };
+        imfwizard_core::preflight::check_before_encode(&plan)?;
+        // a Dolby Vision source carries its own light levels, so the panel can leave them unset
+        composition.hdr =
+            imfwizard_core::hdr_source::resolve(Some(&picture), shared_plan.hdr.clone())?;
+        hints.extend(
+            imfwizard_core::hints::gather_hints(&plan)
+                .into_iter()
+                .map(|hint| hint.text),
+        );
+    }
+    Ok(hints)
+}
+
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -308,7 +360,7 @@ pub async fn submit_job(
 
     // Build/Delivery may pass a compositions array; legacy single-video callers
     // pass video_path and are treated as a one-composition job.
-    let compositions = match compositions {
+    let mut compositions = match compositions {
         Some(c) if !c.is_empty() => c,
         _ => {
             let Some(video_path) = video_path else {
@@ -321,6 +373,7 @@ pub async fn submit_job(
                 audio_path,
                 audio_lang: None,
                 subtitles: subtitles.unwrap_or_default(),
+                hdr: None,
             }]
         }
     };
@@ -366,55 +419,22 @@ pub async fn submit_job(
         .audio_map
         .clone()
         .filter(|spec| !spec.trim().is_empty());
-    let mut hints: Vec<String> = Vec::new();
-    for composition in &compositions {
-        let picture = PathBuf::from(&composition.video_path);
-        if audio_map.is_some() && composition.audio_path.is_none() {
-            return Err(format!(
-                "{} has no sound to map: drop a WAV on its Sound track or clear the audio map",
-                composition.title
-            ));
-        }
-        match (postkit::still::is_still_image(&picture), still_frames) {
-            (false, Some(_)) => {
-                return Err(format!(
-                    "{} is a video or a frame directory, so a still length has nothing to hold",
-                    composition.video_path
-                ));
-            }
-            (true, None) => {
-                return Err(format!(
-                    "{} is a single image; set a still length to say how long to hold it",
-                    composition.video_path
-                ));
-            }
-            _ => {}
-        }
-
-        let plan = imfwizard_core::preflight::CreatePlan {
-            picture: Some(picture),
-            audio_files: composition.audio_path.iter().map(PathBuf::from).collect(),
-            audio_language: composition.audio_lang.clone(),
-            timed_text_files: composition.subtitles.iter().map(PathBuf::from).collect(),
-            fps_num,
-            fps_den,
-            edits,
-            audio_map: audio_map.clone(),
-            burn_subtitle: burn_subtitle.clone(),
-            burn_subtitle_font: burn_subtitle_font.clone(),
-            burn_style: burn_style.clone(),
-            picture_options: picture_options.clone(),
-            source_colour: source_colour.clone(),
-            hdr: hdr.clone(),
-            still_frames,
-        };
-        imfwizard_core::preflight::check_before_encode(&plan)?;
-        hints.extend(
-            imfwizard_core::hints::gather_hints(&plan)
-                .into_iter()
-                .map(|hint| hint.text),
-        );
-    }
+    // what every composition shares, with its own picture and sound filled in per composition
+    let shared_plan = imfwizard_core::preflight::CreatePlan {
+        fps_num,
+        fps_den,
+        edits,
+        audio_map: audio_map.clone(),
+        burn_subtitle: burn_subtitle.clone(),
+        burn_subtitle_font: burn_subtitle_font.clone(),
+        burn_style: burn_style.clone(),
+        picture_options: picture_options.clone(),
+        source_colour: source_colour.clone(),
+        hdr,
+        still_frames,
+        ..Default::default()
+    };
+    let hints = plan_compositions(&mut compositions, &shared_plan)?;
 
     // the pref lives in the panel, which says it has taken the hints by sending
     // hintsAccepted rather than by naming the pref here
@@ -450,7 +470,6 @@ pub async fn submit_job(
         quality_psnr,
         edits,
         source_colour,
-        hdr,
         still_frames,
         burn_subtitle,
         burn_subtitle_font,
@@ -1220,7 +1239,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             picture_mxf,
             audio_files,
             timed_text_files: source.timed_text_files,
-            hdr: job.hdr.clone(),
+            hdr: ci.hdr.clone(),
         });
     }
 
@@ -1311,8 +1330,165 @@ fn emit_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_encode_breakdown, format_stage_timing, SourceSettings};
+    use super::{format_encode_breakdown, format_stage_timing, CompositionInput, SourceSettings};
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
+
+    const CLIP_WIDTH: u32 = 256;
+    const CLIP_HEIGHT: u32 = 144;
+    const CLIP_FRAMES: u32 = 2;
+    const FPS: u32 = 24;
+    // the clips are small, so the plan pads them into an App 2E raster
+    const APP2E_RASTER: (u32, u32) = (1920, 1080);
+    const PQ_TRANSFER_TAG: &str = "smpte2084";
+    const HLG_TRANSFER_TAG: &str = "arib-std-b67";
+
+    fn scratch_directory(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!("imfwizard-gui-{name}"));
+        std::fs::remove_dir_all(&directory).ok();
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn run_ffmpeg(arguments: &[&str]) {
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error"])
+            .args(arguments)
+            .output()
+            .expect("ffmpeg");
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+    }
+
+    fn clip(directory: &Path, name: &str, transfer: Option<&str>) -> PathBuf {
+        let path = directory.join(format!("{name}.mkv"));
+        let source = format!("color=c=gray:s={CLIP_WIDTH}x{CLIP_HEIGHT}:r={FPS}");
+        let frames = CLIP_FRAMES.to_string();
+        let mut arguments = vec![
+            "-f",
+            "lavfi",
+            "-i",
+            &source,
+            "-frames:v",
+            &frames,
+            "-c:v",
+            "ffv1",
+            "-pix_fmt",
+            "yuv420p10le",
+        ];
+        // the lavfi source carries no colour of its own, so setparams tags the frames
+        // and the output flags carry the tag into the container
+        let set_parameters = format!(
+            "setparams=color_primaries=bt2020:color_trc={}:colorspace=bt2020nc:range=tv",
+            transfer.unwrap_or_default()
+        );
+        if let Some(transfer) = transfer {
+            arguments.extend_from_slice(&[
+                "-vf",
+                &set_parameters,
+                "-color_primaries",
+                "bt2020",
+                "-color_trc",
+                transfer,
+                "-colorspace",
+                "bt2020nc",
+                "-color_range",
+                "tv",
+            ]);
+        }
+        let path_argument = path.to_string_lossy().into_owned();
+        arguments.push(&path_argument);
+        run_ffmpeg(&arguments);
+        path
+    }
+
+    fn composition(picture: &Path) -> CompositionInput {
+        CompositionInput {
+            title: "Feature".to_string(),
+            content_kind: "feature".to_string(),
+            video_path: picture.to_string_lossy().into_owned(),
+            audio_path: None,
+            audio_lang: None,
+            subtitles: Vec::new(),
+            hdr: None,
+        }
+    }
+
+    fn shared_plan(preset: Option<&str>) -> imfwizard_core::preflight::CreatePlan {
+        imfwizard_core::preflight::CreatePlan {
+            fps_num: FPS,
+            fps_den: 1,
+            picture_options: imfwizard_core::source_picture::SourcePictureOptions {
+                raster: Some(APP2E_RASTER),
+                ..Default::default()
+            },
+            source_colour: imfwizard_core::source_colourspace::to_source_colour(
+                imfwizard_core::source_colourspace::APP2E_SOURCE_SPACE,
+            )
+            .unwrap(),
+            hdr: settings(preset).hdr().unwrap(),
+            ..Default::default()
+        }
+    }
+
+    // the panel carries one preset for the job, so what each source adds to it is
+    // the part that has to be settled per composition
+    #[test]
+    fn each_composition_settles_its_own_hdr_against_its_own_source() {
+        let directory = scratch_directory("hdr-per-composition");
+        let mut compositions = vec![
+            composition(&clip(&directory, "tagged", Some(PQ_TRANSFER_TAG))),
+            composition(&clip(&directory, "untagged", None)),
+        ];
+
+        super::plan_compositions(&mut compositions, &shared_plan(Some("pq-bt2020"))).unwrap();
+
+        let preset = imfwizard_core::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None).unwrap();
+        for composition in &compositions {
+            assert_eq!(composition.hdr.as_ref(), Some(&preset));
+        }
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_source_whose_transfer_contradicts_the_preset_is_refused_naming_both() {
+        let directory = scratch_directory("hdr-contradicts-preset");
+        let mut compositions = vec![
+            composition(&clip(&directory, "untagged", None)),
+            composition(&clip(&directory, "tagged", Some(PQ_TRANSFER_TAG))),
+        ];
+
+        let error = super::plan_compositions(&mut compositions, &shared_plan(Some("hlg-bt2020")))
+            .unwrap_err();
+
+        assert!(error.contains(PQ_TRANSFER_TAG), "{error}");
+        assert!(error.contains("hlg-bt2020"), "{error}");
+        assert!(error.contains("pq-bt2020 or pq-p3d65"), "{error}");
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn an_hdr_source_with_no_preset_is_refused_naming_the_control() {
+        let directory = scratch_directory("hdr-without-preset");
+        let mut compositions = vec![composition(&clip(
+            &directory,
+            "tagged",
+            Some(HLG_TRANSFER_TAG),
+        ))];
+
+        let error = super::plan_compositions(&mut compositions, &shared_plan(None)).unwrap_err();
+
+        assert!(error.contains("hlg-bt2020"), "{error}");
+        assert!(error.contains("Rec.709 SDR"), "{error}");
+        assert!(
+            error.contains("the HDR panel control in the GUI"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
 
     fn settings(hdr: Option<&str>) -> SourceSettings {
         SourceSettings {
