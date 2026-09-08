@@ -91,8 +91,19 @@ impl Default for SoundfieldLabels {
 }
 
 /// The MCA label string an AS-02 sound wrap takes for a channel count, which is
-/// what names each channel and its soundfield group.
-pub fn mca_labels(channels: usize) -> String {
+/// what names each channel and its soundfield group. An accessibility track is
+/// named by its role instead of its layout, so the descriptor the CPL reads back
+/// off the track file carries chVIN or chHI.
+pub fn mca_labels(channels: usize, role: Option<AudioRole>) -> String {
+    // asdcplib's AS-02 dictionary spells the accessibility soundfield groups VA
+    // and HA, and their channels VIN and HI
+    if let Some(role) = role {
+        let (group, channel) = match role {
+            AudioRole::AudioDescription => ("VA", "VIN"),
+            AudioRole::HearingImpaired => ("HA", "HI"),
+        };
+        return format!("{group}({})", [channel].repeat(channels).join(","));
+    }
     match channels {
         2 => "ST(L,R)".to_string(),
         6 => "51(L,R,C,LFE,Ls,Rs)".to_string(),
@@ -192,7 +203,7 @@ fn soundfield_config(
 ) -> Result<postkit::mxf_wrap::McaConfig, String> {
     let channels = postkit::wav_io::channel_count(&track.path)?;
     Ok(postkit::mxf_wrap::McaConfig {
-        labels: mca_labels(channels),
+        labels: mca_labels(channels, track.role),
         // ST 2067-2 wants a language on the soundfield group, and und says unknown
         spoken_language: Some(track.language.clone().unwrap_or_else(|| "und".into())),
         soundfield_group: Some(postkit::mxf_wrap::SoundfieldGroup {
@@ -388,10 +399,20 @@ mod tests {
 
     #[test]
     fn a_layout_without_a_standard_group_is_numbered_sources() {
-        assert_eq!(mca_labels(2), "ST(L,R)");
-        assert_eq!(mca_labels(6), "51(L,R,C,LFE,Ls,Rs)");
-        assert_eq!(mca_labels(1), "DNS(NSC001)");
-        assert_eq!(mca_labels(3), "DNS(NSC001,NSC002,NSC003)");
+        assert_eq!(mca_labels(2, None), "ST(L,R)");
+        assert_eq!(mca_labels(6, None), "51(L,R,C,LFE,Ls,Rs)");
+        assert_eq!(mca_labels(1, None), "DNS(NSC001)");
+        assert_eq!(mca_labels(3, None), "DNS(NSC001,NSC002,NSC003)");
+    }
+
+    #[test]
+    fn an_accessibility_track_is_labelled_by_its_role() {
+        assert_eq!(mca_labels(1, Some(AudioRole::AudioDescription)), "VA(VIN)");
+        assert_eq!(mca_labels(1, Some(AudioRole::HearingImpaired)), "HA(HI)");
+        assert_eq!(
+            mca_labels(2, Some(AudioRole::AudioDescription)),
+            "VA(VIN,VIN)"
+        );
     }
 
     #[test]

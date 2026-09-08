@@ -339,6 +339,55 @@ pub(crate) fn wrapped_picture(
     wrap.track_file
 }
 
+/// A real sound track file, since the CPL's EssenceDescriptor is read back out
+/// of one. One second of silence at 48 kHz, so it is a whole number of frames.
+#[cfg(test)]
+pub(crate) fn wrapped_sound(
+    dir: &std::path::Path,
+    name: &str,
+    channels: u16,
+    mca: Option<postkit::mxf_wrap::McaConfig>,
+) -> crate::MxfTrackFile {
+    let wav = dir.join(format!("{name}.wav"));
+    std::fs::write(&wav, make_wav(channels, 48000, 24, 48000)).unwrap();
+    let wrap = wrap_mxf(&MxfWrapOptions {
+        input_dir: wav,
+        output_file: dir.join(format!("AUDIO_{name}.mxf")),
+        essence_type: crate::EssenceType::Wav,
+        edit_rate_num: 24,
+        edit_rate_den: 1,
+        duration: 0,
+        hdr: None,
+        mca,
+        asset_uuid: None,
+    });
+    assert!(wrap.success, "sound wrap failed: {}", wrap.error);
+    wrap.track_file
+}
+
+/// Build a minimal PCM WAV (fmt + data chunks) with the given parameters.
+#[cfg(test)]
+pub(crate) fn make_wav(channels: u16, sample_rate: u32, bits: u16, sample_frames: u32) -> Vec<u8> {
+    let block_align = (bits / 8) as u32 * channels as u32;
+    let data_len = block_align * sample_frames;
+    let mut w = Vec::new();
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVE");
+    w.extend_from_slice(b"fmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes()); // WAVE_FORMAT_PCM
+    w.extend_from_slice(&channels.to_le_bytes());
+    w.extend_from_slice(&sample_rate.to_le_bytes());
+    w.extend_from_slice(&(sample_rate * block_align).to_le_bytes()); // byte rate
+    w.extend_from_slice(&(block_align as u16).to_le_bytes());
+    w.extend_from_slice(&bits.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    w.resize(w.len() + data_len as usize, 0);
+    w
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,27 +490,5 @@ mod tests {
         assert_eq!(desc.channel_count, 2);
         assert_eq!(desc.quantization_bits, 16);
         assert_eq!(desc.audio_sampling_rate.numerator, 48000);
-    }
-
-    /// Build a minimal PCM WAV (fmt + data chunks) with the given parameters.
-    fn make_wav(channels: u16, sample_rate: u32, bits: u16, sample_frames: u32) -> Vec<u8> {
-        let block_align = (bits / 8) as u32 * channels as u32;
-        let data_len = block_align * sample_frames;
-        let mut w = Vec::new();
-        w.extend_from_slice(b"RIFF");
-        w.extend_from_slice(&(36 + data_len).to_le_bytes());
-        w.extend_from_slice(b"WAVE");
-        w.extend_from_slice(b"fmt ");
-        w.extend_from_slice(&16u32.to_le_bytes());
-        w.extend_from_slice(&1u16.to_le_bytes()); // WAVE_FORMAT_PCM
-        w.extend_from_slice(&channels.to_le_bytes());
-        w.extend_from_slice(&sample_rate.to_le_bytes());
-        w.extend_from_slice(&(sample_rate * block_align).to_le_bytes()); // byte rate
-        w.extend_from_slice(&(block_align as u16).to_le_bytes());
-        w.extend_from_slice(&bits.to_le_bytes());
-        w.extend_from_slice(b"data");
-        w.extend_from_slice(&data_len.to_le_bytes());
-        w.resize(w.len() + data_len as usize, 0);
-        w
     }
 }

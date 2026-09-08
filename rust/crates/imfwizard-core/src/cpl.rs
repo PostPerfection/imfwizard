@@ -1,20 +1,18 @@
 use std::path::Path;
 
-use postkit::packaging::{
-    App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind, escape_xml,
-};
+use postkit::packaging::{App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind};
 
 use crate::MxfTrackFile;
-use crate::imp::{AudioRole, Composition, ImpOptions};
+use crate::imp::{Composition, ImpOptions};
 
 /// Write an IMF CPL (ST 2067-3) using the shared postkit writer.
 ///
 /// Track files are classified by their filename prefix (VIDEO_/AUDIO_/SUBTITLE_),
 /// the same convention the MXF wrapper writes. Audio languages from `comp` are
 /// written into a composition-level LocaleList (ST 2067-3 Locale/LanguageList).
-/// Audio tracks with an accessibility role (AD/HI) get an MCA EssenceDescriptor
-/// linked to the resource via SourceEncoding (ST 2067-2/-3). HDR content light
-/// levels become ST 2067-21 ExtensionProperties.
+/// Every picture and sound resource names an EssenceDescriptorList entry read
+/// back off its own track file, linked by SourceEncoding, which ST 2067-3 makes
+/// mandatory. HDR content light levels become ST 2067-21 ExtensionProperties.
 pub fn write_cpl(
     path: &Path,
     cpl_uuid: &str,
@@ -24,9 +22,7 @@ pub fn write_cpl(
 ) -> std::io::Result<()> {
     let mut resources = Vec::new();
     let mut descriptors = Vec::new();
-    // audio track files are wrapped in composition order, so the Nth AUDIO_ file
-    // maps to the Nth audio track; used to attach accessibility MCA descriptors.
-    let mut audio_idx = 0;
+    let edit_rate = asdcplib::Rational::new(opts.fps_num as i32, opts.fps_den as i32);
     for tf in track_files {
         let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
         let kind = if fname.starts_with("VIDEO_") {
@@ -38,30 +34,21 @@ pub fn write_cpl(
         } else {
             continue;
         };
-        let mut source_encoding = None;
-        // the picture's descriptor is read back out of the track file, since a
-        // validator compares the two and every item has to be the MXF's own
-        if kind == ImfTrackKind::Image {
-            let se = uuid::Uuid::new_v4().to_string();
+        // a descriptor is read back out of the track file, since a validator
+        // compares the two and every item has to be the MXF's own
+        let body = match kind {
+            ImfTrackKind::Image => Some(picture_descriptor_body(&tf.path)?),
+            ImfTrackKind::Audio => Some(sound_descriptor_body(&tf.path, edit_rate)?),
+            ImfTrackKind::Subtitle => None,
+        };
+        let source_encoding = body.map(|body| {
+            let id = uuid::Uuid::new_v4().to_string();
             descriptors.push(ImfEssenceDescriptor {
-                id: se.clone(),
-                body: picture_descriptor_body(&tf.path)?,
+                id: id.clone(),
+                body,
             });
-            source_encoding = Some(se);
-        }
-        if kind == ImfTrackKind::Audio {
-            if let Some(track) = comp.audio_files.get(audio_idx)
-                && let Some(role) = track.role
-            {
-                let se = uuid::Uuid::new_v4().to_string();
-                descriptors.push(ImfEssenceDescriptor {
-                    id: se.clone(),
-                    body: audio_descriptor_body(role, track.language.as_deref()),
-                });
-                source_encoding = Some(se);
-            }
-            audio_idx += 1;
-        }
+            id
+        });
         resources.push(ImfResource {
             track_file_uuid: tf.uuid.clone(),
             duration: tf.duration,
@@ -102,17 +89,18 @@ pub fn write_cpl(
     std::fs::write(path, cpl.to_xml())
 }
 
+fn read<T>(result: asdcplib::Result<T>, what: &str, track_file: &Path) -> std::io::Result<T> {
+    result.map_err(|e| {
+        std::io::Error::other(format!(
+            "cannot read the {what} of {}: {e}",
+            track_file.display()
+        ))
+    })
+}
+
 /// The picture MXF's own RGBA descriptor and JPEG 2000 sub-descriptor, as the
 /// RegXML the CPL's EssenceDescriptorList carries.
 fn picture_descriptor_body(picture: &Path) -> std::io::Result<String> {
-    fn read<T>(result: asdcplib::Result<T>, what: &str, picture: &Path) -> std::io::Result<T> {
-        result.map_err(|e| {
-            std::io::Error::other(format!(
-                "cannot read the {what} of {}: {e}",
-                picture.display()
-            ))
-        })
-    }
     let mut reader = asdcplib::as02::jp2k::MxfReader::new();
     read(
         reader.open_read(&picture.to_string_lossy()),
@@ -132,46 +120,32 @@ fn picture_descriptor_body(picture: &Path) -> std::io::Result<String> {
     ))
 }
 
-/// MCA essence descriptor body for an accessibility audio track, matching the
-/// XSD-validated shape in postkit's packaging tests: a WAVEPCMDescriptor with a
-/// SoundfieldGroup plus one AudioChannelLabel carrying the accessibility MCA
-/// symbol (chVIN/chHI) and RFC 5646 spoken language. postkit carries it verbatim.
-fn audio_descriptor_body(role: AudioRole, lang: Option<&str>) -> String {
-    let (symbol, name) = match role {
-        AudioRole::AudioDescription => ("chVIN", "Visually Impaired"),
-        AudioRole::HearingImpaired => ("chHI", "Hearing Impaired"),
-    };
-    // optional spoken language, emitted at the given indent when set
-    let spoken = |indent: &str| match lang {
-        Some(l) => format!(
-            "\n{indent}<r1:RFC5646SpokenLanguage>{}</r1:RFC5646SpokenLanguage>",
-            escape_xml(l)
-        ),
-        None => String::new(),
-    };
-    format!(
-        r#"      <r0:WAVEPCMDescriptor xmlns:r0="http://www.smpte-ra.org/reg/395/2014/13/1/aaf" xmlns:r1="http://www.smpte-ra.org/reg/335/2012">
-        <r1:ChannelCount>1</r1:ChannelCount>
-        <r1:SubDescriptors>
-          <r0:SoundfieldGroupLabelSubDescriptor>
-            <r1:MCATagSymbol>sg51</r1:MCATagSymbol>{sg_lang}
-          </r0:SoundfieldGroupLabelSubDescriptor>
-          <r0:AudioChannelLabelSubDescriptor>
-            <r1:MCAChannelID>1</r1:MCAChannelID>
-            <r1:MCATagSymbol>{symbol}</r1:MCATagSymbol>
-            <r1:MCATagName>{name}</r1:MCATagName>{ch_lang}
-          </r0:AudioChannelLabelSubDescriptor>
-        </r1:SubDescriptors>
-      </r0:WAVEPCMDescriptor>"#,
-        sg_lang = spoken("            "),
-        ch_lang = spoken("            "),
-    )
+/// The sound MXF's own WAVE PCM descriptor and MCA label sub-descriptors, as the
+/// RegXML the CPL's EssenceDescriptorList carries.
+fn sound_descriptor_body(sound: &Path, edit_rate: asdcplib::Rational) -> std::io::Result<String> {
+    let mut reader = asdcplib::as02::pcm::MxfReader::new();
+    read(
+        reader.open_read(&sound.to_string_lossy(), edit_rate),
+        "sound MXF",
+        sound,
+    )?;
+    let descriptor = read(reader.wave_audio_descriptor(), "WAVE PCM descriptor", sound)?;
+    let labels = read(
+        reader.mca_label_subdescriptors(),
+        "MCA label sub-descriptors",
+        sound,
+    )?;
+    let _ = reader.close();
+    Ok(postkit::regxml::sound_descriptor_regxml(
+        &descriptor,
+        &labels,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imp::AudioTrack;
+    use crate::imp::{AudioRole, AudioTrack};
 
     const APP2E_2020_NAMESPACE: &str = "http://www.smpte-ra.org/ns/2067-21/2020";
 
@@ -324,15 +298,85 @@ mod tests {
         assert!(xml.find("<LocaleList>").unwrap() < xml.find("<ExtensionProperties>").unwrap());
     }
 
-    // the wrapped audio track file; its accessibility role is carried by the
-    // composition's AudioTrack, matched by position, not by the file itself.
-    fn accessibility_track() -> MxfTrackFile {
-        MxfTrackFile {
-            path: "AUDIO_ad.mxf".into(),
-            uuid: "aaaaaaaa-1111-2222-3333-444444444444".into(),
-            duration: 240,
+    const TWENTY_FOUR_FPS: asdcplib::Rational = asdcplib::Rational {
+        numerator: 24,
+        denominator: 1,
+    };
+
+    fn sound_track(dir: &Path, name: &str, channels: u16, labels: String) -> MxfTrackFile {
+        crate::mxf_wrap::wrapped_sound(
+            dir,
+            name,
+            channels,
+            Some(postkit::mxf_wrap::McaConfig {
+                labels,
+                spoken_language: Some("en-US".into()),
+                soundfield_group: Some(postkit::mxf_wrap::SoundfieldGroup {
+                    title: "Sound Test".into(),
+                    title_version: "Original Version".into(),
+                    audio_content_kind: "PRM".into(),
+                    audio_element_kind: "FCMP".into(),
+                }),
+            }),
+        )
+    }
+
+    /// The WaveAudioDescriptor InstanceID the sound MXF itself carries, as the
+    /// CPL spells it. Photon compares the two, so they have to be one value.
+    fn sound_instance_id(sound: &Path) -> String {
+        let mut reader = asdcplib::as02::pcm::MxfReader::new();
+        reader
+            .open_read(&sound.to_string_lossy(), TWENTY_FOUR_FPS)
+            .expect("the sound MXF opens");
+        let descriptor = reader
+            .wave_audio_descriptor()
+            .expect("a WAVE PCM descriptor");
+        reader.close().unwrap();
+        format!(
+            "urn:uuid:{}",
+            uuid::Uuid::from_bytes(descriptor.instance_id)
+        )
+    }
+
+    /// Plain sound, no accessibility role: ST 2067-3 still makes SourceEncoding
+    /// mandatory, and the descriptor it names is the track file's own.
+    #[test]
+    fn a_sound_resource_names_the_track_files_own_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CPL_sound.xml");
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
             ..Default::default()
-        }
+        };
+        let comp = Composition {
+            title: "Sound Test".into(),
+            audio_files: vec![AudioTrack {
+                path: "stereo.wav".into(),
+                language: Some("en-US".into()),
+                role: None,
+            }],
+            ..Default::default()
+        };
+        let track = sound_track(dir.path(), "stereo", 2, crate::imp::mca_labels(2, None));
+        write_cpl(&path, "cpl", &opts, &comp, std::slice::from_ref(&track)).unwrap();
+        let xml = std::fs::read_to_string(path).unwrap();
+
+        assert!(xml.contains("<SourceEncoding>"), "{xml}");
+        assert!(xml.contains("<r0:WAVEPCMDescriptor"), "{xml}");
+        let instance_id = sound_instance_id(&track.path);
+        assert!(
+            xml.contains(&format!("<r1:InstanceID>{instance_id}</r1:InstanceID>")),
+            "the CPL must carry the MXF's own InstanceID {instance_id}:\n{xml}"
+        );
+        assert!(
+            xml.contains("<r1:MCATagSymbol>chL</r1:MCATagSymbol>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<r1:MCATagSymbol>chR</r1:MCATagSymbol>"),
+            "{xml}"
+        );
     }
 
     #[test]
@@ -353,15 +397,32 @@ mod tests {
             }],
             ..Default::default()
         };
-        let tracks = [accessibility_track()];
-        write_cpl(&path, "cpl", &opts, &comp, &tracks).unwrap();
+        let track = sound_track(
+            dir.path(),
+            "ad",
+            1,
+            crate::imp::mca_labels(1, Some(AudioRole::AudioDescription)),
+        );
+        write_cpl(&path, "cpl", &opts, &comp, std::slice::from_ref(&track)).unwrap();
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<EssenceDescriptorList>"));
-        assert!(xml.contains("<r1:MCATagSymbol>chVIN</r1:MCATagSymbol>"));
-        assert!(xml.contains("<r1:MCATagName>Visually Impaired</r1:MCATagName>"));
+        assert!(
+            xml.contains("<r1:MCATagSymbol>chVIN</r1:MCATagSymbol>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<r1:MCATagName>Visually Impaired-Narrative</r1:MCATagName>"),
+            "{xml}"
+        );
         assert!(xml.contains("<r1:RFC5646SpokenLanguage>en-US</r1:RFC5646SpokenLanguage>"));
         // the audio resource must link to the descriptor via SourceEncoding
         assert!(xml.contains("<SourceEncoding>"));
+        // and the descriptor has to be the one the MXF carries, not a fresh one
+        let instance_id = sound_instance_id(&track.path);
+        assert!(
+            xml.contains(&format!("<r1:InstanceID>{instance_id}</r1:InstanceID>")),
+            "the CPL must carry the MXF's own InstanceID {instance_id}:\n{xml}"
+        );
     }
 
     /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd
@@ -544,7 +605,12 @@ mod tests {
             }],
             ..Default::default()
         };
-        let tracks = [accessibility_track()];
+        let tracks = [sound_track(
+            dir.path(),
+            "ad",
+            1,
+            crate::imp::mca_labels(1, Some(AudioRole::AudioDescription)),
+        )];
         write_cpl(
             &cpl_path,
             "22222222-3333-4444-5555-666666666666",
@@ -558,6 +624,48 @@ mod tests {
         assert!(
             complaint.is_empty(),
             "accessibility CPL must pass ST 2067-3 XSD:\n{complaint}"
+        );
+    }
+
+    /// Validate an IMP with plain sound, no accessibility role, against the ST
+    /// 2067-3:2016 XSD. TrackFileResourceType makes SourceEncoding mandatory, so
+    /// the sound resource fails the schema without its descriptor.
+    #[test]
+    fn a_sound_cpl_passes_st2067_3_xsd() {
+        let dir = tempfile::tempdir().unwrap();
+        let cpl_path = dir.path().join("CPL_sound.xml");
+        let opts = ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        let comp = Composition {
+            title: "Sound Test".into(),
+            content_kind: "feature".into(),
+            audio_files: vec![AudioTrack {
+                path: "stereo.wav".into(),
+                language: Some("en-US".into()),
+                role: None,
+            }],
+            ..Default::default()
+        };
+        let tracks = [
+            crate::mxf_wrap::wrapped_picture(dir.path(), None),
+            sound_track(dir.path(), "stereo", 2, crate::imp::mca_labels(2, None)),
+        ];
+        write_cpl(
+            &cpl_path,
+            "44444444-5555-6666-7777-888888888888",
+            &opts,
+            &comp,
+            &tracks,
+        )
+        .unwrap();
+        let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
+        let complaint = st2067_3_complaint(&cpl_xml);
+        assert!(
+            complaint.is_empty(),
+            "sound CPL must pass ST 2067-3 XSD:\n{complaint}"
         );
     }
 }

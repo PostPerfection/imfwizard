@@ -555,10 +555,8 @@ mod tests {
         let track_files = [
             crate::mxf_wrap::wrapped_picture(dir, Some(&hdr)),
             MxfTrackFile {
-                path: dir.join("AUDIO_ov-audio.mxf"),
                 uuid: "ov-audio".into(),
-                duration: 240,
-                ..Default::default()
+                ..crate::mxf_wrap::wrapped_sound(dir, "ov-audio", 2, None)
             },
         ];
         let opts = crate::imp::ImpOptions {

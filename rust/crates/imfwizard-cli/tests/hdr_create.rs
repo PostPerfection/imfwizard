@@ -115,10 +115,11 @@ fn picture_transfer_and_primaries(imp: &Path) -> ([u8; 16], [u8; 16]) {
 /// edition's validator requires a main audio sequence and the 2020 one does not.
 const NO_SOUND_TRACK: &str = "does not contain a single main audio sequence";
 
-/// A sound resource has to name an EssenceDescriptorList entry, and the entry
-/// has to be the sound MXF's own WaveAudioDescriptor, which the asdcplib binding
-/// does not read back yet.
-const SOUND_DESCRIPTOR_MISSING: &str = "Invalid content was found starting with element";
+/// postkit's `sound_descriptor_regxml` writes the WaveAudioDescriptor's Locked
+/// item as `true`, and the SMPTE Boolean type RegXML renders is `True`, which is
+/// what Photon reads off the MXF. Everything else in the sound descriptor
+/// matches; delete this the moment postkit spells it `True`.
+const LOCKED_BOOLEAN_CASING: &str = "EssenceDescriptor with Id";
 
 /// Photon has to find nothing but `allowed`: the CPL, the picture MXF, the PKL
 /// and the ASSETMAP. The CPL's EssenceDescriptor is the MXF's own descriptor, so
@@ -346,17 +347,20 @@ fn photon_rejects_a_colour_the_cpl_invents() {
 }
 
 /// A sound track file is wrapped with the MCA labels ST 2067-2 asks for, which
-/// Photon checks on the MXF. Its CPL EssenceDescriptorList entry is the open
-/// item: the binding reads back no WaveAudioDescriptor to build one from, so the
-/// resource names no descriptor and the CPL fails the ST 2067-3 schema there.
+/// Photon checks on the MXF, and its CPL EssenceDescriptorList entry is that
+/// same descriptor read back off the track file.
 #[test]
 fn a_sound_track_carries_its_mca_labels() {
     let dir = TempDir::new().unwrap();
     let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
     let wav = dir.path().join("stereo.wav");
+    // ST 2067-3 wants every sequence in a segment to run the same length, and
+    // Photon checks it, so the sine is trimmed to the picture's frame count
+    let samples = FRAMES as u32 * 48000 / FPS;
     let made = std::process::Command::new("ffmpeg")
         .args(["-y", "-v", "error", "-f", "lavfi"])
-        .args(["-i", "sine=frequency=1000:duration=0.125:sample_rate=48000"])
+        .args(["-i", "sine=frequency=1000:duration=1:sample_rate=48000"])
+        .args(["-af", &format!("atrim=end_sample={samples}")])
         .args(["-ac", "2", "-c:a", "pcm_s24le"])
         .arg(&wav)
         .output()
@@ -414,5 +418,5 @@ fn a_sound_track_carries_its_mca_labels() {
     assert_eq!(group.audio_content_kind.as_deref(), Some("PRM"));
     assert_eq!(group.audio_element_kind.as_deref(), Some("FCMP"));
 
-    assert_photon_finds_only(&imp, "sound", &[SOUND_DESCRIPTOR_MISSING]);
+    assert_photon_finds_only(&imp, "sound", &[LOCKED_BOOLEAN_CASING]);
 }

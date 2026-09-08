@@ -13,24 +13,6 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
-## Open: the sound resource names no CPL descriptor
-
-The picture resource names an EssenceDescriptorList entry read back out of the
-track file, and the sound resource names none unless `--audio-role ad|hi` gave
-it one. ST 2067-3's TrackFileResourceType makes SourceEncoding mandatory and a
-resource with no descriptor writes none, so Photon reports "Invalid content was
-found starting with element" against the CPL of every IMP that carries sound.
-`hdr_create.rs` allows that one finding, as `SOUND_DESCRIPTOR_MISSING`, so the
-end-to-end sound test passes with it outstanding.
-
-What closes it: `asdcplib::as02::pcm::MxfReader` reads back no
-WaveAudioDescriptor, so the binding needs one the way
-`asdcplib::as02::jp2k::MxfReader` already has `rgba_essence_descriptor` and
-`jpeg2000_sub_descriptor`. Then the sound path writes its entry the way
-`cpl::picture_descriptor_body` writes the picture's: read the descriptor off the
-wrapped track file and hand it to a `postkit::regxml` writer, InstanceID
-included, since Photon compares the CPL entry with the MXF field for field.
-
 ## Open: `to-dcp` takes Rec.709 picture only
 
 `to_dcp.rs` transcodes an IMF profile picture whose track file signals Rec.709
