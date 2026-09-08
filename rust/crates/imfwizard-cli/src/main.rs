@@ -1361,6 +1361,14 @@ enum Commands {
         /// Output directory for MXF and ADM sidecar
         #[arg(short, long)]
         output: String,
+
+        /// Frame rate numerator
+        #[arg(long, default_value = "24")]
+        fps_num: u32,
+
+        /// Frame rate denominator
+        #[arg(long, default_value = "1")]
+        fps_den: u32,
     },
 
     /// Check external tool dependencies
@@ -3980,12 +3988,24 @@ fn run() {
             }
         }
 
-        Commands::Atmos { input, output } => {
+        Commands::Atmos {
+            input,
+            output,
+            fps_num,
+            fps_den,
+        } => {
             // Import Dolby Atmos ADM BWF into IMF-compatible MXF
             let input_path = std::path::Path::new(&input);
             let output_path = std::path::Path::new(&output);
 
-            let result = imfwizard_core::atmos::import_atmos(input_path, output_path);
+            if fps_num == 0 || fps_den == 0 {
+                fail(format!(
+                    "--fps-num {fps_num} --fps-den {fps_den}: an edit rate needs both above 0"
+                ));
+            }
+
+            let result =
+                imfwizard_core::atmos::import_atmos(input_path, output_path, fps_num, fps_den);
             if result.success {
                 println!(
                     "Atmos import complete: {} beds, {} objects, {} channels",
