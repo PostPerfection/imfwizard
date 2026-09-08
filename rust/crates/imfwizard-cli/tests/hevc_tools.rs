@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use postkit::dolby_vision::{
-    DOLBY_VISION_FIXTURE_FRAMES, DolbyVisionFixtureProfile, write_dolby_vision_fixture,
+    DOLBY_VISION_FIXTURE_FRAMES, DolbyVisionFixtureProfile, parse_single_rpu,
+    write_dolby_vision_fixture,
 };
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -13,7 +14,13 @@ const FIXTURE_FPS: u32 = 25;
 // 12 bit PQ code for 600 cd/m², the level 1 peak the fixture RPUs carry
 const PQ_CODE_600_NITS: u16 = 2851;
 // an 8.1 RPU reads back as profile 8, the RPU carries no sub profile
-const DOVI_PROFILE_8: u64 = 8;
+const DOVI_PROFILE_8: u8 = 8;
+const DOVI_PROFILE_5: u8 = 5;
+const NAL_START_CODE: [u8; 4] = [0, 0, 0, 1];
+// the reshaping curve mode 5 writes, an eight segment polynomial over the luma
+const PROFILE_84_LUMA_PIVOTS: [u16; 9] = [63, 69, 230, 256, 256, 37, 16, 8, 7];
+// profile 8.1 maps the whole range in one segment
+const PROFILE_81_LUMA_PIVOTS: [u16; 2] = [0, 1023];
 
 const MAX_CLL: u64 = 1000;
 const MAX_FALL: u64 = 400;
@@ -83,6 +90,17 @@ fn profile81_fixture(directory: &Path) -> PathBuf {
     .unwrap()
 }
 
+fn profile5_fixture(directory: &Path) -> PathBuf {
+    write_dolby_vision_fixture(
+        directory,
+        "profile5.hevc",
+        DolbyVisionFixtureProfile::Profile5,
+        None,
+        Some(PQ_CODE_600_NITS),
+    )
+    .unwrap()
+}
+
 fn extract_rpu(hevc: &Path, bin: &Path) {
     cmd()
         .arg("dv-extract")
@@ -94,8 +112,35 @@ fn extract_rpu(hevc: &Path, bin: &Path) {
         .success();
 }
 
-// postkit's parse_single_rpu leaves the emulation prevention bytes in place, so
-// the RPUs are read back with dovi_tool's own parser
+// an escaped RPU cannot hold a start code, so the NALUs split on one
+fn rpu_nalus(bin: &Path) -> Vec<Vec<u8>> {
+    let data = std::fs::read(bin).unwrap_or_else(|e| panic!("read {}: {e}", bin.display()));
+    let starts: Vec<usize> = (0..data.len().saturating_sub(NAL_START_CODE.len() - 1))
+        .filter(|&start| data[start..start + NAL_START_CODE.len()] == NAL_START_CODE)
+        .collect();
+    assert!(!starts.is_empty(), "{} holds no RPU", bin.display());
+
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(data.len());
+            data[start..end].to_vec()
+        })
+        .collect()
+}
+
+fn luma_pivots(nalu: &[u8]) -> Vec<u16> {
+    parse_single_rpu(nalu)
+        .expect("parse the RPU")
+        .rpu_data_mapping
+        .expect("the RPU carries no mapping")
+        .curves[0]
+        .pivots
+        .clone()
+}
+
+// dovi_tool reading the file back proves the RPUs are written as it writes them
 fn exported_rpus(bin: &Path) -> Vec<Value> {
     let json_path = bin.with_extension("export.json");
     let exported = std::process::Command::new("dovi_tool")
@@ -122,10 +167,54 @@ fn dv_extract_writes_the_rpu_of_every_frame() {
     let rpu = directory.path().join("extracted.bin");
     extract_rpu(&fixture, &rpu);
 
-    let rpus = exported_rpus(&rpu);
-    assert_eq!(rpus.len(), DOLBY_VISION_FIXTURE_FRAMES);
-    for parsed in &rpus {
-        assert_eq!(parsed["dovi_profile"], DOVI_PROFILE_8);
+    let nalus = rpu_nalus(&rpu);
+    assert_eq!(nalus.len(), DOLBY_VISION_FIXTURE_FRAMES);
+    for nalu in &nalus {
+        assert_eq!(
+            parse_single_rpu(nalu).expect("parse the RPU").dovi_profile,
+            DOVI_PROFILE_8
+        );
+    }
+}
+
+#[test]
+fn dv_convert_retargets_profile_5() {
+    let directory = TempDir::new().unwrap();
+    let fixture = profile5_fixture(directory.path());
+    let rpu = directory.path().join("profile5.bin");
+    extract_rpu(&fixture, &rpu);
+    for nalu in rpu_nalus(&rpu) {
+        assert_eq!(
+            parse_single_rpu(&nalu).expect("parse the RPU").dovi_profile,
+            DOVI_PROFILE_5
+        );
+    }
+
+    for (target_profile, pivots) in [
+        ("8.1", PROFILE_81_LUMA_PIVOTS.to_vec()),
+        ("8.4", PROFILE_84_LUMA_PIVOTS.to_vec()),
+    ] {
+        let converted = directory
+            .path()
+            .join(format!("profile{target_profile}.bin"));
+        cmd()
+            .arg("dv-convert")
+            .arg("-i")
+            .arg(&rpu)
+            .arg("-o")
+            .arg(&converted)
+            .args(["--target-profile", target_profile])
+            .assert()
+            .success();
+
+        let exported = exported_rpus(&converted);
+        assert_eq!(exported.len(), DOLBY_VISION_FIXTURE_FRAMES);
+        for parsed in &exported {
+            assert_eq!(parsed["dovi_profile"], DOVI_PROFILE_8);
+        }
+        for nalu in rpu_nalus(&converted) {
+            assert_eq!(luma_pivots(&nalu), pivots);
+        }
     }
 }
 
