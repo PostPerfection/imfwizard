@@ -7,6 +7,7 @@ use quick_xml::reader::Reader;
 
 use crate::EssenceType;
 use crate::MxfTrackFile;
+use crate::source_edits::{FITTED_AUDIO_PREFIX, fit_audio_to_picture};
 
 /// Options for creating a supplemental IMP.
 ///
@@ -286,19 +287,35 @@ fn descriptors_still_referenced(
 }
 
 /// Wrap one new/changed asset into an MXF track file inside the supplemental IMP.
+///
+/// Sound is padded with silence or cut to `picture_frames` first, the rule
+/// `create` follows, so the supplement's dub runs the OV picture's length rather
+/// than its own and the segment's sequences stay equal.
 fn wrap_asset(
     spec: &TrackSpec,
     output_dir: &Path,
     fps_num: u32,
     fps_den: u32,
+    picture_frames: Option<u64>,
 ) -> Result<MxfTrackFile, String> {
     if !spec.path.exists() {
         return Err(format!("input not found: {}", spec.path.display()));
     }
     let asset_uuid = uuid::Uuid::new_v4();
     let mxf_path = output_dir.join(format!("{}_{asset_uuid}.mxf", prefix_for(spec.kind)));
+
+    let fitted = output_dir.join(format!("{FITTED_AUDIO_PREFIX}{asset_uuid}.wav"));
+    let mut source = spec.path.clone();
+    if spec.kind == ImfTrackKind::Audio
+        && let Some(frames) = picture_frames
+        && let Some(fit) = fit_audio_to_picture(&spec.path, &fitted, frames, fps_num, fps_den)?
+    {
+        crate::imp::report_audio_fit(&spec.path, &fit, frames);
+        source = fitted.clone();
+    }
+
     let wrap = crate::mxf_wrap::wrap_mxf(&crate::mxf_wrap::MxfWrapOptions {
-        input_dir: spec.path.clone(),
+        input_dir: source.clone(),
         output_file: mxf_path,
         essence_type: essence_for(spec.kind),
         edit_rate_num: fps_num,
@@ -308,6 +325,9 @@ fn wrap_asset(
         mca: None,
         asset_uuid: Some(*asset_uuid.as_bytes()),
     });
+    if source == fitted {
+        let _ = std::fs::remove_file(&fitted);
+    }
     if !wrap.success {
         return Err(format!(
             "wrap failed for {}: {}",
@@ -316,6 +336,16 @@ fn wrap_asset(
         ));
     }
     Ok(wrap.track_file)
+}
+
+/// How long the OV's picture runs, which every sound file the supplement wraps
+/// is fitted to. `None` when the OV CPL names no image resource, and then the
+/// sound is wrapped at its own length.
+fn ov_picture_frames(ov: &CplResources) -> Option<u64> {
+    ov.resources
+        .iter()
+        .find(|resource| resource.kind == ImfTrackKind::Image)
+        .map(|resource| resource.duration)
 }
 
 /// Create a supplemental IMP referencing an Original Version (OV).
@@ -395,6 +425,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
     // the OV entry that described the essence it replaces
     let mut wrapped_descriptors: Vec<ImfEssenceDescriptor> = Vec::new();
     let edit_rate = asdcplib::Rational::new(ov.fps_num as i32, ov.fps_den as i32);
+    let picture_frames = ov_picture_frames(&ov);
     let mut resources: Vec<ImfResource> = ov
         .resources
         .iter()
@@ -407,7 +438,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         .collect();
 
     for s in &replace_specs {
-        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den) {
+        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den, picture_frames) {
             Ok(tf) => tf,
             Err(e) => return SupplementResult::fail(out, e),
         };
@@ -428,7 +459,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         present.push(tf);
     }
     for s in &add_specs {
-        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den) {
+        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den, picture_frames) {
             Ok(tf) => tf,
             Err(e) => return SupplementResult::fail(out, e),
         };
@@ -556,6 +587,9 @@ mod tests {
         assert_eq!(ov.resources[1].uuid, "ov-audio");
     }
 
+    /// The OV's running time, which every sound file a supplement wraps is fitted to.
+    const OV_FRAMES: u64 = 24;
+
     /// The OV as imfwizard itself writes it: an HLG picture, so the CPL claims the
     /// 2020 edition and carries an RGBADescriptor the image resource names.
     fn write_hlg_ov(dir: &Path) {
@@ -567,7 +601,7 @@ mod tests {
             ..Default::default()
         };
         let track_files = [
-            crate::mxf_wrap::wrapped_picture(dir, Some(&hdr)),
+            crate::mxf_wrap::wrapped_picture(dir, Some(&hdr), OV_FRAMES),
             MxfTrackFile {
                 uuid: "ov-audio".into(),
                 ..crate::mxf_wrap::wrapped_sound(dir, "ov-audio", 2, None)
@@ -679,6 +713,68 @@ mod tests {
             2,
             "both wrapped sound files must carry their own descriptor: {cpl}"
         );
+
+        let complaint = crate::cpl::st2067_3_complaint(&cpl);
+        assert!(
+            complaint.is_empty(),
+            "supplemental CPL must pass ST 2067-3 XSD:\n{complaint}"
+        );
+    }
+
+    /// A dub the supplement wraps runs the OV picture's length, whichever way it
+    /// missed: short is padded with silence, long is cut. A segment whose
+    /// sequences run different lengths is what Photon rejects.
+    #[test]
+    fn a_supplement_fits_its_dubs_to_the_ov_picture() {
+        const SAMPLES_A_FRAME: u32 = 2000;
+        let dir = tempfile::tempdir().unwrap();
+        write_hlg_ov(dir.path());
+        let out = tempfile::tempdir().unwrap();
+
+        let wav = |name: &str, frames: u64| {
+            let path = out.path().join(format!("{name}.wav"));
+            let samples = frames as u32 * SAMPLES_A_FRAME;
+            std::fs::write(&path, make_wav(2, 48000, 16, samples)).unwrap();
+            path
+        };
+        let short = wav("short", OV_FRAMES - 1);
+        let long = wav("long", OV_FRAMES + 1);
+
+        let result = create_supplement(&SupplementOptions {
+            ov_dir: dir.path().to_path_buf(),
+            title: "Fitted dubs".into(),
+            output_dir: out.path().to_path_buf(),
+            replace: vec![format!("{}@audio", short.display())],
+            add: vec![format!("{}@audio", long.display())],
+        });
+        assert!(result.success, "supplement failed: {}", result.error);
+
+        let cpl = read_one(out.path(), "CPL_");
+        let durations: Vec<u64> = cpl
+            .split("<IntrinsicDuration>")
+            .skip(1)
+            .map(|rest| {
+                rest.split("</IntrinsicDuration>")
+                    .next()
+                    .expect("a closing tag")
+                    .parse()
+                    .expect("a frame count")
+            })
+            .collect();
+        assert_eq!(
+            durations,
+            vec![OV_FRAMES; 3],
+            "the picture and both dubs must run {OV_FRAMES} frames: {cpl}"
+        );
+
+        // no fitted scratch is left beside the package
+        let leftovers: Vec<String> = std::fs::read_dir(out.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(FITTED_AUDIO_PREFIX))
+            .collect();
+        assert!(leftovers.is_empty(), "fitted scratch left: {leftovers:?}");
 
         let complaint = crate::cpl::st2067_3_complaint(&cpl);
         assert!(

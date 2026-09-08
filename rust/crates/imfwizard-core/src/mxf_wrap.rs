@@ -316,21 +316,21 @@ pub fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -> Vec<u
 pub(crate) fn wrapped_picture(
     dir: &std::path::Path,
     hdr: Option<&crate::hdr_wcg::HdrWcg>,
+    frame_count: u64,
 ) -> crate::MxfTrackFile {
     let frames = dir.join("j2k");
     std::fs::create_dir_all(&frames).unwrap();
-    std::fs::write(
-        frames.join("0001.j2c"),
-        synthetic_j2k_codestream(1920, 1080, 12),
-    )
-    .unwrap();
+    let codestream = synthetic_j2k_codestream(1920, 1080, 12);
+    for frame in 1..=frame_count {
+        std::fs::write(frames.join(format!("{frame:04}.j2c")), &codestream).unwrap();
+    }
     let wrap = wrap_mxf(&MxfWrapOptions {
         input_dir: frames,
         output_file: dir.join("VIDEO_hdr.mxf"),
         essence_type: crate::EssenceType::J2k,
         edit_rate_num: 24,
         edit_rate_den: 1,
-        duration: 1,
+        duration: frame_count,
         hdr: Some(picture_colour(hdr)),
         mca: None,
         asset_uuid: None,

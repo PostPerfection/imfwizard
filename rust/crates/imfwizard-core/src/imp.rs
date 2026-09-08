@@ -196,7 +196,7 @@ fn wrap_one(
     Ok(r.track_file)
 }
 
-fn report_audio_fit(sound: &Path, fit: &AudioFit, picture_frames: u64) {
+pub(crate) fn report_audio_fit(sound: &Path, fit: &AudioFit, picture_frames: u64) {
     let what = match fit.silence_added {
         0 => format!(
             "{} sample frames dropped from its tail",

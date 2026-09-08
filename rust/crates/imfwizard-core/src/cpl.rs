@@ -529,7 +529,8 @@ mod tests {
             hdr: Some(hdr),
             ..Default::default()
         };
-        let video = crate::mxf_wrap::wrapped_picture(dir.path(), Some(&comp.hdr.clone().unwrap()));
+        let video =
+            crate::mxf_wrap::wrapped_picture(dir.path(), Some(&comp.hdr.clone().unwrap()), 1);
         write_cpl(
             &cpl_path,
             "33333333-4444-5555-6666-777777777777",
@@ -661,7 +662,7 @@ mod tests {
             ..Default::default()
         };
         let tracks = [
-            crate::mxf_wrap::wrapped_picture(dir.path(), None),
+            crate::mxf_wrap::wrapped_picture(dir.path(), None, 1),
             sound_track(dir.path(), "stereo", 2, crate::imp::mca_labels(2, None)),
         ];
         write_cpl(
