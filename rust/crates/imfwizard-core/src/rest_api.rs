@@ -3,7 +3,12 @@
 /// Provides HTTP endpoints for IMP creation, validation, encoding,
 /// transcoding, and job management via the integrated job queue.
 use serde::{Deserialize, Serialize};
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use postkit::rest_api::{Request, RestServer, RouteResponse};
 
 use crate::job_queue::{Job, JobQueue, JobState, JobType};
 use crate::tools;
@@ -26,6 +31,34 @@ impl Default for ApiConfig {
     }
 }
 
+// the only paths an API key is not required on
+const HEALTH_PATHS: [&str; 2] = ["/api/v1/health", "/health"];
+
+const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+
+/// What a job submission body carries. Anything else in the JSON object is a
+/// 400 naming the field, so a misspelt key cannot become a silently empty path.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JobRequest {
+    #[serde(default)]
+    input: String,
+    #[serde(default)]
+    output: String,
+    #[serde(default)]
+    title: String,
+}
+
+/// Bind the API without serving it, so a caller can read the address it got
+/// when the port was 0. The background worker is already running.
+pub fn bind_server(config: &ApiConfig) -> Result<(RestServer, TcpListener), String> {
+    let server = build_server(config);
+    let listener = server
+        .bind()
+        .map_err(|e| format!("Failed to bind to {}: {e}", server.bind_address))?;
+    Ok((server, listener))
+}
+
 /// Start the REST API server.
 ///
 /// Endpoints:
@@ -39,20 +72,28 @@ impl Default for ApiConfig {
 /// - `DELETE /api/v1/jobs/<id>` — cancel job
 /// - `GET  /api/v1/profiles`    — list delivery presets
 /// - `GET  /api/v1/tools`       — dependency check
-/// - `POST /api/v1/pause`       — pause job queue
-/// - `POST /api/v1/resume`      — resume job queue
+/// - `POST /api/v1/pause`       — refuse new submissions
+/// - `POST /api/v1/resume`      — accept submissions again
 /// - `GET  /metrics`            — Prometheus metrics
 pub fn start_server(config: &ApiConfig) -> Result<(), String> {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+    let (server, listener) = bind_server(config)?;
+    tracing::info!(
+        "IMF Wizard REST API listening on {}",
+        listener
+            .local_addr()
+            .map(|address| address.to_string())
+            .unwrap_or_else(|_| server.bind_address.clone())
+    );
+    server
+        .serve_forever(listener)
+        .map_err(|e| format!("REST API server failed: {e}"))
+}
 
-    let addr = format!("{}:{}", config.host, config.port);
-    let listener =
-        TcpListener::bind(&addr).map_err(|e| format!("Failed to bind to {addr}: {e}"))?;
-
-    tracing::info!("IMF Wizard REST API listening on {addr}");
+fn build_server(config: &ApiConfig) -> RestServer {
+    let mut server = RestServer::new(&format!("{}:{}", config.host, config.port));
+    if let Some(key) = &config.api_key {
+        server.require_api_key(key, &HEALTH_PATHS);
+    }
 
     let queue = JobQueue::new();
     let paused = Arc::new(AtomicBool::new(false));
@@ -61,226 +102,178 @@ pub fn start_server(config: &ApiConfig) -> Result<(), String> {
     // live only for the lifetime of this server process.
     let _worker_stop = crate::executor::spawn_worker(&queue);
 
-    for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("Failed to accept connection: {e}");
-                continue;
-            }
-        };
-
-        let mut buf = [0u8; 65536];
-        let n = match stream.read(&mut buf) {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let first_line = request.lines().next().unwrap_or("");
-        let body = request
-            .split("\r\n\r\n")
-            .nth(1)
-            .or_else(|| request.split("\n\n").nth(1))
-            .unwrap_or("");
-
-        // API key check
-        if let Some(ref key) = config.api_key {
-            let has_key = request.contains(&format!("X-Api-Key: {key}"))
-                || request.contains(&format!("Authorization: Bearer {key}"));
-            if !has_key && !first_line.contains("/api/v1/health") {
-                let resp = json_response("401 Unauthorized", r#"{"error":"unauthorized"}"#);
-                let _ = stream.write_all(resp.as_bytes());
-                continue;
-            }
-        }
-
-        let (status, response_body) = route(first_line, body, &queue, &paused);
-
-        let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{response_body}",
-            response_body.len()
+    for path in HEALTH_PATHS {
+        server.route(
+            "GET",
+            path,
+            Box::new(|_request| {
+                (
+                    200,
+                    format!(
+                        r#"{{"status":"ok","version":"{}"}}"#,
+                        env!("CARGO_PKG_VERSION")
+                    ),
+                )
+            }),
         );
-        let _ = stream.write_all(response.as_bytes());
     }
 
-    Ok(())
+    server.route(
+        "GET",
+        "/api/v1/tools",
+        Box::new(|_request| {
+            let result = tools::check_all_tools();
+            (
+                200,
+                serde_json::to_string(&result).unwrap_or_else(|_| "{}".into()),
+            )
+        }),
+    );
+
+    server.route(
+        "GET",
+        "/api/v1/profiles",
+        Box::new(|_request| {
+            let profiles = crate::profiles::all_profiles();
+            (
+                200,
+                serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into()),
+            )
+        }),
+    );
+
+    let jobs = queue.clone();
+    server.route(
+        "GET",
+        "/api/v1/jobs",
+        Box::new(move |_request| {
+            (
+                200,
+                serde_json::to_string(&jobs.list()).unwrap_or_else(|_| "[]".into()),
+            )
+        }),
+    );
+
+    let jobs = queue.clone();
+    server.route_with_parameter(
+        "GET",
+        "/api/v1/jobs/",
+        Box::new(move |_request, id| {
+            let Ok(id) = id.parse::<u64>() else {
+                return (400, r#"{"error":"invalid job id"}"#.into());
+            };
+            match jobs.get(id) {
+                Some(job) => (
+                    200,
+                    serde_json::to_string(&job).unwrap_or_else(|_| "{}".into()),
+                ),
+                None => (404, r#"{"error":"job not found"}"#.into()),
+            }
+        }),
+    );
+
+    let jobs = queue.clone();
+    server.route_with_parameter(
+        "DELETE",
+        "/api/v1/jobs/",
+        Box::new(move |_request, id| {
+            let Ok(id) = id.parse::<u64>() else {
+                return (400, r#"{"error":"invalid job id"}"#.into());
+            };
+            if jobs.cancel(id) {
+                return (200, r#"{"cancelled":true}"#.into());
+            }
+            (
+                404,
+                r#"{"error":"job not found or not cancellable"}"#.into(),
+            )
+        }),
+    );
+
+    for (path, job_type) in [
+        ("/api/v1/create", JobType::Create),
+        ("/api/v1/validate", JobType::Validate),
+        ("/api/v1/encode", JobType::Encode),
+        ("/api/v1/transcode", JobType::Transcode),
+    ] {
+        let jobs = queue.clone();
+        let paused = paused.clone();
+        server.route(
+            "POST",
+            path,
+            Box::new(move |request| submit_job(request, job_type, &jobs, &paused)),
+        );
+    }
+
+    for (path, wanted) in [("/api/v1/pause", true), ("/api/v1/resume", false)] {
+        let paused = paused.clone();
+        server.route(
+            "POST",
+            path,
+            Box::new(move |_request| {
+                paused.store(wanted, Ordering::Relaxed);
+                (200, format!(r#"{{"paused":{wanted}}}"#))
+            }),
+        );
+    }
+
+    let jobs = queue.clone();
+    server.route_with_content_type(
+        "GET",
+        "/metrics",
+        Box::new(move |_request| RouteResponse {
+            status: 200,
+            content_type: PROMETHEUS_CONTENT_TYPE,
+            body: metrics(&jobs),
+        }),
+    );
+
+    server
 }
 
-fn route(
-    first_line: &str,
-    body: &str,
-    queue: &JobQueue,
-    paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> (&'static str, String) {
-    use std::sync::atomic::Ordering;
-
-    // GET /api/v1/health
-    if first_line.starts_with("GET /api/v1/health") || first_line.starts_with("GET /health") {
-        return ("200 OK", r#"{"status":"ok","version":"1.0.0"}"#.into());
-    }
-
-    // GET /api/v1/tools
-    if first_line.starts_with("GET /api/v1/tools") {
-        let result = tools::check_all_tools();
-        let json = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
-        return ("200 OK", json);
-    }
-
-    // GET /api/v1/profiles
-    if first_line.starts_with("GET /api/v1/profiles") {
-        let profiles = crate::profiles::all_profiles();
-        let json = serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into());
-        return ("200 OK", json);
-    }
-
-    // GET /api/v1/jobs/<id>
-    if first_line.starts_with("GET /api/v1/jobs/") {
-        let id_str = first_line
-            .strip_prefix("GET /api/v1/jobs/")
-            .and_then(|s| s.split_whitespace().next())
-            .unwrap_or("");
-        if let Ok(id) = id_str.parse::<u64>() {
-            if let Some(job) = queue.get(id) {
-                let json = serde_json::to_string(&job).unwrap_or_else(|_| "{}".into());
-                return ("200 OK", json);
-            }
-            return ("404 Not Found", r#"{"error":"job not found"}"#.into());
-        }
-        return ("400 Bad Request", r#"{"error":"invalid job id"}"#.into());
-    }
-
-    // DELETE /api/v1/jobs/<id>
-    if first_line.starts_with("DELETE /api/v1/jobs/") {
-        let id_str = first_line
-            .strip_prefix("DELETE /api/v1/jobs/")
-            .and_then(|s| s.split_whitespace().next())
-            .unwrap_or("");
-        if let Ok(id) = id_str.parse::<u64>() {
-            if queue.cancel(id) {
-                return ("200 OK", r#"{"cancelled":true}"#.into());
-            }
-            return (
-                "404 Not Found",
-                r#"{"error":"job not found or not cancellable"}"#.into(),
-            );
-        }
-        return ("400 Bad Request", r#"{"error":"invalid job id"}"#.into());
-    }
-
-    // GET /api/v1/jobs
-    if first_line.starts_with("GET /api/v1/jobs") {
-        let jobs = queue.list();
-        let json = serde_json::to_string(&jobs).unwrap_or_else(|_| "[]".into());
-        return ("200 OK", json);
-    }
-
-    // POST /api/v1/create
-    if first_line.starts_with("POST /api/v1/create") {
-        return submit_job(body, JobType::Create, queue, paused);
-    }
-
-    // POST /api/v1/validate
-    if first_line.starts_with("POST /api/v1/validate") {
-        return submit_job(body, JobType::Validate, queue, paused);
-    }
-
-    // POST /api/v1/encode
-    if first_line.starts_with("POST /api/v1/encode") {
-        return submit_job(body, JobType::Encode, queue, paused);
-    }
-
-    // POST /api/v1/transcode
-    if first_line.starts_with("POST /api/v1/transcode") {
-        return submit_job(body, JobType::Transcode, queue, paused);
-    }
-
-    // POST /api/v1/pause
-    if first_line.starts_with("POST /api/v1/pause") {
-        paused.store(true, Ordering::Relaxed);
-        return ("200 OK", r#"{"paused":true}"#.into());
-    }
-
-    // POST /api/v1/resume
-    if first_line.starts_with("POST /api/v1/resume") {
-        paused.store(false, Ordering::Relaxed);
-        return ("200 OK", r#"{"paused":false}"#.into());
-    }
-
-    // GET /metrics
-    if first_line.starts_with("GET /metrics") {
-        let jobs = queue.list();
-        let queued = jobs.iter().filter(|j| j.state == JobState::Queued).count();
-        let running = jobs.iter().filter(|j| j.state == JobState::Running).count();
-        let completed = jobs
-            .iter()
-            .filter(|j| j.state == JobState::Completed)
-            .count();
-        let failed = jobs.iter().filter(|j| j.state == JobState::Failed).count();
-        let metrics = format!(
-            "# HELP imfwizard_jobs_total Total jobs by state\n\
-             # TYPE imfwizard_jobs_total gauge\n\
-             imfwizard_jobs_total{{state=\"queued\"}} {queued}\n\
-             imfwizard_jobs_total{{state=\"running\"}} {running}\n\
-             imfwizard_jobs_total{{state=\"completed\"}} {completed}\n\
-             imfwizard_jobs_total{{state=\"failed\"}} {failed}\n"
-        );
-        return ("200 OK", metrics);
-    }
-
-    ("404 Not Found", r#"{"error":"not found"}"#.into())
+fn metrics(queue: &JobQueue) -> String {
+    let jobs = queue.list();
+    let count = |state: JobState| jobs.iter().filter(|job| job.state == state).count();
+    let queued = count(JobState::Queued);
+    let running = count(JobState::Running);
+    let completed = count(JobState::Completed);
+    let failed = count(JobState::Failed);
+    format!(
+        "# HELP imfwizard_jobs_total Total jobs by state\n\
+         # TYPE imfwizard_jobs_total gauge\n\
+         imfwizard_jobs_total{{state=\"queued\"}} {queued}\n\
+         imfwizard_jobs_total{{state=\"running\"}} {running}\n\
+         imfwizard_jobs_total{{state=\"completed\"}} {completed}\n\
+         imfwizard_jobs_total{{state=\"failed\"}} {failed}\n"
+    )
 }
 
 fn submit_job(
-    body: &str,
+    request: &Request,
     job_type: JobType,
     queue: &JobQueue,
-    paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> (&'static str, String) {
-    use std::sync::atomic::Ordering;
-
+    paused: &AtomicBool,
+) -> (u16, String) {
     if paused.load(Ordering::Relaxed) {
-        return (
-            "503 Service Unavailable",
-            r#"{"error":"queue is paused"}"#.into(),
-        );
+        return (503, r#"{"error":"queue is paused"}"#.into());
     }
 
-    let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-    let input = parsed["input"]
-        .as_str()
-        .or_else(|| parsed["imp_dir"].as_str())
-        .unwrap_or("")
-        .to_string();
-    let output = parsed["output"]
-        .as_str()
-        .or_else(|| parsed["output_dir"].as_str())
-        .unwrap_or("")
-        .to_string();
-    let description = parsed["title"]
-        .as_str()
-        .or_else(|| parsed["description"].as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let job = Job {
-        job_type,
-        description,
-        input: PathBuf::from(&input),
-        output: PathBuf::from(&output),
-        ..Default::default()
+    let parsed: JobRequest = match serde_json::from_str(&request.body) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            return (
+                400,
+                serde_json::json!({ "error": e.to_string() }).to_string(),
+            );
+        }
     };
 
-    let id = queue.submit(job);
-    (
-        "202 Accepted",
-        format!(r#"{{"id":{id},"status":"queued"}}"#),
-    )
-}
-
-fn json_response(status: &str, body: &str) -> String {
-    format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    )
+    let id = queue.submit(Job {
+        job_type,
+        description: parsed.title,
+        input: PathBuf::from(&parsed.input),
+        output: PathBuf::from(&parsed.output),
+        ..Default::default()
+    });
+    (202, format!(r#"{{"id":{id},"status":"queued"}}"#))
 }

@@ -2333,3 +2333,48 @@ fn a_rec2020_source_keeps_a_neutral_neutral_at_the_converted_level() {
         );
     }
 }
+
+/// `serve` really listens: the command is started on a free port and answers
+/// its health endpoint over TCP before it is killed.
+#[test]
+fn serve_answers_health_over_http() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("imfwizard"))
+        .args([
+            "serve",
+            "--bind",
+            &format!("127.0.0.1:{port}"),
+            "--api-key",
+            "k",
+        ])
+        .spawn()
+        .unwrap();
+
+    let mut response = String::new();
+    for _ in 0..200 {
+        let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            continue;
+        };
+        stream
+            .write_all(
+                b"GET /api/v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        stream.read_to_string(&mut response).unwrap();
+        break;
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "serve never answered on port {port}: {response:?}"
+    );
+    assert!(response.contains(r#""status":"ok""#), "{response}");
+}

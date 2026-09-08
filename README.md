@@ -78,7 +78,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Slate generation**, prepend a black text slate as an image sequence
 
 ### Integration & Extensibility
-- **REST API server**, HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
+- **REST API server** (`serve`), HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
 - **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro 7 XML timelines
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
@@ -603,7 +603,7 @@ imfwizard analytics -d /path/to/imp/ --json
 
 ```bash
 # Start on host:port, optionally requiring an API key
-imfwizard rest-api --bind 0.0.0.0:9090 --api-key "my-secret"
+imfwizard serve --bind 0.0.0.0:9090 --api-key "my-secret"
 
 # Endpoints:
 #   GET  /api/v1/health       , health check
@@ -616,10 +616,41 @@ imfwizard rest-api --bind 0.0.0.0:9090 --api-key "my-secret"
 #   DELETE /api/v1/jobs/<id>  , cancel job
 #   GET  /api/v1/profiles     , list delivery presets
 #   GET  /api/v1/tools        , dependency check
-#   POST /api/v1/pause        , pause job queue
-#   POST /api/v1/resume       , resume job queue
+#   POST /api/v1/pause        , refuse new submissions
+#   POST /api/v1/resume       , accept submissions again
 #   GET  /metrics             , Prometheus metrics
 ```
+
+Every job submission takes the same JSON object. `input` and `output` are
+paths on the server, `title` is the ContentTitle a `create` job writes into its
+CPL and the description the other job types carry. Any other field is a 400
+naming it, and a body that is not a JSON object is a 400 too:
+
+```bash
+curl -X POST http://localhost:9090/api/v1/create \
+  -H "X-Api-Key: my-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"input":"/masters/feature/j2k","output":"/deliveries/feature","title":"My Feature"}'
+# {"id":1,"status":"queued"}
+
+curl -H "X-Api-Key: my-secret" http://localhost:9090/api/v1/jobs/1
+# {"id":1,"job_type":"Create","state":"Running","progress":0.0, ...}
+```
+
+A `create` job takes a directory of JPEG 2000 codestreams as its `input`, a
+`validate` job takes an IMP directory, and `encode` and `transcode` take the
+file or frame directory their CLI commands take. A job type that needs
+parameters the queue cannot carry (`qc`, `copy`, `kdm`) has no endpoint: run its
+CLI command.
+
+`--api-key` is required on every endpoint but `/api/v1/health` and `/health`,
+in `X-Api-Key` or `Authorization: Bearer`, `/metrics` included. Without the flag
+nothing is required and the whole API is open, so bind it to a network you
+trust.
+
+`POST /api/v1/pause` refuses new submissions with 503 until `POST
+/api/v1/resume`. A job already queued or running is untouched, so the worker
+drains what it has; cancel those with `DELETE /api/v1/jobs/<id>`.
 
 ### Dependency check (doctor)
 
