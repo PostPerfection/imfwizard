@@ -173,6 +173,31 @@ mod tests {
     use super::*;
     use crate::imp::AudioTrack;
 
+    const APP2E_2020_NAMESPACE: &str = "http://www.smpte-ra.org/ns/2067-21/2020";
+
+    fn app2e_2020_property(cpl_xml: &str, local_name: &str) -> Option<String> {
+        use quick_xml::events::Event;
+        use quick_xml::name::ResolveResult;
+
+        let mut reader = quick_xml::NsReader::from_str(cpl_xml);
+        let mut wanted = false;
+        loop {
+            let (namespace, event) = reader.read_resolved_event().expect("parse the CPL");
+            match event {
+                Event::Start(element) => {
+                    wanted = matches!(namespace, ResolveResult::Bound(bound)
+                        if bound.as_ref() == APP2E_2020_NAMESPACE.as_bytes())
+                        && element.local_name().as_ref() == local_name.as_bytes();
+                }
+                Event::Text(text) if wanted => {
+                    return Some(text.unescape().expect("unescape the text").into_owned());
+                }
+                Event::Eof => return None,
+                _ => {}
+            }
+        }
+    }
+
     #[test]
     fn write_cpl_identifies_app_2e() {
         let dir = tempfile::tempdir().unwrap();
@@ -240,13 +265,16 @@ mod tests {
 
         write_cpl(&path, "cpl", &ImpOptions::default(), &comp, &[]).unwrap();
         let xml = std::fs::read_to_string(&path).unwrap();
-        let app2e = "http://www.smpte-ra.org/ns/2067-21/2020";
-        assert!(xml.contains(&format!(
-            "<app2e:MaxCLL xmlns:app2e=\"{app2e}\">993</app2e:MaxCLL>"
-        )));
-        assert!(xml.contains(&format!(
-            "<app2e:MaxFALL xmlns:app2e=\"{app2e}\">362</app2e:MaxFALL>"
-        )));
+        assert_eq!(
+            app2e_2020_property(&xml, "MaxCLL").as_deref(),
+            Some("993"),
+            "MaxCLL must be bound to {APP2E_2020_NAMESPACE}"
+        );
+        assert_eq!(
+            app2e_2020_property(&xml, "MaxFALL").as_deref(),
+            Some("362"),
+            "MaxFALL must be bound to {APP2E_2020_NAMESPACE}"
+        );
         // they follow ApplicationIdentification inside ExtensionProperties
         assert!(
             xml.find("<cc:ApplicationIdentification>").unwrap()
@@ -336,8 +364,8 @@ mod tests {
         assert!(xml.contains("<SourceEncoding>"));
     }
 
-    /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd,
-    /// app2e-2016.xsd and xmldsig-core-schema.xsd. IMFWIZARD_IMF_XSD_DIR overrides it.
+    /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd
+    /// and xmldsig-core-schema.xsd. IMFWIZARD_IMF_XSD_DIR overrides it.
     const VENDORED_IMF_XSD_DIR: &str = "../../../extern/dcpdoctor/extern/photon/src/main/resources";
 
     fn imf_xsd_dir() -> std::path::PathBuf {
@@ -378,16 +406,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cpl_path = dir.path().join("CPL.xml");
         std::fs::write(&cpl_path, cpl_xml).unwrap();
-        // ExtensionProperties is xs:any processContents="lax", so MaxCLL/MaxFALL are
-        // only really checked when the app2e schema is among the imports.
-        let app2e_import = match walk(root, "app2e-2016.xsd") {
-            Some(p) => format!(
-                r#"
-  <xs:import namespace="http://www.smpte-ra.org/schemas/2067-21/2016" schemaLocation="{}"/>"#,
-                postkit::file_uri::file_uri(&p)
-            ),
-            None => String::new(),
-        };
         let driver = dir.path().join("driver.xsd");
         std::fs::write(
             &driver,
@@ -395,7 +413,7 @@ mod tests {
                 r#"<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
-  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>{app2e_import}
+  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>
 </xs:schema>"#,
                 cpl = postkit::file_uri::file_uri(&cpl_xsd),
                 dsig = postkit::file_uri::file_uri(&dsig_xsd),
@@ -451,7 +469,17 @@ mod tests {
         let cpl_xml = std::fs::read_to_string(&cpl_path).unwrap();
         assert!(cpl_xml.contains("<r0:RGBADescriptor"));
         assert!(cpl_xml.contains("<r1:TransferCharacteristic>"));
-        assert!(cpl_xml.contains(">993</app2e:MaxCLL>"));
+        // no 2020 App 2E schema in the tree, so xmllint skips these under xs:any lax
+        assert_eq!(
+            app2e_2020_property(&cpl_xml, "MaxCLL").as_deref(),
+            Some("993"),
+            "MaxCLL must be bound to {APP2E_2020_NAMESPACE}"
+        );
+        assert_eq!(
+            app2e_2020_property(&cpl_xml, "MaxFALL").as_deref(),
+            Some("362"),
+            "MaxFALL must be bound to {APP2E_2020_NAMESPACE}"
+        );
         let complaint = st2067_3_complaint(&cpl_xml);
         assert!(
             complaint.is_empty(),

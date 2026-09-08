@@ -76,6 +76,16 @@ so a codestream whose Rsiz and label say IMF but whose samples are X'Y'Z' would
 still pass, and `app2e_picture.rs` reading a decoded frame back stays the proof
 of that here.
 
+## Open: MaxCLL and MaxFALL are not schema validated
+
+Every composition claims the 2020 App 2E edition, so `write_cpl` emits MaxCLL
+and MaxFALL in `http://www.smpte-ra.org/ns/2067-21/2020`. The only App 2E schema
+in the tree is `app2e-2016.xsd`, which Photon vendors, and ExtensionProperties
+is `xs:any processContents="lax"`, so xmllint skips both elements instead of
+checking them. `cpl.rs` asserts their name, namespace and value directly to
+cover the gap. What closes it: a 2020 edition App 2E XSD among the fixtures, and
+the `st2067_3_complaint` driver importing it under that namespace.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
