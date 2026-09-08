@@ -115,12 +115,6 @@ fn picture_transfer_and_primaries(imp: &Path) -> ([u8; 16], [u8; 16]) {
 /// edition's validator requires a main audio sequence and the 2020 one does not.
 const NO_SOUND_TRACK: &str = "does not contain a single main audio sequence";
 
-/// postkit's `sound_descriptor_regxml` writes the WaveAudioDescriptor's Locked
-/// item as `true`, and the SMPTE Boolean type RegXML renders is `True`, which is
-/// what Photon reads off the MXF. Everything else in the sound descriptor
-/// matches; delete this the moment postkit spells it `True`.
-const LOCKED_BOOLEAN_CASING: &str = "EssenceDescriptor with Id";
-
 /// Photon has to find nothing but `allowed`: the CPL, the picture MXF, the PKL
 /// and the ASSETMAP. The CPL's EssenceDescriptor is the MXF's own descriptor, so
 /// Photon compares the two and checks the App 2E colour against it.
@@ -418,5 +412,5 @@ fn a_sound_track_carries_its_mca_labels() {
     assert_eq!(group.audio_content_kind.as_deref(), Some("PRM"));
     assert_eq!(group.audio_element_kind.as_deref(), Some("FCMP"));
 
-    assert_photon_finds_only(&imp, "sound", &[LOCKED_BOOLEAN_CASING]);
+    assert_photon_finds_only(&imp, "sound", &[]);
 }
