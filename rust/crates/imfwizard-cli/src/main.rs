@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use imfwizard_core::prores::ContainerRaster;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -1246,7 +1247,7 @@ enum Commands {
 
     /// Encode to ProRes
     Prores {
-        /// Input video/image sequence
+        /// Input video/image sequence, or an IMP directory to export as ProRes 4444
         #[arg(short, long)]
         input: String,
 
@@ -1254,9 +1255,17 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Profile (proxy, lt, standard, hq, 4444, 4444xq)
+        /// Profile (proxy, lt, standard, hq, 4444, 4444xq). Ignored for an IMP, which is always 4444
         #[arg(short, long, default_value = "hq")]
         profile: String,
+
+        /// Fit an IMP's picture into a named container: 2k (2048x1080) or 4k (4096x2160)
+        #[arg(long)]
+        container: Option<String>,
+
+        /// UUID of the IMP's CPL to export, when it holds more than one
+        #[arg(long)]
+        cpl: Option<String>,
     },
 
     /// Create partial IMP version
@@ -3627,38 +3636,31 @@ fn run() {
             input,
             output,
             profile,
+            container,
+            cpl,
         } => {
-            let prores_profile = match profile.to_lowercase().as_str() {
-                "proxy" => "0",
-                "lt" => "1",
-                "standard" => "2",
-                "hq" => "3",
-                "4444" => "4",
-                "4444xq" => "5",
-                _ => "3",
-            };
-            let status = std::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-i")
-                .arg(&input)
-                .arg("-c:v")
-                .arg("prores_ks")
-                .arg("-profile:v")
-                .arg(prores_profile)
-                .arg("-c:a")
-                .arg("pcm_s24le")
-                .arg(&output)
-                .status();
-            match status {
-                Ok(s) if s.success() => println!("ProRes encoded: {output}"),
-                Ok(s) => {
-                    eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
-                    std::process::exit(1);
+            let input_path = PathBuf::from(&input);
+            if input_path.is_dir() {
+                let raster = container.as_deref().map(|name| {
+                    ContainerRaster::parse(name).unwrap_or_else(|| {
+                        eprintln!("Error: unknown container '{name}', use 2k or 4k");
+                        std::process::exit(1);
+                    })
+                });
+                match imfwizard_core::prores::export_imp_to_prores(
+                    &input_path,
+                    &PathBuf::from(&output),
+                    cpl.as_deref(),
+                    raster,
+                ) {
+                    Ok(()) => println!("ProRes 4444 exported: {output}"),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Failed to run ffmpeg: {e}");
-                    std::process::exit(1);
-                }
+            } else {
+                encode_prores_file(&input, &output, &profile, container.as_deref());
             }
         }
 
@@ -4538,6 +4540,45 @@ fn run() {
             "grok's accelerator plugin ran {} frames on the device",
             postkit::grok_encoder::accelerated_frames()
         );
+    }
+}
+
+fn encode_prores_file(input: &str, output: &str, profile: &str, container: Option<&str>) {
+    if container.is_some() {
+        eprintln!("Error: --container fits an IMP's picture, and {input} is not an IMP directory");
+        std::process::exit(1);
+    }
+    let prores_profile = match profile.to_lowercase().as_str() {
+        "proxy" => "0",
+        "lt" => "1",
+        "standard" => "2",
+        "hq" => "3",
+        "4444" => "4",
+        "4444xq" => "5",
+        _ => "3",
+    };
+    let status = std::process::Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
+        .arg(input)
+        .arg("-c:v")
+        .arg("prores_ks")
+        .arg("-profile:v")
+        .arg(prores_profile)
+        .arg("-c:a")
+        .arg("pcm_s24le")
+        .arg(output)
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("ProRes encoded: {output}"),
+        Ok(s) => {
+            eprintln!("ffmpeg exited with code {}", s.code().unwrap_or(-1));
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to run ffmpeg: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

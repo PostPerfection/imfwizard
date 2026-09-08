@@ -551,6 +551,17 @@ imfwizard prores \
   -i /path/to/master.mov \
   -o /path/to/master_prores.mov \
   -p hq
+
+# An IMP directory exports its first CPL's picture and main sound as ProRes 4444
+# at the CPL's edit rate. --cpl <uuid> picks another composition.
+imfwizard prores \
+  -i /path/to/imp/ \
+  -o /path/to/delivery.mov \
+  --container 2k
+
+# Containers: 2k (2048×1080), 4k (4096×2160). The picture keeps its aspect ratio
+# and is padded with black. Without --container it keeps its own raster.
+# No file inside the IMP is written.
 ```
 
 ### Burn subtitles into video
