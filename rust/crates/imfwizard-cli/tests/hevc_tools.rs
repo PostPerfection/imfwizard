@@ -26,6 +26,60 @@ const MAX_CLL: u64 = 1000;
 const MAX_FALL: u64 = 400;
 const PQ_TRANSFER_TAG: &str = "smpte2084";
 
+struct MasteringDisplayField {
+    flag: &'static str,
+    probe_key: &'static str,
+    value: u32,
+    // ffprobe reports the ST 2086 value over the unit it counts in
+    denominator: u32,
+}
+
+const CHROMATICITY_UNIT: u32 = 50000;
+const LUMINANCE_UNIT: u32 = 10000;
+
+// none of these is the flag's default, so a default reaching the SEI fails the test
+const MASTERING_DISPLAY: [MasteringDisplayField; 10] = [
+    field(
+        "--display-primaries-gx",
+        "green_x",
+        13250,
+        CHROMATICITY_UNIT,
+    ),
+    field(
+        "--display-primaries-gy",
+        "green_y",
+        34500,
+        CHROMATICITY_UNIT,
+    ),
+    field("--display-primaries-bx", "blue_x", 7500, CHROMATICITY_UNIT),
+    field("--display-primaries-by", "blue_y", 3000, CHROMATICITY_UNIT),
+    field("--display-primaries-rx", "red_x", 34000, CHROMATICITY_UNIT),
+    field("--display-primaries-ry", "red_y", 16000, CHROMATICITY_UNIT),
+    field("--white-point-x", "white_point_x", 15600, CHROMATICITY_UNIT),
+    field("--white-point-y", "white_point_y", 16400, CHROMATICITY_UNIT),
+    field(
+        "--max-luminance",
+        "max_luminance",
+        40_000_000,
+        LUMINANCE_UNIT,
+    ),
+    field("--min-luminance", "min_luminance", 50, LUMINANCE_UNIT),
+];
+
+const fn field(
+    flag: &'static str,
+    probe_key: &'static str,
+    value: u32,
+    denominator: u32,
+) -> MasteringDisplayField {
+    MasteringDisplayField {
+        flag,
+        probe_key,
+        value,
+        denominator,
+    }
+}
+
 const HDR10PLUS_FRAMES: usize = 4;
 const HDR10PLUS_SCENE_LENGTHS: [usize; 2] = [2, 2];
 const FIRST_SCENE_MAX_SCL: [u32; 3] = [17000, 18000, 19000];
@@ -395,21 +449,28 @@ fn ffprobe_json(arguments: &[&str], input: &Path) -> Value {
 }
 
 #[test]
-fn hdr10_inject_writes_the_content_light_level() {
+fn hdr10_inject_writes_the_mastering_display_and_the_light_levels() {
     let directory = TempDir::new().unwrap();
     let base_layer = plain_hevc(directory.path(), "base.hevc", HDR10PLUS_FRAMES);
     let injected = directory.path().join("hdr10.hevc");
 
-    cmd()
+    let mut command = cmd();
+    command
         .arg("hdr10-inject")
         .arg("-i")
         .arg(&base_layer)
         .arg("-o")
         .arg(&injected)
         .args(["--max-cll", &MAX_CLL.to_string()])
-        .args(["--max-fall", &MAX_FALL.to_string()])
+        .args(["--max-fall", &MAX_FALL.to_string()]);
+    for field in &MASTERING_DISPLAY {
+        command.args([field.flag, &field.value.to_string()]);
+    }
+    command
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("master-display=G(13250,34500)"))
+        .stdout(predicate::str::contains("L(40000000,50)"));
 
     let frames = ffprobe_json(&["-show_frames", "-read_intervals", "%+#1"], &injected);
     let side_data = frames["frames"][0]["side_data_list"]
@@ -422,12 +483,19 @@ fn hdr10_inject_writes_the_content_light_level() {
         .expect("no content light level in the injected stream");
     assert_eq!(light_level["max_content"].as_u64(), Some(MAX_CLL));
     assert_eq!(light_level["max_average"].as_u64(), Some(MAX_FALL));
-    assert!(
-        side_data
-            .iter()
-            .any(|entry| entry["side_data_type"] == "Mastering display metadata"),
-        "no mastering display in the injected stream"
-    );
+
+    let mastering = side_data
+        .iter()
+        .find(|entry| entry["side_data_type"] == "Mastering display metadata")
+        .expect("no mastering display in the injected stream");
+    for field in &MASTERING_DISPLAY {
+        assert_eq!(
+            mastering[field.probe_key],
+            json!(format!("{}/{}", field.value, field.denominator)),
+            "{} did not reach the stream",
+            field.flag
+        );
+    }
 
     let streams = ffprobe_json(&["-show_streams"], &injected);
     assert_eq!(streams["streams"][0]["color_transfer"], PQ_TRANSFER_TAG);

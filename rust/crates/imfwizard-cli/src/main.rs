@@ -415,6 +415,96 @@ struct BurnArguments {
     burn_fade_down: Option<u64>,
 }
 
+// BT.2020 primaries and the D65 white point, in the 1/50000 chromaticity units
+// SMPTE ST 2086 counts in
+const BT2020_GREEN: (u16, u16) = (8500, 39850);
+const BT2020_BLUE: (u16, u16) = (6550, 2300);
+const BT2020_RED: (u16, u16) = (35400, 14600);
+const D65_WHITE_POINT: (u16, u16) = (15635, 16450);
+// 1000 cd/m² and 0.0001 cd/m², in ST 2086's 0.0001 cd/m² units
+const MASTERING_DISPLAY_MAX_LUMINANCE: u32 = 10_000_000;
+const MASTERING_DISPLAY_MIN_LUMINANCE: u32 = 1;
+
+/// The SMPTE ST 2086 mastering display `hdr10-inject` writes as HEVC SEI.
+#[derive(clap::Args)]
+struct MasteringDisplayArguments {
+    /// Green primary x, in 1/50000
+    #[arg(long, default_value_t = BT2020_GREEN.0)]
+    display_primaries_gx: u16,
+
+    /// Green primary y, in 1/50000
+    #[arg(long, default_value_t = BT2020_GREEN.1)]
+    display_primaries_gy: u16,
+
+    /// Blue primary x, in 1/50000
+    #[arg(long, default_value_t = BT2020_BLUE.0)]
+    display_primaries_bx: u16,
+
+    /// Blue primary y, in 1/50000
+    #[arg(long, default_value_t = BT2020_BLUE.1)]
+    display_primaries_by: u16,
+
+    /// Red primary x, in 1/50000
+    #[arg(long, default_value_t = BT2020_RED.0)]
+    display_primaries_rx: u16,
+
+    /// Red primary y, in 1/50000
+    #[arg(long, default_value_t = BT2020_RED.1)]
+    display_primaries_ry: u16,
+
+    /// White point x, in 1/50000
+    #[arg(long, default_value_t = D65_WHITE_POINT.0)]
+    white_point_x: u16,
+
+    /// White point y, in 1/50000
+    #[arg(long, default_value_t = D65_WHITE_POINT.1)]
+    white_point_y: u16,
+
+    /// Mastering display peak luminance, in 0.0001 cd/m²
+    #[arg(long, default_value_t = MASTERING_DISPLAY_MAX_LUMINANCE)]
+    max_luminance: u32,
+
+    /// Mastering display black luminance, in 0.0001 cd/m²
+    #[arg(long, default_value_t = MASTERING_DISPLAY_MIN_LUMINANCE)]
+    min_luminance: u32,
+}
+
+impl MasteringDisplayArguments {
+    fn metadata(&self, max_cll: u16, max_fall: u16) -> postkit::dolby_vision::Hdr10Metadata {
+        postkit::dolby_vision::Hdr10Metadata {
+            display_primaries_gx: self.display_primaries_gx,
+            display_primaries_gy: self.display_primaries_gy,
+            display_primaries_bx: self.display_primaries_bx,
+            display_primaries_by: self.display_primaries_by,
+            display_primaries_rx: self.display_primaries_rx,
+            display_primaries_ry: self.display_primaries_ry,
+            white_point_x: self.white_point_x,
+            white_point_y: self.white_point_y,
+            max_luminance: self.max_luminance,
+            min_luminance: self.min_luminance,
+            max_cll,
+            max_fall,
+        }
+    }
+}
+
+// the same shape postkit hands x265, so the line can be read back into a command
+fn master_display_string(metadata: &postkit::dolby_vision::Hdr10Metadata) -> String {
+    format!(
+        "master-display=G({},{})B({},{})R({},{})WP({},{})L({},{})",
+        metadata.display_primaries_gx,
+        metadata.display_primaries_gy,
+        metadata.display_primaries_bx,
+        metadata.display_primaries_by,
+        metadata.display_primaries_rx,
+        metadata.display_primaries_ry,
+        metadata.white_point_x,
+        metadata.white_point_y,
+        metadata.max_luminance,
+        metadata.min_luminance,
+    )
+}
+
 impl BurnArguments {
     /// Read the flags into the rasteriser's overrides, failing on a colour or an
     /// effect name that cannot be read.
@@ -1128,6 +1218,9 @@ enum Commands {
         /// Max frame average light level (MaxFALL)
         #[arg(long, default_value = "400")]
         max_fall: u16,
+
+        #[command(flatten)]
+        mastering_display: Box<MasteringDisplayArguments>,
     },
 
     /// Burn a visible operator/session watermark into an image sequence
@@ -3377,21 +3470,22 @@ fn run() {
             output,
             max_cll,
             max_fall,
+            mastering_display,
         } => {
+            let hdr10 = mastering_display.metadata(max_cll, max_fall);
             let opts = postkit::dolby_vision::HdrMetadataOptions {
                 input: PathBuf::from(&input),
                 output: PathBuf::from(&output),
                 hdr_type: postkit::dolby_vision::HdrType::Hdr10,
-                hdr10: postkit::dolby_vision::Hdr10Metadata {
-                    max_cll,
-                    max_fall,
-                    ..Default::default()
-                },
+                hdr10,
                 ..Default::default()
             };
             let result = postkit::dolby_vision::inject_hdr10_metadata(&opts);
             if result == 0 {
-                println!("HDR10 metadata injected: {output}");
+                println!(
+                    "HDR10 metadata injected: {output}, {}",
+                    master_display_string(&hdr10)
+                );
             } else {
                 eprintln!("Error: HDR10 injection into {input} failed");
                 std::process::exit(1);
