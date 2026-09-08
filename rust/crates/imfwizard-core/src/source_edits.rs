@@ -21,6 +21,7 @@ pub const TRIMMED_PICTURE_DIR: &str = "j2k_trimmed";
 
 pub const DELAYED_AUDIO_PREFIX: &str = "delayed_audio_";
 pub const TRIMMED_AUDIO_PREFIX: &str = "trimmed_audio_";
+pub const FITTED_AUDIO_PREFIX: &str = "fitted_audio_";
 pub const TRIMMED_SUBTITLE_PREFIX: &str = "trimmed_subtitle_";
 
 /// Trim and audio delay for one composition's source.
@@ -394,6 +395,66 @@ fn edit_one_wav(
         current = trimmed;
     }
     Ok(current)
+}
+
+/// What fitting one sound file to the picture changed, in sample frames. Only
+/// one of the two is ever set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioFit {
+    pub silence_added: u64,
+    pub samples_dropped: u64,
+}
+
+/// How many samples of one channel a picture frame holds at the wrap edit rate.
+/// postkit's PCM wrap rounds the same way, so a WAV fitted to a frame count
+/// wraps to exactly that many frames.
+fn samples_per_picture_frame(sample_rate: u32, fps_num: u32, fps_den: u32) -> u64 {
+    let fps = fps_num.max(1) as f64 / fps_den.max(1) as f64;
+    (sample_rate.max(1) as f64 / fps).ceil() as u64
+}
+
+/// Pad a WAV's tail with silence, or cut it, so the sound runs exactly as long
+/// as the picture. ST 2067-3 wants every sequence in a segment to run the same
+/// length and Photon rejects a composition where they differ.
+///
+/// `Ok(None)` means the sound already ran the picture's length and nothing was
+/// written, so `input` is what to wrap.
+pub fn fit_audio_to_picture(
+    input: &Path,
+    output: &Path,
+    picture_frames: u64,
+    fps_num: u32,
+    fps_den: u32,
+) -> Result<Option<AudioFit>, String> {
+    use postkit::wav_io::Samples;
+    let (spec, samples) = postkit::wav_io::read_interleaved_exact(input)
+        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
+    let channels = spec.channels.max(1) as usize;
+    let present = (samples.len() / channels) as u64;
+    let wanted = picture_frames * samples_per_picture_frame(spec.sample_rate, fps_num, fps_den);
+    if present == wanted {
+        return Ok(None);
+    }
+
+    // the kept samples are copied untouched, so the output stays bit-exact for
+    // every PCM format, 32-bit int included
+    fn refitted<T: Copy + Default>(samples: &[T], wanted: usize) -> Vec<T> {
+        let mut out = vec![T::default(); wanted];
+        let kept = wanted.min(samples.len());
+        out[..kept].copy_from_slice(&samples[..kept]);
+        out
+    }
+    let wanted_samples = wanted as usize * channels;
+    let fitted = match &samples {
+        Samples::Int(v) => Samples::Int(refitted(v, wanted_samples)),
+        Samples::Float(v) => Samples::Float(refitted(v, wanted_samples)),
+    };
+    postkit::wav_io::write_interleaved_exact(output, spec, &fitted)
+        .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    Ok(Some(AudioFit {
+        silence_added: wanted.saturating_sub(present),
+        samples_dropped: present.saturating_sub(wanted),
+    }))
 }
 
 /// Shift a WAV against the picture without changing its running time: a positive
@@ -860,6 +921,55 @@ mod tests {
             bits_per_sample: 24,
             sample_format: SampleFormat::Int,
         }
+    }
+
+    /// Sound short of the picture gains silence and sound past it loses the
+    /// tail, both landing on exactly the picture's frame count. The kept samples
+    /// are untouched.
+    #[test]
+    fn sound_is_padded_or_cut_to_the_pictures_length() {
+        const PICTURE_FRAMES: u64 = 2;
+        const SAMPLES_A_FRAME: usize = 2000;
+        let dir = tempfile::tempdir().unwrap();
+        let wanted = PICTURE_FRAMES as usize * SAMPLES_A_FRAME;
+
+        let fit = |sample_frames: usize, name: &str| {
+            let input = ramp_wav(dir.path(), &format!("{name}.wav"), sample_frames, 2);
+            let output = dir.path().join(format!("fitted_{name}.wav"));
+            let fit = fit_audio_to_picture(&input, &output, PICTURE_FRAMES, 24, 1).unwrap();
+            let (_, before) = postkit::wav_io::read_interleaved(&input).unwrap();
+            let (_, after) = postkit::wav_io::read_interleaved(&output).unwrap();
+            (fit.expect("the file was refitted"), before, after)
+        };
+
+        let (short, before, after) = fit(SAMPLES_A_FRAME, "short");
+        assert_eq!(short.silence_added, SAMPLES_A_FRAME as u64);
+        assert_eq!(short.samples_dropped, 0);
+        assert_eq!(after.len(), wanted * 2);
+        assert_eq!(
+            &after[..before.len()],
+            &before[..],
+            "the sound is untouched"
+        );
+        assert!(
+            after[before.len()..].iter().all(|s| *s == 0.0),
+            "the tail is silence"
+        );
+
+        let (long, before, after) = fit(SAMPLES_A_FRAME * 3, "long");
+        assert_eq!(long.silence_added, 0);
+        assert_eq!(long.samples_dropped, SAMPLES_A_FRAME as u64);
+        assert_eq!(after.len(), wanted * 2);
+        assert_eq!(&after[..], &before[..wanted * 2], "the head is untouched");
+
+        // sound already the picture's length is left where it is
+        let input = ramp_wav(dir.path(), "exact.wav", wanted, 2);
+        let output = dir.path().join("fitted_exact.wav");
+        assert_eq!(
+            fit_audio_to_picture(&input, &output, PICTURE_FRAMES, 24, 1).unwrap(),
+            None
+        );
+        assert!(!output.exists());
     }
 
     /// A ramp so a shift is visible in the sample values, not just the count.

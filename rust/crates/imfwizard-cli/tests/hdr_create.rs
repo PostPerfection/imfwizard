@@ -340,21 +340,13 @@ fn photon_rejects_a_colour_the_cpl_invents() {
     );
 }
 
-/// A sound track file is wrapped with the MCA labels ST 2067-2 asks for, which
-/// Photon checks on the MXF, and its CPL EssenceDescriptorList entry is that
-/// same descriptor read back off the track file.
-#[test]
-fn a_sound_track_carries_its_mca_labels() {
-    let dir = TempDir::new().unwrap();
-    let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
-    let wav = dir.path().join("stereo.wav");
-    // ST 2067-3 wants every sequence in a segment to run the same length, and
-    // Photon checks it, so the sine is trimmed to the picture's frame count
-    let samples = FRAMES as u32 * 48000 / FPS;
+/// A sine WAV of exactly `sample_frames` stereo sample frames at 48 kHz.
+fn sine_wav(dir: &Path, name: &str, sample_frames: u32) -> PathBuf {
+    let wav = dir.join(format!("{name}.wav"));
     let made = std::process::Command::new("ffmpeg")
         .args(["-y", "-v", "error", "-f", "lavfi"])
-        .args(["-i", "sine=frequency=1000:duration=1:sample_rate=48000"])
-        .args(["-af", &format!("atrim=end_sample={samples}")])
+        .args(["-i", "sine=frequency=1000:duration=10:sample_rate=48000"])
+        .args(["-af", &format!("atrim=end_sample={sample_frames}")])
         .args(["-ac", "2", "-c:a", "pcm_s24le"])
         .arg(&wav)
         .output()
@@ -364,15 +356,18 @@ fn a_sound_track_carries_its_mca_labels() {
         "{}",
         String::from_utf8_lossy(&made.stderr)
     );
+    wav
+}
 
-    let imp = dir.path().join("imp_sound");
+fn build_sound_imp(dir: &Path, clip: &Path, name: &str, title: &str, wav: &Path) -> PathBuf {
+    let imp = dir.join(name);
     cmd()
         .args([
             "create",
             "-o",
             &imp.to_string_lossy(),
             "-t",
-            "HLG with sound",
+            title,
             "--video",
             &clip.to_string_lossy(),
             "--raster",
@@ -390,6 +385,62 @@ fn a_sound_track_carries_its_mca_labels() {
         ])
         .assert()
         .success();
+    imp
+}
+
+/// Every resource's IntrinsicDuration in the IMP's CPL, in CPL order.
+fn intrinsic_durations(imp: &Path) -> Vec<u64> {
+    let cpl = file_starting_with(imp, "CPL_");
+    let xml = std::fs::read_to_string(cpl).expect("the CPL");
+    xml.split("<IntrinsicDuration>")
+        .skip(1)
+        .map(|rest| {
+            rest.split("</IntrinsicDuration>")
+                .next()
+                .expect("a closing tag")
+                .parse()
+                .expect("a frame count")
+        })
+        .collect()
+}
+
+/// Sound shorter than the picture is padded with silence and sound longer than
+/// it is cut, so the segment's two sequences run the same length. Photon rejects
+/// a segment whose sequences differ.
+#[test]
+fn sound_is_fitted_to_the_picture() {
+    let dir = TempDir::new().unwrap();
+    let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
+    let frame_samples = 48000 / FPS;
+
+    for (name, sample_frames) in [("short", frame_samples), ("long", frame_samples * 3)] {
+        let wav = sine_wav(dir.path(), name, sample_frames);
+        let imp = build_sound_imp(
+            dir.path(),
+            &clip,
+            &format!("imp_{name}"),
+            "Fitted sound",
+            &wav,
+        );
+        let durations = intrinsic_durations(&imp);
+        assert_eq!(
+            durations,
+            vec![FRAMES as u64; 2],
+            "{name} sound must run the picture's {FRAMES} frames"
+        );
+        assert_photon_finds_only(&imp, name, &[]);
+    }
+}
+
+/// A sound track file is wrapped with the MCA labels ST 2067-2 asks for, which
+/// Photon checks on the MXF, and its CPL EssenceDescriptorList entry is that
+/// same descriptor read back off the track file.
+#[test]
+fn a_sound_track_carries_its_mca_labels() {
+    let dir = TempDir::new().unwrap();
+    let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
+    let wav = sine_wav(dir.path(), "stereo", FRAMES as u32 * 48000 / FPS);
+    let imp = build_sound_imp(dir.path(), &clip, "imp_sound", "HLG with sound", &wav);
 
     let sound = file_starting_with(&imp, "AUDIO_");
     let mut reader = asdcplib::as02::pcm::MxfReader::new();

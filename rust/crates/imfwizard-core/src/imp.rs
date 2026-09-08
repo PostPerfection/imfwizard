@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::source_edits::{AudioFit, FITTED_AUDIO_PREFIX, fit_audio_to_picture};
+
 /// Accessibility role of an audio track, carried in the CPL as an MCA essence
 /// descriptor (ST 2067-2/-3). None is normal main audio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +196,20 @@ fn wrap_one(
     Ok(r.track_file)
 }
 
+fn report_audio_fit(sound: &Path, fit: &AudioFit, picture_frames: u64) {
+    let what = match fit.silence_added {
+        0 => format!(
+            "{} sample frames dropped from its tail",
+            fit.samples_dropped
+        ),
+        added => format!("{added} sample frames of silence added to its tail"),
+    };
+    tracing::info!(
+        "Sound fitted to the {picture_frames} frame picture: {}, {what}",
+        sound.display()
+    );
+}
+
 /// The MCA labels one sound track file carries: a channel label each, and a
 /// soundfield group naming the work, its version and what kind of mix it is.
 fn soundfield_config(
@@ -294,10 +310,38 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             }
         }
 
-        for a in &comp.audio_files {
+        // every sequence in a segment has to run the picture's length
+        let picture_frames = comp_tracks
+            .first()
+            .map(|picture| picture.duration)
+            .unwrap_or(0);
+
+        for (index, a) in comp.audio_files.iter().enumerate() {
             if !a.path.exists() {
                 continue;
             }
+            let fitted = opts
+                .output_dir
+                .join(format!("{FITTED_AUDIO_PREFIX}{index}.wav"));
+            let sound = match fit_audio_to_picture(
+                &a.path,
+                &fitted,
+                picture_frames,
+                opts.fps_num,
+                opts.fps_den,
+            ) {
+                Ok(None) => a.path.clone(),
+                Ok(Some(fit)) => {
+                    report_audio_fit(&a.path, &fit, picture_frames);
+                    fitted
+                }
+                Err(e) => {
+                    return ImpResult {
+                        error: format!("Audio wrap failed: {e}"),
+                        ..Default::default()
+                    };
+                }
+            };
             let mca = match soundfield_config(a, comp, &opts.soundfield) {
                 Ok(mca) => mca,
                 Err(e) => {
@@ -311,7 +355,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 opts,
                 &opts.output_dir,
                 "AUDIO",
-                &a.path,
+                &sound,
                 crate::EssenceType::Wav,
                 None,
                 Some(mca),
