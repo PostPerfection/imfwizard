@@ -507,7 +507,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🌈</div>
             <h3>HDR/WCG essence metadata</h3>
-            <p>Tag the picture as PQ BT.2020 or P3-D65 (ST 2067-21) and add an ST 2086 mastering display. The transfer, colour, and mastering values are written into the MXF and mirrored in the CPL, so the package declares exactly what the essence carries.</p>
+            <p><code>create --hdr</code> takes pq-bt2020, pq-p3d65, or hlg-bt2020, the App 2E COLOR.6, COLOR.7, and COLOR.8 combinations, and <code>--mastering-display</code> adds an ST 2086 mastering display. The transfer, colour, and mastering values are written into the MXF and mirrored in the CPL. A master whose own transfer tag disagrees with the preset is refused, so is an HDR master given without a preset, and a Dolby Vision 8.1 RPU fills the MaxCLL and MaxFALL you did not pass.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎥</div>
