@@ -5,6 +5,9 @@
 ### Changed
 - **`watch` builds an IMP from a master that lands in the folder**: it used to print filesystem events and build nothing. It takes `--output` and any `create` flags after `--`, waits for a dropped video file or frame folder to stop changing, runs `create` on it with the file stem as the title and a same named `.wav` and `.ttml` beside it as sound and subtitle, writes the job log beside the package, moves the source into `done/` or `failed/`, and posts `imp.created` or `imp.failed`. The sidecar subtitle is TTML because that is what `create --subtitle` packages, an SRT goes through `subtitle-convert` first.
 
+### Fixed
+- **A finished IMP holds none of the build scratch**: `create` and a GUI job left the codestreams they encoded inside the output directory, `j2k` sitting beside the picture MXF, the CPL, the PKL and an ASSETMAP that lists none of it, and the demuxed sound, the mapped and trimmed sound, the trimmed subtitles and a held still's frames with it. Both front ends call `imfwizard_core::intermediates::remove_intermediates` once `create_imp` reports success, one list of the names a build writes inside the output directory, so the CLI and the GUI cannot drift. A build that fails keeps everything it wrote, so the codestreams are still there to look at or to package by hand, and a codestream directory handed to `--video` is never removed. `create --keep-intermediates` leaves the scratch where it was.
+
 ### Removed
 - **`ingest` is gone**: it matched camera RAW (ARRIRAW, R3D, BRAW, Canon Cinema RAW Light, Sony X-OCN) by file name or MXF header and refused every match, and transcoded ProRes and DNxHR through ffmpeg. Camera RAW is graded and exported as a master before an IMP is built, and `create --video` already refuses a file ffmpeg cannot decode.
 

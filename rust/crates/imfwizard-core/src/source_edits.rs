@@ -17,7 +17,11 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Where the trimmed picture frames are written under the job's work directory.
-const TRIMMED_PICTURE_DIR: &str = "j2k_trimmed";
+pub const TRIMMED_PICTURE_DIR: &str = "j2k_trimmed";
+
+pub const DELAYED_AUDIO_PREFIX: &str = "delayed_audio_";
+pub const TRIMMED_AUDIO_PREFIX: &str = "trimmed_audio_";
+pub const TRIMMED_SUBTITLE_PREFIX: &str = "trimmed_subtitle_";
 
 /// Trim and audio delay for one composition's source.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,7 +358,7 @@ pub fn apply_source_edits(
             .iter()
             .enumerate()
             .map(|(index, path)| {
-                let output = work_dir.join(format!("trimmed_subtitle_{index}.xml"));
+                let output = work_dir.join(format!("{TRIMMED_SUBTITLE_PREFIX}{index}.xml"));
                 trim_timed_text(path, &output, kept_start, kept_end, fps)?;
                 Ok(output)
             })
@@ -380,12 +384,12 @@ fn edit_one_wav(
 ) -> Result<PathBuf, String> {
     let mut current = wav.to_path_buf();
     if edits.audio_delay_ms != 0 {
-        let delayed = work_dir.join(format!("delayed_audio_{index}.wav"));
+        let delayed = work_dir.join(format!("{DELAYED_AUDIO_PREFIX}{index}.wav"));
         apply_audio_delay(&current, &delayed, edits.audio_delay_ms)?;
         current = delayed;
     }
     if edits.trims() {
-        let trimmed = work_dir.join(format!("trimmed_audio_{index}.wav"));
+        let trimmed = work_dir.join(format!("{TRIMMED_AUDIO_PREFIX}{index}.wav"));
         trim_wav(&current, &trimmed, edits, fps)?;
         current = trimmed;
     }

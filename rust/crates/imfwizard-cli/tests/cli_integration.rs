@@ -544,6 +544,90 @@ fn synthesize_clip(path: &Path, width: u32, height: u32) {
     );
 }
 
+/// A finished IMP holds the package and nothing else: the codestreams and the
+/// demuxed sound the build wrote are scratch, and they used to ship inside it.
+#[test]
+fn a_finished_imp_holds_none_of_the_build_scratch() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Scratch",
+            "--video",
+            &clip.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP created"));
+
+    assert!(
+        !output.join("j2k").exists(),
+        "the codestreams shipped inside the package"
+    );
+    assert!(
+        !output.join("audio_demux.wav").exists(),
+        "the demuxed sound shipped inside the package"
+    );
+    let package: Vec<_> = std::fs::read_dir(&output)
+        .unwrap()
+        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+        .collect();
+    assert!(package.iter().any(|n| n == "ASSETMAP.xml"), "{package:?}");
+    assert!(package.iter().any(|n| n.starts_with("CPL_")), "{package:?}");
+    assert!(
+        package.iter().any(|n| n.starts_with("VIDEO_")),
+        "{package:?}"
+    );
+
+    cmd()
+        .args(["validate", &output.to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP validation PASSED"));
+}
+
+/// A build that fails after the encode keeps every frame it compressed, so the
+/// codestreams are still there to look at or to package by hand.
+#[test]
+fn a_failed_build_keeps_the_codestreams() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Kept",
+            "--video",
+            &clip.to_string_lossy(),
+            "--audio-map",
+            "9:L",
+        ])
+        .assert()
+        .failure();
+
+    let codestreams = std::fs::read_dir(output.join("j2k"))
+        .expect("the codestreams a failed build encoded")
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "j2c"))
+        })
+        .count();
+    assert_eq!(codestreams, 24, "one codestream per source frame");
+}
+
 /// The headline feature: a video source has to come out the far end as a package.
 /// This is the only test that runs a real J2K encode, and it is the one that
 /// would have caught `create` shipping without the postkit `grok-ffi` feature,
@@ -558,6 +642,7 @@ fn a_video_source_encodes_and_packages() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",
@@ -625,6 +710,7 @@ fn a_23_976_source_encodes_one_codestream_per_source_frame() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",
@@ -693,6 +779,7 @@ fn an_image_sequence_directory_encodes_and_packages() {
         cmd()
             .args([
                 "create",
+                "--keep-intermediates",
                 "-o",
                 &output.to_string_lossy(),
                 "-t",
@@ -800,6 +887,7 @@ fn a_burnt_subtitle_changes_the_encoded_picture() {
         let mut command = cmd();
         command.args([
             "create",
+            "--keep-intermediates",
             "-o",
             &out.to_string_lossy(),
             "-t",
@@ -867,6 +955,7 @@ fn a_burnt_still_holds_one_codestream_per_cue_change_and_packages() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",
@@ -1443,6 +1532,7 @@ fn an_audio_map_reaches_the_track_demuxed_from_the_video() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",
@@ -1570,6 +1660,7 @@ fn a_rotated_source_encodes_onto_the_named_raster() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",
@@ -1616,6 +1707,7 @@ fn an_audio_map_writes_the_gained_lane_into_the_package() {
     cmd()
         .args([
             "create",
+            "--keep-intermediates",
             "-o",
             &output.to_string_lossy(),
             "-t",

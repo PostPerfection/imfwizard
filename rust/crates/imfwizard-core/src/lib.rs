@@ -13,6 +13,7 @@ pub mod timeline;
 pub mod duration_spec;
 pub mod encode;
 pub mod hints;
+pub mod intermediates;
 pub mod preflight;
 pub mod probe;
 pub mod source_edits;

@@ -950,7 +950,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         );
 
         // per-composition scratch dir so multiple encodes don't clobber each other
-        let enc_dir = output.join(format!("enc_{idx}"));
+        let enc_dir = output.join(format!(
+            "{}{idx}",
+            imfwizard_core::intermediates::ENCODE_SCRATCH_PREFIX
+        ));
         let app_ref = app.clone();
         let log_ref = log_file.clone();
         let encode_stage_name = format!("encode composition {}", idx + 1);
@@ -1253,6 +1256,14 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         &log_file,
         &format!("[PACKAGE] Done, {} CPL(s)", result.cpl_paths.len()),
     );
+    // a codestream directory a composition names sits where the encode would
+    // have written its own
+    let handed_in: Vec<&std::path::Path> = job
+        .compositions
+        .iter()
+        .map(|composition| std::path::Path::new(&composition.video_path))
+        .collect();
+    imfwizard_core::intermediates::remove_intermediates(output, &handed_in);
     log_to(
         &log_file,
         &format_stage_timing("package", package_started.elapsed()),

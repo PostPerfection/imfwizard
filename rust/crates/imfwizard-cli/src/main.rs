@@ -573,6 +573,11 @@ enum Commands {
         /// without encoding or writing anything under --output.
         #[arg(long)]
         check: bool,
+
+        /// Leave the codestreams and the edited sound in the output directory
+        /// once the IMP is written. A finished package holds neither.
+        #[arg(long = "keep-intermediates")]
+        keep_intermediates: bool,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1732,6 +1737,7 @@ fn run() {
             picture: picture_arguments,
             audio_map,
             check,
+            keep_intermediates,
         } => {
             let CompressionArguments {
                 profile,
@@ -2207,7 +2213,8 @@ fn run() {
                             (Some(a), _) => vec![PathBuf::from(a)],
                             (None, true) => vec![],
                             (None, false) => {
-                                let wav_out = output.join("audio_demux.wav");
+                                let wav_out =
+                                    output.join(imfwizard_core::intermediates::DEMUXED_AUDIO_NAME);
                                 let demux = std::process::Command::new("ffmpeg")
                                     .arg("-y")
                                     .arg("-i")
@@ -2309,6 +2316,16 @@ fn run() {
             print_hints(hints_pass);
             let result = imfwizard_core::imp::create_imp(&opts);
             if result.success {
+                if !keep_intermediates {
+                    // a codestream directory handed to --video sits where the
+                    // encode would have written its own
+                    let handed_in: Vec<&std::path::Path> =
+                        video.iter().map(std::path::Path::new).collect();
+                    imfwizard_core::intermediates::remove_intermediates(
+                        &result.output_dir,
+                        &handed_in,
+                    );
+                }
                 println!("IMP created at {}", result.output_dir.display());
                 for cpl in &result.cpl_paths {
                     println!("  CPL: {}", cpl.display());
