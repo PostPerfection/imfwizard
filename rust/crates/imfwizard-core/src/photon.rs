@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 pub struct PhotonResult {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
+    /// Every ERROR/WARNING line IMPAnalyzer printed under its summaries, so a
+    /// caller can say which finding it is and not only how many there were.
+    pub details: Vec<String>,
 }
 
 const MAIN_CLASS: &str = "com.netflix.imflibrary.app.IMPAnalyzer";
@@ -64,6 +67,13 @@ pub fn run_photon(imp_dir: &Path, explicit_jar: Option<&Path>) -> Result<PhotonR
 pub fn parse_photon_output(text: &str) -> PhotonResult {
     let mut result = PhotonResult::default();
     for line in text.lines() {
+        // the finding sits after slf4j's own prefix, which carries a level of its own
+        for marker in ["ERROR-", "WARNING-"] {
+            if let Some(at) = line.find(marker) {
+                result.details.push(line[at..].trim_end().to_string());
+                break;
+            }
+        }
         let Some(idx) = line.find(" has ") else {
             continue;
         };

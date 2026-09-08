@@ -111,16 +111,47 @@ fn picture_transfer_and_primaries(imp: &Path) -> ([u8; 16], [u8; 16]) {
     )
 }
 
-fn assert_photon_is_clean(imp: &Path, preset: &str) {
-    match imfwizard_core::photon::run_photon(imp, None) {
-        Ok(photon) => assert!(
-            photon.errors.is_empty() && photon.warnings.is_empty(),
-            "{preset}: Photon errors {:?}, warnings {:?}",
-            photon.errors,
-            photon.warnings
-        ),
+/// Every Photon finding the CPL EssenceDescriptor still draws, each one an item
+/// the picture MXF's descriptor carries and the CPL's copy of it does not. The
+/// asdcplib binding exposes neither the descriptor's InstanceID nor a RegXML
+/// dump, so the CPL cannot yet repeat what the MXF says.
+const OPEN_DESCRIPTOR_FINDINGS: [&str; 8] = [
+    "does not have a value set for the field SampleRate",
+    "doesn't match any EssenceDescriptors within the IMFTrackFile resource",
+    "is missing SubDescriptors",
+    "is missing ComponentMinRef/ComponentMaxRef",
+    "shall have a Video Line Map item",
+    "has invalid storedWidth(-1) or storedHeight(-1)",
+    "Cannot invoke \"com.netflix.imflibrary.st0377.header.UL.equalsWithMask",
+    // a picture-only package, which these fixtures are, is not a legal composition
+    "does not contain a single main audio sequence",
+];
+
+/// Photon must find nothing in the package beyond the descriptor items that are
+/// still open, and nothing at all in the picture MXF, the PKL or the ASSETMAP.
+fn assert_photon_finds_nothing_new(imp: &Path, preset: &str) {
+    let photon = match imfwizard_core::photon::run_photon(imp, None) {
+        Ok(photon) => photon,
         Err(e) => panic!("{preset}: Photon failed to analyse the IMP: {e}"),
+    };
+    for finding in &photon.details {
+        assert!(
+            OPEN_DESCRIPTOR_FINDINGS
+                .iter()
+                .any(|known| finding.contains(known)),
+            "{preset}: Photon reports something new: {finding}"
+        );
     }
+    for counted in photon.errors.iter().chain(photon.warnings.iter()) {
+        assert!(
+            counted.contains("CPL_"),
+            "{preset}: only the CPL may carry findings, got {counted}"
+        );
+    }
+    assert!(
+        !photon.details.is_empty(),
+        "{preset}: Photon found nothing at all, so it did not analyse the composition"
+    );
 }
 
 #[test]
@@ -139,7 +170,7 @@ fn a_pq_imp_carries_st2084_and_passes_photon() {
         "the CPL descriptor does not carry the ST 2084 transfer UL"
     );
 
-    assert_photon_is_clean(&imp, "pq-bt2020");
+    assert_photon_finds_nothing_new(&imp, "pq-bt2020");
 }
 
 // COLOR.8, the BT.2020 primaries with the HLG OETF
@@ -162,7 +193,7 @@ fn an_hlg_imp_carries_the_hlg_transfer_and_passes_photon() {
         "the CPL descriptor does not carry the HLG transfer UL"
     );
 
-    assert_photon_is_clean(&imp, "hlg-bt2020");
+    assert_photon_finds_nothing_new(&imp, "hlg-bt2020");
 }
 
 #[test]

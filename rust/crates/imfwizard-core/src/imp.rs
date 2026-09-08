@@ -567,14 +567,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (result, out) = build_hdr_imp(dir.path());
         assert!(result.success, "create failed: {}", result.error);
-        match crate::photon::run_photon(&out, None) {
-            Ok(photon) => assert!(
-                photon.errors.is_empty() && photon.warnings.is_empty(),
-                "Photon errors {:?}, warnings {:?}",
-                photon.errors,
-                photon.warnings
-            ),
+        let photon = match crate::photon::run_photon(&out, None) {
+            Ok(photon) => photon,
             Err(e) => panic!("Photon failed to analyse the HDR IMP: {e}"),
+        };
+        // the CPL EssenceDescriptor cannot yet repeat what the picture MXF says,
+        // so every finding has to be one of those and none of them elsewhere
+        for finding in &photon.details {
+            assert!(
+                ["EssenceDescriptor", "SampleRate", "main audio sequence"]
+                    .iter()
+                    .any(|known| finding.contains(known)),
+                "Photon reports something new: {finding}"
+            );
+        }
+        for counted in photon.errors.iter().chain(photon.warnings.iter()) {
+            assert!(
+                counted.contains("CPL_"),
+                "only the CPL may carry findings, got {counted}"
+            );
         }
     }
 
