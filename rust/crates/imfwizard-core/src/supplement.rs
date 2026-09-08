@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use postkit::packaging::{ImfCpl, ImfResource, ImfTrackKind};
+use postkit::packaging::{App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind};
 use quick_xml::events::Event;
 use quick_xml::name::QName;
 use quick_xml::reader::Reader;
@@ -99,6 +99,8 @@ pub(crate) struct CplResource {
     pub(crate) kind: ImfTrackKind,
     pub(crate) uuid: String,
     pub(crate) duration: u64,
+    /// The EssenceDescriptorList entry this resource names, when it names one.
+    pub(crate) source_encoding: Option<String>,
 }
 
 pub(crate) struct CplResources {
@@ -106,6 +108,10 @@ pub(crate) struct CplResources {
     pub(crate) fps_den: u32,
     pub(crate) content_kind: String,
     pub(crate) resources: Vec<CplResource>,
+    /// The ST 2067-21 edition the OV claims, which a supplement over it claims too.
+    pub(crate) app2e_edition: App2eEdition,
+    /// The OV's EssenceDescriptorList, carried through verbatim.
+    pub(crate) essence_descriptors: Vec<ImfEssenceDescriptor>,
 }
 
 fn local_name(qname: QName) -> String {
@@ -132,6 +138,11 @@ pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, Strin
     let mut resources: Vec<CplResource> = Vec::new();
     let mut cur_uuid = String::new();
     let mut cur_dur = 0u64;
+    let mut cur_source_encoding: Option<String> = None;
+    let mut app2e_edition = App2eEdition::Edition2016;
+    let mut essence_descriptors: Vec<ImfEssenceDescriptor> = Vec::new();
+    let mut descriptor_body_start: Option<usize> = None;
+    let mut descriptor_id = String::new();
 
     loop {
         match reader.read_event() {
@@ -146,6 +157,12 @@ pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, Strin
                         in_resource = true;
                         cur_uuid.clear();
                         cur_dur = 0;
+                        cur_source_encoding = None;
+                    }
+                    // the body is the source text between this tag and its end tag
+                    "EssenceDescriptor" => {
+                        descriptor_body_start = Some(reader.buffer_position() as usize);
+                        descriptor_id.clear();
                     }
                     _ => {}
                 }
@@ -169,7 +186,16 @@ pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, Strin
                     "ContentKind" if content_kind.is_empty() && seq_kind.is_none() => {
                         content_kind = text;
                     }
+                    "ApplicationIdentification" => {
+                        if text == App2eEdition::Edition2020.namespace() {
+                            app2e_edition = App2eEdition::Edition2020;
+                        }
+                    }
+                    "Id" if descriptor_body_start.is_some() && descriptor_id.is_empty() => {
+                        descriptor_id = strip_urn(&text);
+                    }
                     "TrackFileId" if in_resource => cur_uuid = strip_urn(&text),
+                    "SourceEncoding" if in_resource => cur_source_encoding = Some(strip_urn(&text)),
                     "SourceDuration" if in_resource => cur_dur = text.parse().unwrap_or(cur_dur),
                     "IntrinsicDuration" if in_resource && cur_dur == 0 => {
                         cur_dur = text.parse().unwrap_or(0)
@@ -189,11 +215,23 @@ pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, Strin
                                 kind,
                                 uuid: std::mem::take(&mut cur_uuid),
                                 duration: cur_dur,
+                                source_encoding: cur_source_encoding.take(),
                             });
                         }
                     }
                     "MainImageSequence" | "MainAudioSequence" | "SubtitlesSequence" => {
                         seq_kind = None
+                    }
+                    name @ "EssenceDescriptor" => {
+                        if let Some(start) = descriptor_body_start.take()
+                            && !descriptor_id.is_empty()
+                        {
+                            let end = reader.buffer_position() as usize - (name.len() + 3);
+                            essence_descriptors.push(ImfEssenceDescriptor {
+                                id: std::mem::take(&mut descriptor_id),
+                                body: descriptor_body(&content[start..end]),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -217,7 +255,34 @@ pub(crate) fn parse_cpl_resources(cpl_path: &Path) -> Result<CplResources, Strin
         fps_den,
         content_kind,
         resources,
+        app2e_edition,
+        essence_descriptors,
     })
+}
+
+/// The descriptor itself, which is everything after the entry's own Id.
+fn descriptor_body(entry: &str) -> String {
+    match entry.find("</Id>") {
+        Some(id_end) => entry[id_end + "</Id>".len()..].trim_end().to_string(),
+        None => entry.trim_end().to_string(),
+    }
+}
+
+/// The OV descriptors a resource still names. A replaced track file has new
+/// essence, so the descriptor the OV wrote for it is dropped with the link.
+fn descriptors_still_referenced(
+    descriptors: &[ImfEssenceDescriptor],
+    resources: &[ImfResource],
+) -> Vec<ImfEssenceDescriptor> {
+    descriptors
+        .iter()
+        .filter(|descriptor| {
+            resources
+                .iter()
+                .any(|resource| resource.source_encoding.as_deref() == Some(&descriptor.id))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Wrap one new/changed asset into an MXF track file inside the supplemental IMP.
@@ -332,7 +397,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             track_file_uuid: r.uuid.clone(),
             duration: r.duration,
             kind: r.kind,
-            source_encoding: None,
+            source_encoding: r.source_encoding.clone(),
         })
         .collect();
 
@@ -349,6 +414,8 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             .expect("replace target validated above");
         target.track_file_uuid = tf.uuid.clone();
         target.duration = tf.duration;
+        // the OV's descriptor described the essence this replaces
+        target.source_encoding = None;
         present.push(tf);
     }
     for s in &add_specs {
@@ -371,6 +438,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
 
     // 5. build the supplemental CPL: references both new and unchanged OV UUIDs
     let cpl_uuid = uuid::Uuid::new_v4().to_string();
+    let essence_descriptors = descriptors_still_referenced(&ov.essence_descriptors, &resources);
     let cpl = ImfCpl {
         uuid: cpl_uuid.clone(),
         title: opts.title.clone(),
@@ -382,11 +450,10 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         fps_den: ov.fps_den,
         resources,
         languages: Vec::new(),
-        essence_descriptors: Vec::new(),
+        essence_descriptors,
         max_cll: None,
         max_fall: None,
-        // a supplement carries no picture colour of its own, and neither does the OV it parsed
-        app2e_edition: postkit::packaging::App2eEdition::default(),
+        app2e_edition: ov.app2e_edition,
     };
     let cpl_path = out.join(format!("CPL_{cpl_uuid}.xml"));
     if let Err(e) = std::fs::write(&cpl_path, cpl.to_xml()) {
@@ -472,6 +539,97 @@ mod tests {
         assert_eq!(ov.resources[0].kind, ImfTrackKind::Image);
         assert_eq!(ov.resources[0].uuid, "ov-video");
         assert_eq!(ov.resources[1].uuid, "ov-audio");
+    }
+
+    /// The OV as imfwizard itself writes it: an HLG picture, so the CPL claims the
+    /// 2020 edition and carries an RGBADescriptor the image resource names.
+    fn write_hlg_ov(dir: &Path) {
+        let hdr = crate::hdr_wcg::HdrWcg::from_flags("hlg-bt2020", None).unwrap();
+        let comp = crate::imp::Composition {
+            title: "OV".into(),
+            content_kind: "feature".into(),
+            hdr: Some(hdr),
+            ..Default::default()
+        };
+        let track_files = [
+            MxfTrackFile {
+                path: dir.join("VIDEO_ov-video.mxf"),
+                uuid: "ov-video".into(),
+                duration: 240,
+                ..Default::default()
+            },
+            MxfTrackFile {
+                path: dir.join("AUDIO_ov-audio.mxf"),
+                uuid: "ov-audio".into(),
+                duration: 240,
+                ..Default::default()
+            },
+        ];
+        let opts = crate::imp::ImpOptions {
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        crate::cpl::write_cpl(
+            &dir.join("CPL_ov.xml"),
+            "ov-cpl",
+            &opts,
+            &comp,
+            &track_files,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("ASSETMAP.xml"),
+            r#"<?xml version="1.0"?><AssetMap><AssetList>
+              <Asset><Id>urn:uuid:ov-cpl</Id><ChunkList><Chunk><Path>CPL_ov.xml</Path></Chunk></ChunkList></Asset>
+            </AssetList></AssetMap>"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_supplement_keeps_the_ov_edition_and_picture_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        write_hlg_ov(dir.path());
+        let out = tempfile::tempdir().unwrap();
+        let wav = out.path().join("dub.wav");
+        std::fs::write(&wav, make_wav(2, 48000, 16, 48000)).unwrap();
+
+        let result = create_supplement(&SupplementOptions {
+            ov_dir: dir.path().to_path_buf(),
+            title: "French dub".into(),
+            output_dir: out.path().to_path_buf(),
+            replace: vec![format!("{}@audio", wav.display())],
+            add: vec![],
+        });
+        assert!(result.success, "supplement failed: {}", result.error);
+
+        let cpl = read_one(out.path(), "CPL_");
+        assert!(
+            cpl.contains(&format!(
+                "<cc:ApplicationIdentification>{}</cc:ApplicationIdentification>",
+                App2eEdition::Edition2020.namespace()
+            )),
+            "the supplement dropped the OV's 2020 identification: {cpl}"
+        );
+        assert!(
+            cpl.contains(
+                "<r1:TransferCharacteristic>urn:smpte:ul:060e2b34.0401010d.04010101.010b0000"
+            ),
+            "the supplement dropped the OV's HLG descriptor: {cpl}"
+        );
+
+        // the picture resource still names the descriptor it kept
+        let descriptor_id = {
+            let start = cpl.find("<EssenceDescriptor>").expect("a descriptor");
+            let id_start = cpl[start..].find("<Id>urn:uuid:").expect("a descriptor id") + start;
+            let id_end = cpl[id_start..].find("</Id>").expect("a closed id") + id_start;
+            cpl[id_start + "<Id>urn:uuid:".len()..id_end].to_string()
+        };
+        assert!(
+            cpl.contains(&format!("<SourceEncoding>urn:uuid:{descriptor_id}<")),
+            "no resource names the descriptor {descriptor_id}: {cpl}"
+        );
     }
 
     #[test]
