@@ -512,7 +512,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎥</div>
             <h3>Dolby Vision and HDR10+</h3>
-            <p>Carry Dolby Vision and HDR10+ dynamic metadata through into your HDR packages so the grade travels with the picture.</p>
+            <p>Side tools on an HEVC stream, not on the IMP. <code>dv-extract</code> and <code>dv-inject</code> move a Dolby Vision RPU with dovi_tool, <code>dv-convert</code> retargets profile 5 to 8.1 or 8.4, <code>hdr10plus-extract</code> writes HDR10+ metadata to JSON, and <code>hdr10-inject</code> re-encodes through x265 with MaxCLL and MaxFALL.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,186,116,0.15);">🎵</div>
@@ -564,14 +564,14 @@
             <tr><td>Desktop app</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Command-line version</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Structural + signature validation</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>Dolby Vision packaging</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
+            <tr><td>Dolby Vision RPU tools (HEVC stream)</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>TTML / IMSC subtitles</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Subtitle burn-in during encode</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Preview playback with QC overlays</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>GPU JPEG 2000 encode and preview decode</td><td class="yes">Linux, Windows, macOS</td><td class="yes">&#10003; (Windows)</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard advantages</td></tr>
-            <tr><td>HDR10+ metadata packaging</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
+            <tr><td>HDR10+ metadata extraction (HEVC stream)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Audio description with ducking</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>Netflix Photon validation</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
