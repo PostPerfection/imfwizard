@@ -39,12 +39,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libxml2-utils libssl-dev libxerces-c-dev fonts-dejavu-core
+          sudo apt-get install -y pkg-config libxml2-dev libxml2-utils libssl-dev libxerces-c-dev xmlsec1 fonts-dejavu-core
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install pkg-config libxml2 openssl@3 xerces-c
+          brew install pkg-config libxml2 openssl@3 xerces-c libxmlsec1
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -106,6 +106,21 @@ jobs:
           unzip -q ffmpeg.zip
           echo "$(cygpath -w "$PWD/ffmpeg-n8.1.2-47-g156bb4d299-win64-gpl-8.1/bin")" >> "$GITHUB_PATH"
 
+      - name: Install xmlsec1 (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # a slow msys2 mirror fails the sync outright, so retry the install
+          for attempt in 1 2 3 4 5; do
+            /c/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed mingw-w64-x86_64-xmlsec && break
+            if [ "$attempt" -eq 5 ]; then
+              echo "pacman install failed after $attempt attempts"
+              exit 1
+            fi
+            sleep $((30 * attempt))
+          done
+          echo "C:\msys64\mingw64\bin" >> "$GITHUB_PATH"
+
       # the workspace links grok-ffi, so every platform needs this to compile
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1.1.2
@@ -148,6 +163,7 @@ jobs:
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
           xmllint --version
+          xmlsec1 --version
           java -version
           test -n "$PHOTON_JAR"
           # the burn shapes text with fontdb, and cosmic-text builds it without
