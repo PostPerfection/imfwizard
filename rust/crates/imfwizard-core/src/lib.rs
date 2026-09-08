@@ -52,7 +52,6 @@ pub mod tools;
 pub mod watch;
 
 // Delivery
-pub mod delivery;
 pub mod profiles;
 
 // Tools

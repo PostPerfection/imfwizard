@@ -127,7 +127,7 @@ fn assert_is_prores_4444_with_sound(movie: &Path) {
 }
 
 #[test]
-fn an_imp_exports_into_the_2k_container_without_being_touched() {
+fn an_imp_exports_into_a_container_without_being_touched() {
     let dir = TempDir::new().unwrap();
     let imp = build_sound_imp(dir.path(), "imp_2k");
     let before = imp_digests(&imp);
@@ -136,7 +136,7 @@ fn an_imp_exports_into_the_2k_container_without_being_touched() {
     cmd()
         .args(["prores", "-i", &imp.to_string_lossy()])
         .args(["-o", &movie.to_string_lossy()])
-        .args(["--container", "2k"])
+        .args(["--container", "2k-full"])
         .assert()
         .success()
         .stdout(predicate::str::contains("ProRes 4444 exported"));
@@ -148,21 +148,47 @@ fn an_imp_exports_into_the_2k_container_without_being_touched() {
 }
 
 #[test]
-fn the_4k_container_pads_the_picture_to_4096x2160() {
+fn every_container_name_pads_the_picture_to_its_own_raster() {
+    let containers = [
+        ("2k-scope", "2048", "858"),
+        ("2k-flat", "1998", "1080"),
+        ("2k-full", "2048", "1080"),
+        ("4k-scope", "4096", "1716"),
+        ("4k-flat", "3996", "2160"),
+        ("4k-full", "4096", "2160"),
+    ];
     let dir = TempDir::new().unwrap();
-    let imp = build_sound_imp(dir.path(), "imp_4k");
-    let movie = dir.path().join("out4k.mov");
+    let imp = build_sound_imp(dir.path(), "imp_containers");
+
+    for (container, width, height) in containers {
+        let movie = dir.path().join(format!("{container}.mov"));
+        cmd()
+            .args(["prores", "-i", &imp.to_string_lossy()])
+            .args(["-o", &movie.to_string_lossy()])
+            .args(["--container", container])
+            .assert()
+            .success();
+
+        assert_is_prores_4444_with_sound(&movie);
+        assert_eq!(probe(&movie, "v:0", "width"), width, "{container}");
+        assert_eq!(probe(&movie, "v:0", "height"), height, "{container}");
+    }
+}
+
+#[test]
+fn an_unknown_container_is_refused_with_the_names_that_work() {
+    let dir = TempDir::new().unwrap();
+    let empty = dir.path().join("empty_imp");
+    std::fs::create_dir(&empty).unwrap();
 
     cmd()
-        .args(["prores", "-i", &imp.to_string_lossy()])
-        .args(["-o", &movie.to_string_lossy()])
-        .args(["--container", "4k"])
+        .args(["prores", "-i", &empty.to_string_lossy()])
+        .args(["-o", &dir.path().join("out.mov").to_string_lossy()])
+        .args(["--container", "2k"])
         .assert()
-        .success();
-
-    assert_is_prores_4444_with_sound(&movie);
-    assert_eq!(probe(&movie, "v:0", "width"), "4096");
-    assert_eq!(probe(&movie, "v:0", "height"), "2160");
+        .failure()
+        .stderr(predicate::str::contains("unknown container '2k'"))
+        .stderr(predicate::str::contains("2k-full, 4k-scope"));
 }
 
 #[test]

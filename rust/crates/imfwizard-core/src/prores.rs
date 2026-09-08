@@ -8,26 +8,40 @@ const STDERR_TAIL_LINES: usize = 10;
 const PRORES_4444_PROFILE: &str = "4";
 const PRORES_4444_PIXEL_FORMAT: &str = "yuv444p10le";
 
+const CONTAINER_RASTERS: [(&str, ContainerRaster); 6] = [
+    ("2k-scope", ContainerRaster::new(2048, 858)),
+    ("2k-flat", ContainerRaster::new(1998, 1080)),
+    ("2k-full", ContainerRaster::new(2048, 1080)),
+    ("4k-scope", ContainerRaster::new(4096, 1716)),
+    ("4k-flat", ContainerRaster::new(3996, 2160)),
+    ("4k-full", ContainerRaster::new(4096, 2160)),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContainerRaster {
-    TwoK,
-    FourK,
+pub struct ContainerRaster {
+    pub width: u32,
+    pub height: u32,
 }
 
 impl ContainerRaster {
-    pub fn parse(name: &str) -> Option<Self> {
-        match name.to_lowercase().as_str() {
-            "2k" => Some(Self::TwoK),
-            "4k" => Some(Self::FourK),
-            _ => None,
-        }
+    const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
     }
 
-    pub fn size(self) -> (u32, u32) {
-        match self {
-            Self::TwoK => (2048, 1080),
-            Self::FourK => (4096, 2160),
-        }
+    pub fn parse(name: &str) -> Option<Self> {
+        let wanted = name.to_lowercase();
+        CONTAINER_RASTERS
+            .iter()
+            .find(|(spelling, _)| *spelling == wanted)
+            .map(|(_, raster)| *raster)
+    }
+
+    pub fn names() -> String {
+        CONTAINER_RASTERS
+            .iter()
+            .map(|(spelling, _)| *spelling)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -68,8 +82,7 @@ pub fn export_imp_to_prores(
         command.arg("-i").arg(&sound);
         command.args(["-map", "0:v:0", "-map", "1:a:0"]);
     }
-    if let Some(container) = container {
-        let (width, height) = container.size();
+    if let Some(ContainerRaster { width, height }) = container {
         command.args([
             "-vf",
             &format!(
@@ -117,9 +130,20 @@ mod imp_export_tests {
 
     #[test]
     fn container_sizes() {
-        assert_eq!(ContainerRaster::parse("2k").unwrap().size(), (2048, 1080));
-        assert_eq!(ContainerRaster::parse("4K").unwrap().size(), (4096, 2160));
-        assert!(ContainerRaster::parse("8k").is_none());
+        let scope = ContainerRaster::parse("2k-scope").unwrap();
+        assert_eq!((scope.width, scope.height), (2048, 858));
+        let flat = ContainerRaster::parse("4K-FLAT").unwrap();
+        assert_eq!((flat.width, flat.height), (3996, 2160));
+        assert!(ContainerRaster::parse("2k").is_none());
+        assert!(ContainerRaster::parse("8k-full").is_none());
+    }
+
+    #[test]
+    fn every_container_name_is_offered() {
+        assert_eq!(
+            ContainerRaster::names(),
+            "2k-scope, 2k-flat, 2k-full, 4k-scope, 4k-flat, 4k-full"
+        );
     }
 
     #[test]

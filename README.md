@@ -29,7 +29,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
 - **CPU and GPU encoding on Linux, Windows, and macOS**, CPU encoding uses the available cores by default. `--gpu` or the desktop GPU setting enables Grok's accelerator plugin for JPEG 2000 encode and decode. An explicit `--gpu` fails if the plugin cannot start, while a saved desktop preference warns and continues on the CPU. `--no-gpu` forces the CPU
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
-- **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master
+- **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
@@ -557,10 +557,12 @@ imfwizard prores \
 imfwizard prores \
   -i /path/to/imp/ \
   -o /path/to/delivery.mov \
-  --container 2k
+  --container 4k-scope
 
-# Containers: 2k (2048×1080), 4k (4096×2160). The picture keeps its aspect ratio
-# and is padded with black. Without --container it keeps its own raster.
+# Containers: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
+#             4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
+# The picture keeps its aspect ratio and is padded with black. Without
+# --container it keeps its own raster. An unknown name is refused.
 # No file inside the IMP is written.
 ```
 
@@ -571,22 +573,6 @@ imfwizard burn-in \
   -i /path/to/video.mp4 \
   -s /path/to/subs.srt \
   -o /path/to/output_burned.mp4
-```
-
-### Export an IMP as a ProRes delivery master
-
-```bash
-# Transcode an IMP's essence to a ProRes 4444 .mov, fitted and padded into 4K scope
-imfwizard target-convert \
-  -i /path/to/imp/ \
-  -o /path/to/delivery/ \
-  -t 4k-scope
-
-# The IMP is not modified: the picture keeps its aspect ratio and is padded
-# to fill the container.
-# Containers: 2k-scope (2048×858), 2k-flat (1998×1080), 2k-full (2048×1080),
-#             4k-scope (4096×1716), 4k-flat (3996×2160), 4k-full (4096×2160)
-# An unknown target errors instead of falling back to 1080p.
 ```
 
 ### Bitrate analytics

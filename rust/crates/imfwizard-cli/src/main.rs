@@ -988,22 +988,6 @@ enum Commands {
         trusted_cert: Option<PathBuf>,
     },
 
-    /// Convert IMP to a delivery target format
-    #[command(name = "target-convert")]
-    TargetConvert {
-        /// Input IMP directory
-        #[arg(short, long)]
-        input: String,
-
-        /// Target platform (e.g. netflix, apple, amazon)
-        #[arg(short, long)]
-        target: String,
-
-        /// Output directory (defaults to input + _delivery)
-        #[arg(short, long)]
-        output: Option<String>,
-    },
-
     /// Generate QC report for an IMP
     #[command(alias = "qc-report")]
     Report {
@@ -1335,8 +1319,7 @@ enum Commands {
         #[arg(short, long, default_value = "hq")]
         profile: String,
 
-        /// Fit an IMP's picture into a named container: 2k (2048x1080) or 4k (4096x2160)
-        #[arg(long)]
+        #[arg(long, value_name = "NAME", help = prores_container_help())]
         container: Option<String>,
 
         /// UUID of the IMP's CPL to export, when it holds more than one
@@ -3143,35 +3126,6 @@ fn run() {
             }
         },
 
-        Commands::TargetConvert {
-            input,
-            target,
-            output,
-        } => {
-            let imp_dir = PathBuf::from(&input);
-            let output_dir = output
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(format!("{input}_delivery")));
-
-            let spec = match imfwizard_core::delivery::spec_for_target(&target) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
-
-            match imfwizard_core::delivery::deliver(&imp_dir, &output_dir, &spec) {
-                Ok(out) => {
-                    println!("Delivered to: {}", out.display());
-                }
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-
         Commands::Report {
             imp,
             output,
@@ -3735,7 +3689,10 @@ fn run() {
             if input_path.is_dir() {
                 let raster = container.as_deref().map(|name| {
                     ContainerRaster::parse(name).unwrap_or_else(|| {
-                        eprintln!("Error: unknown container '{name}', use 2k or 4k");
+                        eprintln!(
+                            "Error: unknown container '{name}', use one of {}",
+                            ContainerRaster::names()
+                        );
                         std::process::exit(1);
                     })
                 });
@@ -4645,6 +4602,13 @@ fn run() {
             postkit::grok_encoder::accelerated_frames()
         );
     }
+}
+
+fn prores_container_help() -> String {
+    format!(
+        "Fit an IMP's picture into a named container: {}",
+        ContainerRaster::names()
+    )
 }
 
 fn encode_prores_file(input: &str, output: &str, profile: &str, container: Option<&str>) {
