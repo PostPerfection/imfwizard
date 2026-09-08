@@ -111,47 +111,47 @@ fn picture_transfer_and_primaries(imp: &Path) -> ([u8; 16], [u8; 16]) {
     )
 }
 
-/// Every Photon finding the CPL EssenceDescriptor still draws, each one an item
-/// the picture MXF's descriptor carries and the CPL's copy of it does not. The
-/// asdcplib binding exposes neither the descriptor's InstanceID nor a RegXML
-/// dump, so the CPL cannot yet repeat what the MXF says.
-const OPEN_DESCRIPTOR_FINDINGS: [&str; 8] = [
-    "does not have a value set for the field SampleRate",
-    "doesn't match any EssenceDescriptors within the IMFTrackFile resource",
-    "is missing SubDescriptors",
-    "is missing ComponentMinRef/ComponentMaxRef",
-    "shall have a Video Line Map item",
-    "has invalid storedWidth(-1) or storedHeight(-1)",
-    "Cannot invoke \"com.netflix.imflibrary.st0377.header.UL.equalsWithMask",
-    // a picture-only package, which these fixtures are, is not a legal composition
-    "does not contain a single main audio sequence",
-];
+/// A composition with no sound, which these picture fixtures are. The 2016
+/// edition's validator requires a main audio sequence and the 2020 one does not.
+const NO_SOUND_TRACK: &str = "does not contain a single main audio sequence";
 
-/// Photon must find nothing in the package beyond the descriptor items that are
-/// still open, and nothing at all in the picture MXF, the PKL or the ASSETMAP.
-fn assert_photon_finds_nothing_new(imp: &Path, preset: &str) {
+/// A sound resource has to name an EssenceDescriptorList entry, and the entry
+/// has to be the sound MXF's own WaveAudioDescriptor, which the asdcplib binding
+/// does not read back yet.
+const SOUND_DESCRIPTOR_MISSING: &str = "Invalid content was found starting with element";
+
+/// Photon has to find nothing but `allowed`: the CPL, the picture MXF, the PKL
+/// and the ASSETMAP. The CPL's EssenceDescriptor is the MXF's own descriptor, so
+/// Photon compares the two and checks the App 2E colour against it.
+fn assert_photon_finds_only(imp: &Path, preset: &str, allowed: &[&str]) {
     let photon = match imfwizard_core::photon::run_photon(imp, None) {
         Ok(photon) => photon,
         Err(e) => panic!("{preset}: Photon failed to analyse the IMP: {e}"),
     };
     for finding in &photon.details {
         assert!(
-            OPEN_DESCRIPTOR_FINDINGS
-                .iter()
-                .any(|known| finding.contains(known)),
-            "{preset}: Photon reports something new: {finding}"
+            allowed.iter().any(|known| finding.contains(known)),
+            "{preset}: Photon reports {finding}"
+        );
+    }
+    if allowed.is_empty() {
+        assert!(
+            photon.errors.is_empty() && photon.warnings.is_empty(),
+            "{preset}: Photon errors {:?}, warnings {:?}",
+            photon.errors,
+            photon.warnings
         );
     }
     for counted in photon.errors.iter().chain(photon.warnings.iter()) {
         assert!(
             counted.contains("CPL_"),
-            "{preset}: only the CPL may carry findings, got {counted}"
+            "{preset}: only the CPL may carry a finding, got {counted}"
         );
     }
-    assert!(
-        !photon.details.is_empty(),
-        "{preset}: Photon found nothing at all, so it did not analyse the composition"
-    );
+}
+
+fn assert_photon_is_clean(imp: &Path, preset: &str) {
+    assert_photon_finds_only(imp, preset, &[]);
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn a_pq_imp_carries_st2084_and_passes_photon() {
         "the CPL descriptor does not carry the ST 2084 transfer UL"
     );
 
-    assert_photon_finds_nothing_new(&imp, "pq-bt2020");
+    assert_photon_finds_only(&imp, "pq-bt2020", &[NO_SOUND_TRACK]);
 }
 
 // COLOR.8, the BT.2020 primaries with the HLG OETF
@@ -193,7 +193,7 @@ fn an_hlg_imp_carries_the_hlg_transfer_and_passes_photon() {
         "the CPL descriptor does not carry the HLG transfer UL"
     );
 
-    assert_photon_finds_nothing_new(&imp, "hlg-bt2020");
+    assert_photon_is_clean(&imp, "hlg-bt2020");
 }
 
 #[test]
@@ -266,4 +266,153 @@ fn an_hdr_source_without_a_preset_is_refused() {
         .failure()
         .stderr(predicate::str::contains("--hdr hlg-bt2020"))
         .stderr(predicate::str::contains("Rec.709 SDR"));
+}
+
+/// An SDR App 2E picture is COLOR.3, so the wrap declares the Rec.709 ULs and
+/// the CPL repeats them: a picture that declared nothing would read as an
+/// unknown colour system.
+#[test]
+fn an_sdr_imp_declares_rec709_and_passes_photon() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("sdr.mkv");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi"])
+        .args([
+            "-i",
+            &format!("color=c=gray:s={SOURCE_WIDTH}x{SOURCE_HEIGHT}:r={FPS}"),
+        ])
+        .args(["-frames:v", &FRAMES.to_string()])
+        .args(["-c:v", "ffv1", "-pix_fmt", "gbrp"])
+        .arg(&clip)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    let imp = dir.path().join("imp_sdr");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &imp.to_string_lossy(),
+            "-t",
+            "SDR",
+            "--video",
+            &clip.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--fps-num",
+            &FPS.to_string(),
+            "--fps-den",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let (transfer, primaries) = picture_transfer_and_primaries(&imp);
+    assert_eq!(transfer, asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709);
+    assert_eq!(primaries, asdcplib::jp2k::COLOR_PRIMARIES_BT709);
+    assert_photon_finds_only(&imp, "sdr", &[NO_SOUND_TRACK]);
+}
+
+/// The colour in the CPL is checked, not taken on trust: BT.709 primaries under
+/// the HLG transfer is no App 2E colour system, and Photon says so.
+#[test]
+fn photon_rejects_a_colour_the_cpl_invents() {
+    let dir = TempDir::new().unwrap();
+    let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
+    let imp = build_imp(dir.path(), &clip, "hlg-bt2020");
+    assert_photon_is_clean(&imp, "hlg-bt2020");
+
+    let cpl_path = file_starting_with(&imp, "CPL_");
+    let cpl = std::fs::read_to_string(&cpl_path).unwrap();
+    let rewritten = cpl.replace(
+        "<r1:ColorPrimaries>urn:smpte:ul:060e2b34.0401010d.04010101.03040000",
+        "<r1:ColorPrimaries>urn:smpte:ul:060e2b34.04010106.04010101.03030000",
+    );
+    assert_ne!(rewritten, cpl, "the CPL has to carry the BT.2020 primaries");
+    std::fs::write(&cpl_path, rewritten).unwrap();
+
+    let photon = imfwizard_core::photon::run_photon(&imp, None).expect("Photon runs");
+    assert!(
+        photon.details.iter().any(|finding| finding
+            .contains("invalid ColorPrimaries(ITU709)-TransferCharacteristic(HLG)")),
+        "Photon did not check the colour: {:?}",
+        photon.details
+    );
+}
+
+/// A sound track file is wrapped with the MCA labels ST 2067-2 asks for, which
+/// Photon checks on the MXF. Its CPL EssenceDescriptorList entry is the open
+/// item: the binding reads back no WaveAudioDescriptor to build one from, so the
+/// resource names no descriptor and the CPL fails the ST 2067-3 schema there.
+#[test]
+fn a_sound_track_carries_its_mca_labels() {
+    let dir = TempDir::new().unwrap();
+    let clip = tagged_clip(dir.path(), HLG_TRANSFER_TAG);
+    let wav = dir.path().join("stereo.wav");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi"])
+        .args(["-i", "sine=frequency=1000:duration=0.125:sample_rate=48000"])
+        .args(["-ac", "2", "-c:a", "pcm_s24le"])
+        .arg(&wav)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    let imp = dir.path().join("imp_sound");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &imp.to_string_lossy(),
+            "-t",
+            "HLG with sound",
+            "--video",
+            &clip.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--hdr",
+            "hlg-bt2020",
+            "--audio",
+            &wav.to_string_lossy(),
+            "--audio-lang",
+            "en-US",
+            "--fps-num",
+            &FPS.to_string(),
+            "--fps-den",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let sound = file_starting_with(&imp, "AUDIO_");
+    let mut reader = asdcplib::as02::pcm::MxfReader::new();
+    reader
+        .open_read(&sound.to_string_lossy(), asdcplib::Rational::new(24, 1))
+        .expect("the sound MXF opens");
+    assert_eq!(
+        reader.channel_assignment().expect("channel assignment"),
+        Some(asdcplib::as02::pcm::IMF_CHANNEL_ASSIGNMENT_MCA)
+    );
+    let labels = reader.mca_label_subdescriptors().expect("mca labels");
+    assert_eq!(labels.len(), 3, "two channels plus the soundfield group");
+    let group = labels
+        .iter()
+        .find(|label| label.kind == asdcplib::pcm::McaLabelKind::SoundfieldGroup)
+        .expect("a soundfield group");
+    assert_eq!(group.spoken_language.as_deref(), Some("en-US"));
+    assert_eq!(group.title.as_deref(), Some("HLG with sound"));
+    assert_eq!(group.title_version.as_deref(), Some("Original Version"));
+    assert_eq!(group.audio_content_kind.as_deref(), Some("PRM"));
+    assert_eq!(group.audio_element_kind.as_deref(), Some("FCMP"));
+
+    assert_photon_finds_only(&imp, "sound", &[SOUND_DESCRIPTOR_MISSING]);
 }

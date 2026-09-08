@@ -13,33 +13,23 @@ have not run on real hardware, so a hand pass there is the last step before
 trusting the preview panel on those builds. Details in dcpwizard's DESIGN_TODO
 under "Cross-platform embedded preview".
 
-## Open: the CPL descriptor and the audio MCA labels wait on the asdcplib binding
+## Open: the sound resource names no CPL descriptor
 
-Photon parses the CPL now and compares its EssenceDescriptorList entry with the
-descriptor it reads from the picture MXF, field for field, ignoring only
-`PHDRMetadataTrackSubDescriptor` (`IMFCPLValidator` plus
-`DOMNodeObjectModel.equals`). Pasting the MXF's own fields into the entry clears
-that comparison, and changing one digit of the `InstanceID` brings it back, so
-the entry has to repeat the MXF exactly. `asdcplib::as02::jp2k::MxfReader`
-exposes neither `InstanceID` (one on the RGBADescriptor, one on the
-JPEG2000SubDescriptor) nor a RegXML dump, so `hdr_wcg::cpl_descriptor_body`
-still writes only the two colour ULs and Photon reports the rest as missing.
+The picture resource names an EssenceDescriptorList entry read back out of the
+track file, and the sound resource names none unless `--audio-role ad|hi` gave
+it one. ST 2067-3's TrackFileResourceType makes SourceEncoding mandatory and a
+resource with no descriptor writes none, so Photon reports "Invalid content was
+found starting with element" against the CPL of every IMP that carries sound.
+`hdr_create.rs` allows that one finding, as `SOUND_DESCRIPTOR_MISSING`, so the
+end-to-end sound test passes with it outstanding.
 
-Three items are missing from the MXF itself, not just from the CPL:
-`VideoLineMap`, `PixelBitDepth` and the sub-descriptor's `J2CLayout`.
-`JP2K_PDesc_to_MD` sets none of them and `as-02-wrap` writes the first two only
-under `-l` and the third only under `-J`, so `asdcp_shim.cpp`'s
-`as02_jp2k_open_write` has to set them the way it already sets
-`ScanningDirection`, `PixelLayout` and `ComponentMinRef`/`ComponentMaxRef`.
-
-The audio track file needs the ST 377-4 MCA labels ST 2067-2 asks for:
-`ChannelAssignment` = `MDD_IMFAudioChannelCfg_MCA`
-(`060e2b34.0401010d.04020210.04010000`), an RFC 5646 language on the
-SoundfieldGroupLabelSubDescriptor and one AudioChannelLabelSubDescriptor per
-channel. The shim has `asdcp_pcm_writer_open_write_mca` for AS-DCP only; the
-AS-02 PCM path passes an empty subdescriptor list to `OpenWrite`, and postkit
-refuses an MCA config on that path by name. The AS-02 writer needs the same
-entry point with the IMF channel configuration label.
+What closes it: `asdcplib::as02::pcm::MxfReader` reads back no
+WaveAudioDescriptor, so the binding needs one the way
+`asdcplib::as02::jp2k::MxfReader` already has `rgba_essence_descriptor` and
+`jpeg2000_sub_descriptor`. Then the sound path writes its entry the way
+`cpl::picture_descriptor_body` writes the picture's: read the descriptor off the
+wrapped track file and hand it to a `postkit::regxml` writer, InstanceID
+included, since Photon compares the CPL entry with the MXF field for field.
 
 ## Open: `to-dcp` takes Rec.709 picture only
 

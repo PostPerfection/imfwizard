@@ -38,7 +38,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
 ### HDR & Advanced
-- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65|hlg-bt2020` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. `hlg-bt2020` is App 2E COLOR.8, the BT.2020 primaries with the HLG OETF. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
+- **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65|hlg-bt2020` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. The CPL entry is the track file's whole descriptor, read back out of the MXF after the wrap and written as RegXML, so Photon's field for field comparison of the two passes. A picture with no `--hdr` declares Rec.709, App 2E COLOR.3. `hlg-bt2020` is App 2E COLOR.8, the BT.2020 primaries with the HLG OETF. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
 - **Dolby Vision** RPU metadata injection (via dovi_tool)
 - **HDR10+ dynamic metadata** injection, re-encodes with libx265 to write SEI (via hdr10plus_tool)
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
@@ -301,12 +301,19 @@ imfwizard create \
 ### Tag the audio language and apply a delivery preset
 
 ```bash
-# --audio-lang writes an RFC 5646 LocaleList/Language in the CPL (ST 2067-3).
+# --audio-lang writes an RFC 5646 LocaleList/Language in the CPL (ST 2067-3),
+# and the same tag onto the sound MXF's MCA soundfield group (und without it).
+# --audio-title-version is MCATitleVersion on that group, default Original Version.
+# --audio-content-kind is MCAAudioContentKind, default PRM, a primary mix.
+# --audio-element-kind is MCAAudioElementKind, default FCMP, a final complete mix.
 # --profile maps a delivery preset's target bitrate to the J2K compression ratio.
 imfwizard create \
   --title "My Film" \
   --video /path/to/video.mov \
   --audio /path/to/de.wav --audio-lang de-DE \
+  --audio-title-version "Original Version" \
+  --audio-content-kind PRM \
+  --audio-element-kind FCMP \
   --profile netflix \
   --output /path/to/output/
 ```

@@ -39,15 +39,13 @@ pub fn write_cpl(
             continue;
         };
         let mut source_encoding = None;
-        // image gets an RGBA EssenceDescriptor only when HDR/WCG is set; the
-        // descriptor mirrors what the picture MXF actually carries.
-        if kind == ImfTrackKind::Image
-            && let Some(hdr) = &comp.hdr
-        {
+        // the picture's descriptor is read back out of the track file, since a
+        // validator compares the two and every item has to be the MXF's own
+        if kind == ImfTrackKind::Image {
             let se = uuid::Uuid::new_v4().to_string();
             descriptors.push(ImfEssenceDescriptor {
                 id: se.clone(),
-                body: hdr.cpl_descriptor_body(),
+                body: picture_descriptor_body(&tf.path)?,
             });
             source_encoding = Some(se);
         }
@@ -96,14 +94,42 @@ pub fn write_cpl(
         essence_descriptors: descriptors,
         max_cll: comp.hdr.as_ref().and_then(|h| h.max_cll),
         max_fall: comp.hdr.as_ref().and_then(|h| h.max_fall),
-        // COLOR.8 exists from the 2020 edition on, so an HLG picture cannot claim 2016
-        app2e_edition: match comp.hdr.as_ref().is_some_and(|hdr| hdr.is_hlg()) {
-            true => App2eEdition::Edition2020,
-            false => App2eEdition::Edition2016,
-        },
+        // the picture is full range RGB 4:4:4, which the 2016 edition's image
+        // characteristics allow for PQ but not for Rec.709, and COLOR.8 is 2020 only
+        app2e_edition: App2eEdition::Edition2020,
     };
 
     std::fs::write(path, cpl.to_xml())
+}
+
+/// The picture MXF's own RGBA descriptor and JPEG 2000 sub-descriptor, as the
+/// RegXML the CPL's EssenceDescriptorList carries.
+fn picture_descriptor_body(picture: &Path) -> std::io::Result<String> {
+    fn read<T>(result: asdcplib::Result<T>, what: &str, picture: &Path) -> std::io::Result<T> {
+        result.map_err(|e| {
+            std::io::Error::other(format!(
+                "cannot read the {what} of {}: {e}",
+                picture.display()
+            ))
+        })
+    }
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    read(
+        reader.open_read(&picture.to_string_lossy()),
+        "picture MXF",
+        picture,
+    )?;
+    let descriptor = read(reader.rgba_essence_descriptor(), "RGBA descriptor", picture)?;
+    let jpeg2000 = read(
+        reader.jpeg2000_sub_descriptor(),
+        "JPEG 2000 sub-descriptor",
+        picture,
+    )?;
+    let _ = reader.close();
+    Ok(postkit::regxml::picture_descriptor_regxml(
+        &descriptor,
+        &jpeg2000,
+    ))
 }
 
 /// MCA essence descriptor body for an accessibility audio track, matching the
@@ -160,13 +186,13 @@ mod tests {
         write_cpl(&path, "cpl", &opts, &comp, &[]).unwrap();
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<IssueDate>"));
-        assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/schemas/2067-21/2016</cc:ApplicationIdentification>"));
+        assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/ns/2067-21/2020</cc:ApplicationIdentification>"));
     }
 
-    // COLOR.8 arrived in the 2020 edition, and Photon picks its constraints validator
-    // off this string
+    // Photon picks its constraints validator off this string, and only the 2020
+    // edition's table holds COLOR.8 and full range Rec.709 RGB
     #[test]
-    fn an_hlg_composition_claims_the_2020_edition() {
+    fn every_composition_claims_the_2020_edition() {
         let dir = tempfile::tempdir().unwrap();
         let identification = |preset: &str| {
             let path = dir.path().join(format!("CPL_{preset}.xml"));
@@ -187,11 +213,11 @@ mod tests {
         );
         assert_eq!(
             identification("pq-bt2020"),
-            "http://www.smpte-ra.org/schemas/2067-21/2016"
+            "http://www.smpte-ra.org/ns/2067-21/2020"
         );
         assert_eq!(
             identification("pq-p3d65"),
-            "http://www.smpte-ra.org/schemas/2067-21/2016"
+            "http://www.smpte-ra.org/ns/2067-21/2020"
         );
     }
 
@@ -214,7 +240,7 @@ mod tests {
 
         write_cpl(&path, "cpl", &ImpOptions::default(), &comp, &[]).unwrap();
         let xml = std::fs::read_to_string(&path).unwrap();
-        let app2e = "http://www.smpte-ra.org/schemas/2067-21/2016";
+        let app2e = "http://www.smpte-ra.org/ns/2067-21/2020";
         assert!(xml.contains(&format!(
             "<app2e:MaxCLL xmlns:app2e=\"{app2e}\">993</app2e:MaxCLL>"
         )));
@@ -413,12 +439,7 @@ mod tests {
             hdr: Some(hdr),
             ..Default::default()
         };
-        let video = MxfTrackFile {
-            path: "VIDEO_hdr.mxf".into(),
-            uuid: "bbbbbbbb-1111-2222-3333-444444444444".into(),
-            duration: 240,
-            ..Default::default()
-        };
+        let video = crate::mxf_wrap::wrapped_picture(dir.path(), Some(&comp.hdr.clone().unwrap()));
         write_cpl(
             &cpl_path,
             "33333333-4444-5555-6666-777777777777",

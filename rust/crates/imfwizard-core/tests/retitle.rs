@@ -6,25 +6,40 @@ use std::path::Path;
 
 use imfwizard_core::MxfTrackFile;
 use imfwizard_core::imp::{Composition, CplEntry, ImpOptions};
+use imfwizard_core::mxf_wrap::{
+    MxfWrapOptions, picture_colour, synthetic_j2k_codestream, wrap_mxf,
+};
 use postkit::package_edit::{PackageEdit, edit_package};
 
 const CPL_ID: &str = "11111111-1111-1111-1111-111111111111";
 const PKL_ID: &str = "33333333-3333-3333-3333-333333333333";
 const TRACK_ID: &str = "22222222-2222-2222-2222-222222222222";
 const OLD_TITLE: &str = "Feature OV";
-const ESSENCE: &[u8] = b"picture essence";
 
-/// An IMP holding one composition, built through imfwizard's own writers.
-fn write_imp(dir: &Path) {
-    let track_path = dir.join("VIDEO_track.mxf");
-    std::fs::write(&track_path, ESSENCE).unwrap();
-    let tracks = [MxfTrackFile {
-        path: track_path,
-        uuid: TRACK_ID.into(),
-        hash: "dHJhY2s=".into(),
-        size: ESSENCE.len() as u64,
-        duration: 480,
-    }];
+/// An IMP holding one composition, built through imfwizard's own writers. The
+/// picture is a real track file, since the CPL reads its descriptor back.
+fn write_imp(dir: &Path) -> MxfTrackFile {
+    let frames = dir.join("j2k");
+    std::fs::create_dir_all(&frames).unwrap();
+    std::fs::write(
+        frames.join("0001.j2c"),
+        synthetic_j2k_codestream(1920, 1080, 12),
+    )
+    .unwrap();
+    let wrap = wrap_mxf(&MxfWrapOptions {
+        input_dir: frames,
+        output_file: dir.join("VIDEO_track.mxf"),
+        essence_type: imfwizard_core::EssenceType::J2k,
+        edit_rate_num: 24,
+        edit_rate_den: 1,
+        duration: 1,
+        hdr: Some(picture_colour(None)),
+        mca: None,
+        asset_uuid: Some(*uuid::Uuid::parse_str(TRACK_ID).unwrap().as_bytes()),
+    });
+    assert!(wrap.success, "picture wrap failed: {}", wrap.error);
+    assert_eq!(wrap.track_file.uuid, TRACK_ID);
+    let tracks = [wrap.track_file.clone()];
 
     let opts = ImpOptions {
         output_dir: dir.to_path_buf(),
@@ -53,12 +68,14 @@ fn write_imp(dir: &Path) {
     .unwrap();
     imfwizard_core::assetmap::write_assetmap(&dir.join("ASSETMAP.xml"), PKL_ID, &cpls, &tracks)
         .unwrap();
+    wrap.track_file
 }
 
 #[test]
 fn a_retitle_lands_in_the_cpl_and_repoints_the_pkl_and_assetmap() {
     let dir = tempfile::tempdir().unwrap();
-    write_imp(dir.path());
+    let track = write_imp(dir.path());
+    let essence_before = std::fs::read(&track.path).unwrap();
 
     let edited = edit_package(&PackageEdit {
         input: dir.path().to_path_buf(),
@@ -89,13 +106,13 @@ fn a_retitle_lands_in_the_cpl_and_repoints_the_pkl_and_assetmap() {
     assert!(pkl.contains(&format!("<Size>{expected_size}</Size>")));
     assert!(!pkl.contains(CPL_ID));
     assert!(
-        pkl.contains("<Hash>dHJhY2s=</Hash>"),
+        pkl.contains(&format!("<Hash>{}</Hash>", track.hash)),
         "the track file's own PKL entry is untouched"
     );
 
     assert_eq!(
-        std::fs::read(dir.path().join("VIDEO_track.mxf")).unwrap(),
-        ESSENCE,
+        std::fs::read(&track.path).unwrap(),
+        essence_before,
         "essence must be untouched"
     );
 }

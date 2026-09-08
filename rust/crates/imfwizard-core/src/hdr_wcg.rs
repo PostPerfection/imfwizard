@@ -150,65 +150,6 @@ impl HdrWcg {
         }
         m
     }
-
-    /// ST 2067-21 RGBADescriptor body for the CPL EssenceDescriptorList, matching
-    /// the shape asdcplib writes into the MXF. Six-space base indent, already
-    /// namespaced, ready to drop inside `<EssenceDescriptor>`.
-    pub fn cpl_descriptor_body(&self) -> String {
-        let mut b = String::new();
-        b.push_str(concat!(
-            "      <r0:RGBADescriptor ",
-            "xmlns:r0=\"http://www.smpte-ra.org/reg/395/2014/13/1/aaf\" ",
-            "xmlns:r1=\"http://www.smpte-ra.org/reg/335/2012\" ",
-            "xmlns:r2=\"http://www.smpte-ra.org/reg/2003/2012\">\n"
-        ));
-        b.push_str(&format!(
-            "        <r1:TransferCharacteristic>{}</r1:TransferCharacteristic>\n",
-            ul_to_urn(&self.transfer)
-        ));
-        b.push_str(&format!(
-            "        <r1:ColorPrimaries>{}</r1:ColorPrimaries>\n",
-            ul_to_urn(&self.color_primaries)
-        ));
-        if let Some(md) = &self.mastering {
-            let [wx, wy] = md.white_point;
-            b.push_str(&format!(
-                "        <r1:MasteringDisplayWhitePointChromaticity><r2:X>{wx}</r2:X><r2:Y>{wy}</r2:Y></r1:MasteringDisplayWhitePointChromaticity>\n"
-            ));
-            b.push_str("        <r1:MasteringDisplayPrimaries>\n");
-            for [x, y] in md.primaries {
-                b.push_str(&format!(
-                    "          <r2:ColorPrimary><r2:X>{x}</r2:X><r2:Y>{y}</r2:Y></r2:ColorPrimary>\n"
-                ));
-            }
-            b.push_str("        </r1:MasteringDisplayPrimaries>\n");
-            b.push_str(&format!(
-                "        <r1:MasteringDisplayMaximumLuminance>{}</r1:MasteringDisplayMaximumLuminance>\n",
-                md.max_luminance
-            ));
-            b.push_str(&format!(
-                "        <r1:MasteringDisplayMinimumLuminance>{}</r1:MasteringDisplayMinimumLuminance>\n",
-                md.min_luminance
-            ));
-        }
-        b.push_str("      </r0:RGBADescriptor>");
-        b
-    }
-}
-
-/// Format a 16-byte SMPTE UL as its `urn:smpte:ul:` form (four dot-separated
-/// groups of 4 bytes), matching Photon's EssenceDescriptor serialisation.
-fn ul_to_urn(ul: &[u8; 16]) -> String {
-    let g = |o: usize| {
-        format!(
-            "{:02x}{:02x}{:02x}{:02x}",
-            ul[o],
-            ul[o + 1],
-            ul[o + 2],
-            ul[o + 3]
-        )
-    };
-    format!("urn:smpte:ul:{}.{}.{}.{}", g(0), g(4), g(8), g(12))
 }
 
 /// Parse an x265 master-display string, e.g.
@@ -319,7 +260,7 @@ mod tests {
     #[test]
     fn hlg_transfer_urn_matches_photon() {
         assert_eq!(
-            ul_to_urn(&TRANSFER_CHARACTERISTIC_HLG),
+            postkit::regxml::urn_ul(&TRANSFER_CHARACTERISTIC_HLG),
             "urn:smpte:ul:060e2b34.0401010d.04010101.010b0000"
         );
     }
@@ -356,7 +297,7 @@ mod tests {
     fn ul_urn_format_matches_photon() {
         // ST 2084 transfer UL as Photon serialises it
         assert_eq!(
-            ul_to_urn(&asdcplib::jp2k::TRANSFER_CHARACTERISTIC_ST2084),
+            postkit::regxml::urn_ul(&asdcplib::jp2k::TRANSFER_CHARACTERISTIC_ST2084),
             "urn:smpte:ul:060e2b34.0401010d.04010101.010a0000"
         );
     }
@@ -408,28 +349,9 @@ mod tests {
             .unwrap();
         assert_eq!(h.max_cll, Some(993));
         assert_eq!(h.max_fall, Some(362));
-        let body = h.cpl_descriptor_body();
-        assert!(!body.contains("993"));
-        assert!(!body.contains("362"));
         assert_eq!(
             h.to_asdcp(),
             HdrWcg::from_flags("pq-bt2020", None).unwrap().to_asdcp()
         );
-    }
-
-    #[test]
-    fn cpl_body_has_uls_and_mastering() {
-        let h = HdrWcg::from_flags(
-            "pq-p3d65",
-            Some("R(34000,16000)G(13250,34500)B(7500,3000)WP(15635,16450)L(40000000,50)"),
-        )
-        .unwrap();
-        let body = h.cpl_descriptor_body();
-        assert!(body.contains("<r0:RGBADescriptor"));
-        assert!(body.contains(
-            "<r1:TransferCharacteristic>urn:smpte:ul:060e2b34.0401010d.04010101.010a0000"
-        ));
-        assert!(body.contains("<r1:MasteringDisplayMaximumLuminance>40000000<"));
-        assert!(body.contains("<r2:ColorPrimary><r2:X>34000</r2:X><r2:Y>16000</r2:Y>"));
     }
 }

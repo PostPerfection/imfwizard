@@ -182,6 +182,23 @@ fn measured_any_phase(progress: &postkit::pipeline::PipelineProgress) -> bool {
         || progress.write_secs > 0.0
 }
 
+/// What the sound track file's MCA soundfield group says about the mix. Boxed
+/// for the same reason `PictureArguments` is.
+#[derive(clap::Args)]
+struct SoundfieldArguments {
+    /// MCATitleVersion on the sound track file's soundfield group.
+    #[arg(long = "audio-title-version", default_value = "Original Version")]
+    title_version: String,
+
+    /// MCAAudioContentKind on the soundfield group: PRM is a primary mix.
+    #[arg(long = "audio-content-kind", default_value = "PRM")]
+    audio_content_kind: String,
+
+    /// MCAAudioElementKind on the soundfield group: FCMP is a final complete mix.
+    #[arg(long = "audio-element-kind", default_value = "FCMP")]
+    audio_element_kind: String,
+}
+
 /// How many bits a frame of `create`'s picture gets. Boxed for the same reason
 /// `PictureArguments` is.
 #[derive(clap::Args)]
@@ -481,6 +498,9 @@ enum Commands {
         /// visually impaired) or hi (hearing impaired). Emits an MCA descriptor.
         #[arg(long = "audio-role")]
         audio_role: Option<String>,
+
+        #[command(flatten)]
+        soundfield: Box<SoundfieldArguments>,
 
         /// TTML/IMSC subtitle file to package (repeatable)
         #[arg(long = "subtitle")]
@@ -1718,6 +1738,7 @@ fn run() {
             audio,
             audio_lang,
             audio_role,
+            soundfield,
             subtitles,
             burn: burn_arguments,
             kind,
@@ -2310,6 +2331,11 @@ fn run() {
                 }],
                 fps_num,
                 fps_den,
+                soundfield: imfwizard_core::imp::SoundfieldLabels {
+                    title_version: soundfield.title_version,
+                    audio_content_kind: soundfield.audio_content_kind,
+                    audio_element_kind: soundfield.audio_element_kind,
+                },
                 ..Default::default()
             };
             // the picture wrap's hash ran while the hints finished, so this waits less

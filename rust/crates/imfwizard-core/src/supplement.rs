@@ -305,6 +305,7 @@ fn wrap_asset(
         edit_rate_den: fps_den,
         duration: 0,
         hdr: None,
+        mca: None,
         asset_uuid: Some(*asset_uuid.as_bytes()),
     });
     if !wrap.success {
@@ -548,16 +549,11 @@ mod tests {
         let comp = crate::imp::Composition {
             title: "OV".into(),
             content_kind: "feature".into(),
-            hdr: Some(hdr),
+            hdr: Some(hdr.clone()),
             ..Default::default()
         };
         let track_files = [
-            MxfTrackFile {
-                path: dir.join("VIDEO_ov-video.mxf"),
-                uuid: "ov-video".into(),
-                duration: 240,
-                ..Default::default()
-            },
+            crate::mxf_wrap::wrapped_picture(dir, Some(&hdr)),
             MxfTrackFile {
                 path: dir.join("AUDIO_ov-audio.mxf"),
                 uuid: "ov-audio".into(),

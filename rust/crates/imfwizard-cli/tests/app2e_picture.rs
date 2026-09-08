@@ -30,7 +30,7 @@ const PIXEL_LAYOUT_RGB_12: [u8; 16] = [b'R', 12, b'G', 12, b'B', 12, 0, 0, 0, 0,
 /// The CPL namespace ST 2067-3 fixes, and the App 2E identifier ST 2067-21 puts
 /// in ApplicationIdentification.
 const CPL_NAMESPACE_2067_3: &str = "http://www.smpte-ra.org/schemas/2067-3/2016";
-const APP2E_IDENTIFIER: &str = "http://www.smpte-ra.org/schemas/2067-21/2016";
+const APP2E_IDENTIFIER: &str = "http://www.smpte-ra.org/ns/2067-21/2020";
 
 fn cmd() -> Command {
     Command::cargo_bin("imfwizard").unwrap()

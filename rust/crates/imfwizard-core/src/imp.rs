@@ -65,6 +65,44 @@ pub struct ImpOptions {
     pub edit_rate: String,
     /// Duration in frames
     pub duration: u64,
+    /// What the sound track files say about themselves in their MCA soundfield
+    /// group, beside the language each audio track carries.
+    pub soundfield: SoundfieldLabels,
+}
+
+/// MCATitleVersion, MCAAudioContentKind and MCAAudioElementKind, the three
+/// soundfield group items ST 2067-2 wants beside the title and the language.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoundfieldLabels {
+    pub title_version: String,
+    pub audio_content_kind: String,
+    pub audio_element_kind: String,
+}
+
+/// A delivery of the work as it was mastered, a primary mix, a final complete mix.
+impl Default for SoundfieldLabels {
+    fn default() -> Self {
+        Self {
+            title_version: "Original Version".into(),
+            audio_content_kind: "PRM".into(),
+            audio_element_kind: "FCMP".into(),
+        }
+    }
+}
+
+/// The MCA label string an AS-02 sound wrap takes for a channel count, which is
+/// what names each channel and its soundfield group.
+pub fn mca_labels(channels: usize) -> String {
+    match channels {
+        2 => "ST(L,R)".to_string(),
+        6 => "51(L,R,C,LFE,Ls,Rs)".to_string(),
+        // only the count is known about any other layout, so each channel is a
+        // numbered source in the DNS soundfield group
+        other => {
+            let sources: Vec<String> = (1..=other).map(|n| format!("NSC{n:03}")).collect();
+            format!("DNS({})", sources.join(","))
+        }
+    }
 }
 
 /// A CPL written into the IMP, referenced by the shared PKL and ASSETMAP.
@@ -123,6 +161,7 @@ fn wrap_one(
     input: &Path,
     essence: crate::EssenceType,
     hdr: Option<asdcplib::jp2k::HdrMetadata>,
+    mca: Option<postkit::mxf_wrap::McaConfig>,
 ) -> Result<crate::MxfTrackFile, String> {
     let asset_uuid = uuid::Uuid::new_v4();
     let mxf_path = track_file_path(output_dir, prefix, &asset_uuid);
@@ -134,6 +173,7 @@ fn wrap_one(
         edit_rate_den: opts.fps_den,
         duration: opts.duration,
         hdr,
+        mca,
         asset_uuid: Some(*asset_uuid.as_bytes()),
     };
     let r = crate::mxf_wrap::wrap_mxf(&wrap_opts);
@@ -141,6 +181,27 @@ fn wrap_one(
         return Err(r.error);
     }
     Ok(r.track_file)
+}
+
+/// The MCA labels one sound track file carries: a channel label each, and a
+/// soundfield group naming the work, its version and what kind of mix it is.
+fn soundfield_config(
+    track: &AudioTrack,
+    comp: &Composition,
+    labels: &SoundfieldLabels,
+) -> Result<postkit::mxf_wrap::McaConfig, String> {
+    let channels = postkit::wav_io::channel_count(&track.path)?;
+    Ok(postkit::mxf_wrap::McaConfig {
+        labels: mca_labels(channels),
+        // ST 2067-2 wants a language on the soundfield group, and und says unknown
+        spoken_language: Some(track.language.clone().unwrap_or_else(|| "und".into())),
+        soundfield_group: Some(postkit::mxf_wrap::SoundfieldGroup {
+            title: comp.title.clone(),
+            title_version: labels.title_version.clone(),
+            audio_content_kind: labels.audio_content_kind.clone(),
+            audio_element_kind: labels.audio_element_kind.clone(),
+        }),
+    })
 }
 
 /// Create an IMP (Interoperable Master Package).
@@ -209,6 +270,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                     j2k_dir,
                     crate::EssenceType::J2k,
                     Some(crate::mxf_wrap::picture_colour(comp.hdr.as_ref())),
+                    None,
                 ) {
                     Ok(tf) => comp_tracks.push(tf),
                     Err(e) => {
@@ -225,6 +287,15 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             if !a.path.exists() {
                 continue;
             }
+            let mca = match soundfield_config(a, comp, &opts.soundfield) {
+                Ok(mca) => mca,
+                Err(e) => {
+                    return ImpResult {
+                        error: format!("Audio wrap failed: {e}"),
+                        ..Default::default()
+                    };
+                }
+            };
             match wrap_one(
                 opts,
                 &opts.output_dir,
@@ -232,6 +303,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 &a.path,
                 crate::EssenceType::Wav,
                 None,
+                Some(mca),
             ) {
                 Ok(tf) => comp_tracks.push(tf),
                 Err(e) => {
@@ -253,6 +325,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 "SUBTITLE",
                 tt,
                 crate::EssenceType::TimedText,
+                None,
                 None,
             ) {
                 Ok(tf) => comp_tracks.push(tf),
@@ -312,6 +385,14 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_layout_without_a_standard_group_is_numbered_sources() {
+        assert_eq!(mca_labels(2), "ST(L,R)");
+        assert_eq!(mca_labels(6), "51(L,R,C,LFE,Ls,Rs)");
+        assert_eq!(mca_labels(1), "DNS(NSC001)");
+        assert_eq!(mca_labels(3), "DNS(NSC001,NSC002,NSC003)");
+    }
 
     #[test]
     fn test_create_imp_requires_picture_input() {
@@ -571,22 +652,13 @@ mod tests {
             Ok(photon) => photon,
             Err(e) => panic!("Photon failed to analyse the HDR IMP: {e}"),
         };
-        // the CPL EssenceDescriptor cannot yet repeat what the picture MXF says,
-        // so every finding has to be one of those and none of them elsewhere
-        for finding in &photon.details {
-            assert!(
-                ["EssenceDescriptor", "SampleRate", "main audio sequence"]
-                    .iter()
-                    .any(|known| finding.contains(known)),
-                "Photon reports something new: {finding}"
-            );
-        }
-        for counted in photon.errors.iter().chain(photon.warnings.iter()) {
-            assert!(
-                counted.contains("CPL_"),
-                "only the CPL may carry findings, got {counted}"
-            );
-        }
+        assert!(
+            photon.errors.is_empty() && photon.warnings.is_empty(),
+            "Photon errors {:?}, warnings {:?}, findings {:?}",
+            photon.errors,
+            photon.warnings,
+            photon.details
+        );
     }
 
     #[test]

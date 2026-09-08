@@ -13,6 +13,9 @@ pub struct MxfWrapOptions {
     /// HDR/WCG picture metadata for a J2K wrap (ST 2067-21); None is SDR.
     #[serde(skip)]
     pub hdr: Option<asdcplib::jp2k::HdrMetadata>,
+    /// The MCA labels a sound wrap carries; None writes none.
+    #[serde(skip)]
+    pub mca: Option<postkit::mxf_wrap::McaConfig>,
     /// The id written into the MXF as its AssetUUID and returned as the track
     /// file uuid. A caller that names the output file after an id must pass that
     /// id here, or the MXF carries one the package never mentions. None mints one.
@@ -110,7 +113,7 @@ fn delegate(
         fps_den: opts.edit_rate_den,
         partition_size: 0,
         encryption: None,
-        mca_config: None,
+        mca_config: opts.mca.clone(),
         resource_ids: vec![],
         hdr: opts.hdr.clone(),
         asset_uuid: opts.asset_uuid,
@@ -273,14 +276,12 @@ pub fn validate_app2e_picture(
 
 /// The Rsiz a synthetic codestream declares: IMF 2K, main level 4, sub level 2,
 /// what 2048x1080 at 24 fps and 250 Mbps composes to.
-#[cfg(test)]
 pub(crate) const SYNTHETIC_IMF_RSIZ: u16 = 0x0424;
 
 /// A minimal JPEG 2000 codestream at a given raster: SOC, SIZ, SOD, EOC. The
 /// App 2E checks and the AS-02 writer read only the SIZ, so nothing more is
-/// needed to exercise either.
-#[cfg(test)]
-pub(crate) fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -> Vec<u8> {
+/// needed to exercise either. Public so integration tests can wrap a picture.
+pub fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -> Vec<u8> {
     const COMPONENTS: u16 = 3;
     let mut siz = Vec::new();
     siz.extend_from_slice(&SYNTHETIC_IMF_RSIZ.to_be_bytes()); // Rsiz
@@ -307,6 +308,35 @@ pub(crate) fn synthetic_j2k_codestream(width: u32, height: u32, bit_depth: u8) -
     codestream.extend_from_slice(&[0u8; 64]);
     codestream.extend_from_slice(&[0xFF, 0xD9]); // EOC
     codestream
+}
+
+/// A real picture track file, since the CPL's EssenceDescriptor is read back
+/// out of one.
+#[cfg(test)]
+pub(crate) fn wrapped_picture(
+    dir: &std::path::Path,
+    hdr: Option<&crate::hdr_wcg::HdrWcg>,
+) -> crate::MxfTrackFile {
+    let frames = dir.join("j2k");
+    std::fs::create_dir_all(&frames).unwrap();
+    std::fs::write(
+        frames.join("0001.j2c"),
+        synthetic_j2k_codestream(1920, 1080, 12),
+    )
+    .unwrap();
+    let wrap = wrap_mxf(&MxfWrapOptions {
+        input_dir: frames,
+        output_file: dir.join("VIDEO_hdr.mxf"),
+        essence_type: crate::EssenceType::J2k,
+        edit_rate_num: 24,
+        edit_rate_den: 1,
+        duration: 1,
+        hdr: Some(picture_colour(hdr)),
+        mca: None,
+        asset_uuid: None,
+    });
+    assert!(wrap.success, "picture wrap failed: {}", wrap.error);
+    wrap.track_file
 }
 
 #[cfg(test)]
@@ -397,6 +427,7 @@ mod tests {
             edit_rate_den: 1,
             duration: 0,
             hdr: None,
+            mca: None,
             asset_uuid: None,
         };
         let result = wrap_mxf(&opts);

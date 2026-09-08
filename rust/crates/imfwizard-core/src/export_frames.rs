@@ -399,6 +399,7 @@ mod tests {
             fps_den: 1,
             edit_rate: "24 1".to_string(),
             duration: 0,
+            soundfield: Default::default(),
         };
         let r = create_imp(&opts);
         assert!(r.success, "create_imp failed: {}", r.error);
