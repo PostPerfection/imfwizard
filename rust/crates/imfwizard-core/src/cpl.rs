@@ -34,19 +34,9 @@ pub fn write_cpl(
         } else {
             continue;
         };
-        // a descriptor is read back out of the track file, since a validator
-        // compares the two and every item has to be the MXF's own
-        let body = match kind {
-            ImfTrackKind::Image => Some(picture_descriptor_body(&tf.path)?),
-            ImfTrackKind::Audio => Some(sound_descriptor_body(&tf.path, edit_rate)?),
-            ImfTrackKind::Subtitle => None,
-        };
-        let source_encoding = body.map(|body| {
-            let id = uuid::Uuid::new_v4().to_string();
-            descriptors.push(ImfEssenceDescriptor {
-                id: id.clone(),
-                body,
-            });
+        let source_encoding = track_file_descriptor(&tf.path, kind, edit_rate)?.map(|descriptor| {
+            let id = descriptor.id.clone();
+            descriptors.push(descriptor);
             id
         });
         resources.push(ImfResource {
@@ -87,6 +77,25 @@ pub fn write_cpl(
     };
 
     std::fs::write(path, cpl.to_xml())
+}
+
+/// One EssenceDescriptorList entry, read back out of the track file it describes
+/// under a fresh id, since a validator compares the entry with the MXF and every
+/// item has to be the MXF's own. `None` for a kind that names no descriptor.
+pub(crate) fn track_file_descriptor(
+    track_file: &Path,
+    kind: ImfTrackKind,
+    edit_rate: asdcplib::Rational,
+) -> std::io::Result<Option<ImfEssenceDescriptor>> {
+    let body = match kind {
+        ImfTrackKind::Image => picture_descriptor_body(track_file)?,
+        ImfTrackKind::Audio => sound_descriptor_body(track_file, edit_rate)?,
+        ImfTrackKind::Subtitle => return Ok(None),
+    };
+    Ok(Some(ImfEssenceDescriptor {
+        id: uuid::Uuid::new_v4().to_string(),
+        body,
+    }))
 }
 
 fn read<T>(result: asdcplib::Result<T>, what: &str, track_file: &Path) -> std::io::Result<T> {
@@ -142,6 +151,77 @@ fn sound_descriptor_body(sound: &Path, edit_rate: asdcplib::Rational) -> std::io
     ))
 }
 
+/// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd
+/// and xmldsig-core-schema.xsd. IMFWIZARD_IMF_XSD_DIR overrides it.
+#[cfg(test)]
+const VENDORED_IMF_XSD_DIR: &str = "../../../extern/dcpdoctor/extern/photon/src/main/resources";
+
+#[cfg(test)]
+fn imf_xsd_dir() -> std::path::PathBuf {
+    match std::env::var("IMFWIZARD_IMF_XSD_DIR") {
+        Ok(dir) => std::path::PathBuf::from(dir),
+        Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED_IMF_XSD_DIR),
+    }
+}
+
+/// xmllint's complaint about `cpl_xml` against the ST 2067-3 XSDs, empty
+/// when it validates.
+#[cfg(test)]
+pub(crate) fn st2067_3_complaint(cpl_xml: &str) -> String {
+    let xsd_dir = imf_xsd_dir();
+    fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+        for e in std::fs::read_dir(dir).ok()?.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if let Some(f) = walk(&p, name) {
+                    return Some(f);
+                }
+            } else if p.file_name().and_then(|f| f.to_str()) == Some(name) {
+                return Some(p);
+            }
+        }
+        None
+    }
+    let root = xsd_dir.as_path();
+    let (Some(cpl_xsd), Some(dsig_xsd)) = (
+        walk(root, "imf-cpl-20160411.xsd"),
+        walk(root, "xmldsig-core-schema.xsd"),
+    ) else {
+        panic!(
+            "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {}",
+            root.display()
+        );
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let cpl_path = dir.path().join("CPL.xml");
+    std::fs::write(&cpl_path, cpl_xml).unwrap();
+    let driver = dir.path().join("driver.xsd");
+    std::fs::write(
+        &driver,
+        format!(
+            r#"<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
+  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>
+</xs:schema>"#,
+            cpl = postkit::file_uri::file_uri(&cpl_xsd),
+            dsig = postkit::file_uri::file_uri(&dsig_xsd),
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new("xmllint")
+        .arg("--noout")
+        .arg("--schema")
+        .arg(&driver)
+        .arg(&cpl_path)
+        .output()
+        .expect("run xmllint");
+    if out.status.success() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,75 +503,6 @@ mod tests {
             xml.contains(&format!("<r1:InstanceID>{instance_id}</r1:InstanceID>")),
             "the CPL must carry the MXF's own InstanceID {instance_id}:\n{xml}"
         );
-    }
-
-    /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd
-    /// and xmldsig-core-schema.xsd. IMFWIZARD_IMF_XSD_DIR overrides it.
-    const VENDORED_IMF_XSD_DIR: &str = "../../../extern/dcpdoctor/extern/photon/src/main/resources";
-
-    fn imf_xsd_dir() -> std::path::PathBuf {
-        match std::env::var("IMFWIZARD_IMF_XSD_DIR") {
-            Ok(dir) => std::path::PathBuf::from(dir),
-            Err(_) => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED_IMF_XSD_DIR),
-        }
-    }
-
-    /// xmllint's complaint about `cpl_xml` against the ST 2067-3 XSDs, empty
-    /// when it validates.
-    fn st2067_3_complaint(cpl_xml: &str) -> String {
-        let xsd_dir = imf_xsd_dir();
-        fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-            for e in std::fs::read_dir(dir).ok()?.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    if let Some(f) = walk(&p, name) {
-                        return Some(f);
-                    }
-                } else if p.file_name().and_then(|f| f.to_str()) == Some(name) {
-                    return Some(p);
-                }
-            }
-            None
-        }
-        let root = xsd_dir.as_path();
-        let (Some(cpl_xsd), Some(dsig_xsd)) = (
-            walk(root, "imf-cpl-20160411.xsd"),
-            walk(root, "xmldsig-core-schema.xsd"),
-        ) else {
-            panic!(
-                "could not locate imf-cpl-20160411.xsd and xmldsig-core-schema.xsd under {}",
-                root.display()
-            );
-        };
-
-        let dir = tempfile::tempdir().unwrap();
-        let cpl_path = dir.path().join("CPL.xml");
-        std::fs::write(&cpl_path, cpl_xml).unwrap();
-        let driver = dir.path().join("driver.xsd");
-        std::fs::write(
-            &driver,
-            format!(
-                r#"<?xml version="1.0"?>
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:import namespace="http://www.smpte-ra.org/schemas/2067-3/2016" schemaLocation="{cpl}"/>
-  <xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="{dsig}"/>
-</xs:schema>"#,
-                cpl = postkit::file_uri::file_uri(&cpl_xsd),
-                dsig = postkit::file_uri::file_uri(&dsig_xsd),
-            ),
-        )
-        .unwrap();
-        let out = std::process::Command::new("xmllint")
-            .arg("--noout")
-            .arg("--schema")
-            .arg(&driver)
-            .arg(&cpl_path)
-            .output()
-            .expect("run xmllint");
-        if out.status.success() {
-            return String::new();
-        }
-        String::from_utf8_lossy(&out.stderr).into_owned()
     }
 
     /// An HDR/WCG CPL (image RGBADescriptor with transfer/colour ULs + ST 2086

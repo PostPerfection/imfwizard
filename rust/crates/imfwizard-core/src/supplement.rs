@@ -391,6 +391,10 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
 
     // 4. wrap the new/changed assets (only these are physically present here)
     let mut present: Vec<MxfTrackFile> = Vec::new();
+    // each new track file's own descriptor, which its resource names instead of
+    // the OV entry that described the essence it replaces
+    let mut wrapped_descriptors: Vec<ImfEssenceDescriptor> = Vec::new();
+    let edit_rate = asdcplib::Rational::new(ov.fps_num as i32, ov.fps_den as i32);
     let mut resources: Vec<ImfResource> = ov
         .resources
         .iter()
@@ -415,8 +419,12 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             .expect("replace target validated above");
         target.track_file_uuid = tf.uuid.clone();
         target.duration = tf.duration;
-        // the OV's descriptor described the essence this replaces
-        target.source_encoding = None;
+        let descriptor = match crate::cpl::track_file_descriptor(&tf.path, s.kind, edit_rate) {
+            Ok(descriptor) => descriptor,
+            Err(e) => return SupplementResult::fail(out, e.to_string()),
+        };
+        target.source_encoding = descriptor.as_ref().map(|d| d.id.clone());
+        wrapped_descriptors.extend(descriptor);
         present.push(tf);
     }
     for s in &add_specs {
@@ -424,12 +432,17 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             Ok(tf) => tf,
             Err(e) => return SupplementResult::fail(out, e),
         };
+        let descriptor = match crate::cpl::track_file_descriptor(&tf.path, s.kind, edit_rate) {
+            Ok(descriptor) => descriptor,
+            Err(e) => return SupplementResult::fail(out, e.to_string()),
+        };
         resources.push(ImfResource {
             track_file_uuid: tf.uuid.clone(),
             duration: tf.duration,
             kind: s.kind,
-            source_encoding: None,
+            source_encoding: descriptor.as_ref().map(|d| d.id.clone()),
         });
+        wrapped_descriptors.extend(descriptor);
         present.push(tf);
     }
 
@@ -439,7 +452,8 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
 
     // 5. build the supplemental CPL: references both new and unchanged OV UUIDs
     let cpl_uuid = uuid::Uuid::new_v4().to_string();
-    let essence_descriptors = descriptors_still_referenced(&ov.essence_descriptors, &resources);
+    let mut essence_descriptors = descriptors_still_referenced(&ov.essence_descriptors, &resources);
+    essence_descriptors.extend(wrapped_descriptors);
     let cpl = ImfCpl {
         uuid: cpl_uuid.clone(),
         title: opts.title.clone(),
@@ -623,6 +637,53 @@ mod tests {
         assert!(
             cpl.contains(&format!("<SourceEncoding>urn:uuid:{descriptor_id}<")),
             "no resource names the descriptor {descriptor_id}: {cpl}"
+        );
+    }
+
+    /// A supplemental CPL's replaced and added resources name a descriptor read
+    /// back off the track file the supplement wrapped, so the CPL passes the ST
+    /// 2067-3 XSD, which makes SourceEncoding mandatory on a TrackFileResource.
+    #[test]
+    fn a_supplement_names_the_descriptors_of_what_it_wrapped() {
+        let dir = tempfile::tempdir().unwrap();
+        write_hlg_ov(dir.path());
+        let out = tempfile::tempdir().unwrap();
+        let dub = out.path().join("dub.wav");
+        std::fs::write(&dub, make_wav(2, 48000, 16, 48000)).unwrap();
+        let added = out.path().join("added.wav");
+        std::fs::write(&added, make_wav(2, 48000, 16, 48000)).unwrap();
+
+        let result = create_supplement(&SupplementOptions {
+            ov_dir: dir.path().to_path_buf(),
+            title: "French dub".into(),
+            output_dir: out.path().to_path_buf(),
+            replace: vec![format!("{}@audio", dub.display())],
+            add: vec![format!("{}@audio", added.display())],
+        });
+        assert!(result.success, "supplement failed: {}", result.error);
+
+        let cpl = read_one(out.path(), "CPL_");
+        // the OV picture's descriptor plus one for each sound file wrapped here
+        assert_eq!(
+            cpl.matches("<EssenceDescriptor>").count(),
+            3,
+            "every resource but the OV's own sound needs a descriptor: {cpl}"
+        );
+        assert_eq!(
+            cpl.matches("<SourceEncoding>").count(),
+            3,
+            "every resource but the OV's own sound must name one: {cpl}"
+        );
+        assert_eq!(
+            cpl.matches("<r0:WAVEPCMDescriptor").count(),
+            2,
+            "both wrapped sound files must carry their own descriptor: {cpl}"
+        );
+
+        let complaint = crate::cpl::st2067_3_complaint(&cpl);
+        assert!(
+            complaint.is_empty(),
+            "supplemental CPL must pass ST 2067-3 XSD:\n{complaint}"
         );
     }
 
