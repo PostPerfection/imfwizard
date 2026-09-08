@@ -39,8 +39,29 @@ pub fn extract_hdr10plus(
 
     Ok(Hdr10PlusMetadata {
         json_path: output_json.to_path_buf(),
-        scene_count: 0,
+        scene_count: count_scenes(output_json)?,
     })
+}
+
+// one entry a scene, which is how hdr10plus_tool summarises what it extracted
+#[derive(Deserialize)]
+struct SceneInfoSummary {
+    #[serde(rename = "SceneFirstFrameIndex")]
+    scene_first_frame_index: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct Hdr10PlusJson {
+    #[serde(rename = "SceneInfoSummary")]
+    scene_info_summary: SceneInfoSummary,
+}
+
+fn count_scenes(json_path: &std::path::Path) -> Result<usize, String> {
+    let file = std::fs::File::open(json_path)
+        .map_err(|e| format!("Failed to open {}: {e}", json_path.display()))?;
+    let parsed: Hdr10PlusJson = serde_json::from_reader(std::io::BufReader::new(file))
+        .map_err(|e| format!("Failed to read {}: {e}", json_path.display()))?;
+    Ok(parsed.scene_info_summary.scene_first_frame_index.len())
 }
 
 /// Inject HDR10+ metadata using hdr10plus_tool.

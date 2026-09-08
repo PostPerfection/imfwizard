@@ -172,13 +172,21 @@ pub fn deliver(
     // Dolby Vision: inject RPU if requested
     if spec.dolby_vision {
         tracing::info!("Injecting Dolby Vision metadata via dovi_tool");
-        let _ = std::process::Command::new("dovi_tool")
+        let injected = std::process::Command::new("dovi_tool")
             .arg("inject-rpu")
             .arg("-i")
             .arg(&output_file)
             .arg("-o")
             .arg(output_dir.join(format!("delivery_dv.{}", spec.container)))
-            .output();
+            .output()
+            .map_err(|e| format!("Failed to run dovi_tool: {e}"))?;
+
+        if !injected.status.success() {
+            return Err(format!(
+                "Dolby Vision injection failed: {}",
+                String::from_utf8_lossy(&injected.stderr)
+            ));
+        }
     }
 
     tracing::info!("Delivery complete: {}", output_file.display());

@@ -1534,7 +1534,7 @@ enum Commands {
     /// Convert Dolby Vision profile (e.g., profile 5 → profile 8.1)
     #[command(name = "dv-convert")]
     DvConvert {
-        /// Input HEVC file with RPU
+        /// Input RPU file (.bin), as written by dv-extract
         #[arg(short, long)]
         input: String,
 
@@ -2454,9 +2454,16 @@ fn run() {
 
         Commands::Hdr10plusExtract { input, output } => {
             match imfwizard_core::hdr::extract_hdr10plus(&input, &output) {
-                Ok(meta) => println!("HDR10+ metadata written to {}", meta.json_path.display()),
+                Ok(meta) => println!(
+                    "HDR10+ metadata written to {}: {} scenes",
+                    meta.json_path.display(),
+                    meta.scene_count
+                ),
                 Err(e) => {
-                    eprintln!("Error: {e}");
+                    eprintln!(
+                        "Error: HDR10+ extraction from {} failed: {e}",
+                        input.display()
+                    );
                     std::process::exit(1);
                 }
             }
@@ -2466,7 +2473,7 @@ fn run() {
             match imfwizard_core::dolby_vision::extract_rpu(&input, &output) {
                 Ok(()) => println!("RPU extracted to {}", output.display()),
                 Err(e) => {
-                    eprintln!("Error: {e}");
+                    eprintln!("Error: RPU extraction from {} failed: {e}", input.display());
                     std::process::exit(1);
                 }
             }
@@ -3351,8 +3358,8 @@ fn run() {
 
         Commands::DvInject { input, rpu, output } => {
             let opts = postkit::dolby_vision::DolbyVisionOptions {
-                input: PathBuf::from(input),
-                rpu_file: PathBuf::from(rpu),
+                input: PathBuf::from(&input),
+                rpu_file: PathBuf::from(&rpu),
                 output: PathBuf::from(&output),
                 ..Default::default()
             };
@@ -3360,7 +3367,7 @@ fn run() {
             if result == 0 {
                 println!("Dolby Vision RPU injected: {output}");
             } else {
-                eprintln!("Error: DV injection failed");
+                eprintln!("Error: DV injection of {rpu} into {input} failed");
                 std::process::exit(1);
             }
         }
@@ -3372,7 +3379,7 @@ fn run() {
             max_fall,
         } => {
             let opts = postkit::dolby_vision::HdrMetadataOptions {
-                input: PathBuf::from(input),
+                input: PathBuf::from(&input),
                 output: PathBuf::from(&output),
                 hdr_type: postkit::dolby_vision::HdrType::Hdr10,
                 hdr10: postkit::dolby_vision::Hdr10Metadata {
@@ -3386,7 +3393,7 @@ fn run() {
             if result == 0 {
                 println!("HDR10 metadata injected: {output}");
             } else {
-                eprintln!("Error: HDR10 injection failed");
+                eprintln!("Error: HDR10 injection into {input} failed");
                 std::process::exit(1);
             }
         }
@@ -4461,7 +4468,7 @@ fn run() {
                     println!("Converted to Dolby Vision profile {target_profile}: {output}");
                 }
                 Err(e) => {
-                    eprintln!("DV conversion failed: {e}");
+                    eprintln!("DV conversion of {input} failed: {e}");
                     std::process::exit(1);
                 }
             }
