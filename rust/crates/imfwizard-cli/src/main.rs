@@ -488,23 +488,6 @@ impl MasteringDisplayArguments {
     }
 }
 
-// the same shape postkit hands x265, so the line can be read back into a command
-fn master_display_string(metadata: &postkit::dolby_vision::Hdr10Metadata) -> String {
-    format!(
-        "master-display=G({},{})B({},{})R({},{})WP({},{})L({},{})",
-        metadata.display_primaries_gx,
-        metadata.display_primaries_gy,
-        metadata.display_primaries_bx,
-        metadata.display_primaries_by,
-        metadata.display_primaries_rx,
-        metadata.display_primaries_ry,
-        metadata.white_point_x,
-        metadata.white_point_y,
-        metadata.max_luminance,
-        metadata.min_luminance,
-    )
-}
-
 impl BurnArguments {
     /// Read the flags into the rasteriser's overrides, failing on a colour or an
     /// effect name that cannot be read.
@@ -3484,7 +3467,7 @@ fn run() {
             if result == 0 {
                 println!(
                     "HDR10 metadata injected: {output}, {}",
-                    master_display_string(&hdr10)
+                    postkit::dolby_vision::x265_hdr10_params(&hdr10)
                 );
             } else {
                 eprintln!("Error: HDR10 injection into {input} failed");
