@@ -678,9 +678,15 @@ imfwizard atmos -i atmos_master.bwf -o output_dir/
 
 ### MCA label generation
 
+Writes SMPTE 377-4 MCA labels into a sound MXF's descriptor, rewrapping the PCM
+under the same asset id. `--layout` takes `mono`, `stereo`, `51` or `71` and has
+to match the channel count the file carries. When the MXF sits in an IMP, the
+CPL's essence descriptor and the PKL hashes are rewritten with it, so the package
+still validates.
+
 ```bash
-# Inject 5.1 surround MCA labels into an audio MXF's CPL
-imfwizard mca -i audio.mxf -l 51 -L en
+# 5.1 surround, spoken French
+imfwizard mca -i audio.mxf -l 51 -L fr-CA
 
 # 7.1 surround
 imfwizard mca -i audio.mxf -l 71 -L en

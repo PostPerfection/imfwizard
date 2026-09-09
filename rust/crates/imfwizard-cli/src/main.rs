@@ -1473,13 +1473,13 @@ enum Commands {
         frames: u32,
     },
 
-    /// Set MCA (Multi-Channel Audio) labels
+    /// Write MCA (Multi-Channel Audio) labels into a sound MXF's descriptor
     Mca {
-        /// Input MXF audio file
+        /// Input MXF audio file, rewrapped in place under the same asset id
         #[arg(short, long)]
         input: String,
 
-        /// Channel layout (e.g. "51", "71", "stereo")
+        /// Channel layout: mono, stereo, 51 or 71
         #[arg(short, long)]
         layout: String,
 
@@ -4001,89 +4001,27 @@ fn run() {
             layout,
             language,
         } => {
-            // Generate MCA labels and write into CPL
-            let soundfield = match layout.as_str() {
-                "51" => imfwizard_core::mca::soundfield_51(),
-                "71" => imfwizard_core::mca::soundfield_71(),
-                "stereo" | "20" => imfwizard_core::mca::soundfield_stereo(),
-                "mono" | "10" => imfwizard_core::mca::McaSoundfield {
-                    name: "10".to_string(),
-                    channels: vec![imfwizard_core::mca::McaLabel {
-                        symbol: imfwizard_core::mca::McaTagSymbol::M1,
-                        tag_name: "Mono One".to_string(),
-                        tag_symbol: "chM1".to_string(),
-                        channel_index: 0,
-                        spoken_language: String::new(),
-                    }],
-                },
-                "51+hi+vi" | "51+HI+VI" => imfwizard_core::mca::soundfield_51_with_hi_vi(),
-                _ => {
-                    eprintln!("Unknown layout: {layout}. Use: mono, stereo, 51, 71, 51+HI+VI");
-                    std::process::exit(1);
-                }
+            let Some(chosen) = imfwizard_core::mca::layout(&layout) else {
+                eprintln!(
+                    "Unknown layout: {layout}. Use one of: {}",
+                    imfwizard_core::mca::layout_names()
+                );
+                std::process::exit(1);
             };
+            let written = imfwizard_core::mca::write_mca_labels(
+                std::path::Path::new(&input),
+                chosen,
+                &language,
+            )
+            .unwrap_or_else(|error| fail(error));
 
-            // Set spoken language on all channels
-            let mut soundfield = soundfield;
-            for ch in &mut soundfield.channels {
-                ch.spoken_language = language.clone();
+            println!("MCA labels written into {input}");
+            println!("  Layout: {} ({})", chosen.name, chosen.labels);
+            println!("  Language: {}", written.language);
+            println!("  Channels: {}", chosen.channels);
+            for document in &written.package_documents {
+                println!("  Rewritten: {}", document.display());
             }
-
-            let mca_xml = imfwizard_core::mca::generate_mca_xml(&soundfield);
-
-            // Find CPL in IMP directory or use input as CPL path directly
-            let input_path = std::path::Path::new(&input);
-            let cpl_path = if input_path.is_dir() {
-                // Search for CPL XML file in IMP
-                let mut found = None;
-                if let Ok(entries) = std::fs::read_dir(input_path) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_lowercase();
-                        if name.starts_with("cpl") && name.ends_with(".xml") {
-                            found = Some(entry.path());
-                            break;
-                        }
-                    }
-                }
-                found.unwrap_or_else(|| {
-                    eprintln!("No CPL XML found in {input}");
-                    std::process::exit(1);
-                })
-            } else {
-                input_path.to_path_buf()
-            };
-
-            // Read CPL and inject MCA labels
-            let cpl_content = std::fs::read_to_string(&cpl_path).unwrap_or_else(|e| {
-                eprintln!("Failed to read CPL: {e}");
-                std::process::exit(1);
-            });
-
-            // Insert MCA labels before </MainSoundConfiguration> or before </CompositionPlaylist>
-            let updated = if cpl_content.contains("</MainSoundConfiguration>") {
-                cpl_content.replace(
-                    "</MainSoundConfiguration>",
-                    &format!("</MainSoundConfiguration>\n{mca_xml}"),
-                )
-            } else if cpl_content.contains("</CompositionPlaylist>") {
-                cpl_content.replace(
-                    "</CompositionPlaylist>",
-                    &format!("{mca_xml}</CompositionPlaylist>"),
-                )
-            } else {
-                eprintln!("Cannot find insertion point in CPL");
-                std::process::exit(1);
-            };
-
-            std::fs::write(&cpl_path, &updated).unwrap_or_else(|e| {
-                eprintln!("Failed to write CPL: {e}");
-                std::process::exit(1);
-            });
-
-            println!("MCA labels written to {}", cpl_path.display());
-            println!("  Layout: {} ({})", soundfield.name, layout);
-            println!("  Language: {language}");
-            println!("  Channels: {}", soundfield.channels.len());
         }
 
         Commands::AvSync { input } => {
