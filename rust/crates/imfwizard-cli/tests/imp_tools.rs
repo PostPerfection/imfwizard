@@ -444,6 +444,106 @@ fn compliance_checks_the_platform_the_standard_names() {
         .stderr(predicate::str::contains("netflix"));
 }
 
+/// Disney+ and Apple TV+ are checked against their own preset, not folded into
+/// the Netflix one: the stereo package here misses each platform's immersive
+/// layout, and the count each names is that platform's own.
+#[test]
+fn the_streaming_platforms_are_checked_against_their_own_preset() {
+    let directory = TempDir::new().unwrap();
+    let imp = build_imp(
+        directory.path(),
+        "platforms",
+        "Platforms",
+        SHORT_FRAMES,
+        FRAMES_PER_SECOND,
+    );
+    let imp = imp.to_string_lossy().into_owned();
+
+    for (standard, platform) in [
+        ("disney", postkit::profiles::Platform::Disney),
+        ("disney+", postkit::profiles::Platform::Disney),
+        ("apple", postkit::profiles::Platform::Apple),
+        ("appletv", postkit::profiles::Platform::Apple),
+    ] {
+        let profile = imfwizard_core::profiles::profile_for(platform);
+        let channels = imfwizard_core::profiles::required_audio_channels(&profile).unwrap();
+
+        cmd()
+            .args(["compliance", "-i", &imp, "-s", standard])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains(format!(
+                "Checking compliance against: {}",
+                profile.name
+            )))
+            .stdout(predicate::str::contains(format!(
+                "width 1920 != required {}",
+                profile.width
+            )))
+            .stdout(predicate::str::contains(format!(
+                "2 audio channels != the {channels} of {}",
+                profile.audio_channels
+            )))
+            .stdout(predicate::str::contains(format!(
+                "FAIL: not compliant with {}",
+                profile.name
+            )));
+    }
+
+    // Netflix asks for 5.1, so the same package is refused over a different count
+    let netflix = imfwizard_core::profiles::profile_for(postkit::profiles::Platform::Netflix);
+    cmd()
+        .args(["compliance", "-i", &imp, "-s", "netflix"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("2 audio channels != the 6 of 5.1"))
+        .stdout(predicate::str::contains("the 12 of 7.1.4").not())
+        .stdout(predicate::str::contains(netflix.name));
+}
+
+/// The channel check is the preset's rule, so a package that carries the
+/// layout passes it: a 5.1 master leaves Netflix with nothing to say about
+/// the audio.
+#[test]
+fn a_package_carrying_the_presets_layout_passes_its_channel_check() {
+    let directory = TempDir::new().unwrap();
+    let clip = testsrc_clip(directory.path(), "surround.mkv", SHORT_FRAMES, FRAMES_PER_SECOND);
+    let wav = directory.path().join("surround.wav");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        &format!("sine=frequency=1000:duration=1:sample_rate={AUDIO_SAMPLE_RATE}"),
+        "-af",
+        &format!(
+            "atrim=end_sample={},pan=5.1|c0=c0|c1=c0|c2=c0|c3=c0|c4=c0|c5=c0",
+            SHORT_FRAMES * AUDIO_SAMPLE_RATE / FRAMES_PER_SECOND
+        ),
+        "-c:a",
+        "pcm_s24le",
+        &wav.to_string_lossy(),
+    ]);
+
+    let imp = directory.path().join("surround");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy()])
+        .args(["-t", "Surround"])
+        .args(["--video", &clip.to_string_lossy()])
+        .args(["--raster", RASTER])
+        .args(["--audio", &wav.to_string_lossy()])
+        .args(["--audio-lang", "en-US"])
+        .args(["--fps-num", &FRAMES_PER_SECOND.to_string()])
+        .args(["--fps-den", "1"])
+        .assert()
+        .success();
+
+    cmd()
+        .args(["compliance", "-i", &imp.to_string_lossy(), "-s", "netflix"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("audio channels !=").not());
+}
+
 fn directory_size(directory: &Path) -> u64 {
     std::fs::read_dir(directory)
         .expect("the directory")

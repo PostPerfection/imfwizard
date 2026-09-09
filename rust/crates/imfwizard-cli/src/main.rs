@@ -4288,6 +4288,21 @@ fn run() {
                                     profile.audio_bit_depth
                                 ));
                             }
+                            let channels = stream
+                                .get("channels")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or_default()
+                                as u32;
+                            if let Some(required) =
+                                imfwizard_core::profiles::required_audio_channels(profile)
+                                && channels > 0
+                                && channels != required
+                            {
+                                errors.push(format!(
+                                    "{fname}: {channels} audio channels != the {required} of {}",
+                                    profile.audio_channels
+                                ));
+                            }
                         }
                     }
                 }
