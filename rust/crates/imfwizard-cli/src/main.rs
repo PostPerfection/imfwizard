@@ -2748,6 +2748,8 @@ fn run() {
                         master.into(),
                         "--output".into(),
                         package_dir.as_path().into(),
+                        // the watcher routes by build outcome, not validation
+                        "--no-verify".into(),
                     ];
                     if let Some(audio) = audio.as_deref() {
                         arguments.push("--audio".into());
