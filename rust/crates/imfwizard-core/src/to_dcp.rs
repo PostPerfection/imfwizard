@@ -880,6 +880,137 @@ fn write_volindex(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// A picture track file declaring exactly these colour ULs, so the colour
+    /// check reads them back off a real descriptor.
+    fn picture_signalling(
+        dir: &Path,
+        transfer: Option<[u8; 16]>,
+        primaries: Option<[u8; 16]>,
+    ) -> PathBuf {
+        let frames = dir.join("j2k");
+        std::fs::create_dir_all(&frames).unwrap();
+        let codestream = crate::mxf_wrap::synthetic_j2k_codestream(1920, 1080, 12);
+        std::fs::write(frames.join("0001.j2c"), &codestream).unwrap();
+
+        let mxf = dir.join("VIDEO_colour.mxf");
+        let wrap = crate::mxf_wrap::wrap_mxf(&crate::mxf_wrap::MxfWrapOptions {
+            input_dir: frames,
+            output_file: mxf.clone(),
+            essence_type: crate::EssenceType::J2k,
+            edit_rate_num: 24,
+            edit_rate_den: 1,
+            duration: 1,
+            hdr: Some(asdcplib::jp2k::HdrMetadata {
+                transfer_characteristic: transfer,
+                color_primaries: primaries,
+                ..Default::default()
+            }),
+            mca: None,
+            asset_uuid: None,
+        });
+        assert!(wrap.success, "picture wrap failed: {}", wrap.error);
+        mxf
+    }
+
+    /// A DCP is X'Y'Z' inside the DCI gamut, so wider primaries need a gamut
+    /// conversion this does not do. Each refusal names the primaries it read.
+    #[test]
+    fn wide_gamut_picture_is_refused_naming_the_conversion_it_would_need() {
+        for (primaries, named) in [
+            (asdcplib::jp2k::COLOR_PRIMARIES_P3D65, "P3-D65"),
+            (asdcplib::jp2k::COLOR_PRIMARIES_BT2020, "BT.2020"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let mxf = picture_signalling(
+                directory.path(),
+                Some(asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709),
+                Some(primaries),
+            );
+            let refusal = check_rec709_source_colour(&mxf)
+                .expect_err("wide gamut picture has to be refused");
+            assert!(
+                refusal.contains(named) && refusal.contains("gamut conversion"),
+                "{named} was refused as {refusal:?}"
+            );
+        }
+    }
+
+    /// PQ and the BT.2020 transfer are HDR, which needs a tone map.
+    #[test]
+    fn hdr_transfer_is_refused_naming_the_tone_map_it_would_need() {
+        for (transfer, named) in [
+            (asdcplib::jp2k::TRANSFER_CHARACTERISTIC_ST2084, "ST 2084"),
+            (asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT2020, "BT.2020"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let mxf = picture_signalling(
+                directory.path(),
+                Some(transfer),
+                Some(asdcplib::jp2k::COLOR_PRIMARIES_BT709),
+            );
+            let refusal =
+                check_rec709_source_colour(&mxf).expect_err("HDR picture has to be refused");
+            assert!(
+                refusal.contains(named) && refusal.contains("tone map"),
+                "{named} was refused as {refusal:?}"
+            );
+        }
+    }
+
+    /// Rec.709, which is what `create` writes without `--hdr`, converts.
+    #[test]
+    fn rec709_picture_passes_the_colour_check() {
+        let directory = tempfile::tempdir().unwrap();
+        let mxf = picture_signalling(
+            directory.path(),
+            Some(asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709),
+            Some(asdcplib::jp2k::COLOR_PRIMARIES_BT709),
+        );
+        check_rec709_source_colour(&mxf).expect("Rec.709 picture converts");
+    }
+
+    /// A bitrate over the DCI ceiling is refused before any frame is encoded,
+    /// naming both the figure asked for and the limit.
+    #[test]
+    fn a_bitrate_over_the_dci_limit_is_refused_before_the_encode() {
+        let directory = tempfile::tempdir().unwrap();
+        let mxf = picture_signalling(
+            directory.path(),
+            Some(asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709),
+            Some(asdcplib::jp2k::COLOR_PRIMARIES_BT709),
+        );
+        let over = postkit::j2k::DCI_MAX_BITRATE_MBPS + 1.0;
+
+        let picture = PictureInfo {
+            width: 2048,
+            height: 1080,
+            frame_count: 1,
+            fps_num: 24,
+            fps_den: 1,
+        };
+        let refusal =
+            transcode_picture_to_cinema(&mxf, &picture, 24, over, &directory.path().join("out"))
+                .expect_err("a bitrate over the DCI limit has to be refused");
+        assert!(
+            refusal.contains(&over.to_string()) && refusal.contains("250"),
+            "the refusal names neither the bitrate nor the limit: {refusal:?}"
+        );
+    }
+
+    /// The DCI edit rates, and nothing else, reach a DCP.
+    #[test]
+    fn only_the_dci_edit_rates_are_taken() {
+        for rate in DCP_EDIT_RATES {
+            assert_eq!(check_dcp_edit_rate(rate, 1).unwrap(), rate);
+        }
+        let refusal = check_dcp_edit_rate(24000, 1001).expect_err("23.976 is no DCP rate");
+        assert!(refusal.contains("24000/1001"), "{refusal:?}");
+        for rate in DCP_EDIT_RATES {
+            assert!(refusal.contains(&rate.to_string()), "{refusal:?}");
+        }
+        assert!(check_dcp_edit_rate(23, 1).is_err());
+    }
+
     fn asset(kind: AssetKind, uuid: &str, filename: &str) -> DcpAsset {
         DcpAsset {
             uuid: uuid.to_string(),
