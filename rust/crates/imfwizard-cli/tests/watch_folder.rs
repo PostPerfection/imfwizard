@@ -98,7 +98,26 @@ fn start_watcher(
     webhooks: &RecordedWebhooks,
     config_home: &Path,
 ) -> Watcher {
-    let child = Command::new(env!("CARGO_BIN_EXE_imfwizard"))
+    start_watcher_with(
+        watch_dir,
+        output_dir,
+        webhooks,
+        config_home,
+        POLL_INTERVAL_SECONDS,
+        &[],
+    )
+}
+
+fn start_watcher_with(
+    watch_dir: &Path,
+    output_dir: &Path,
+    webhooks: &RecordedWebhooks,
+    config_home: &Path,
+    interval_seconds: &str,
+    create_arguments: &[&str],
+) -> Watcher {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_imfwizard"));
+    command
         .env("XDG_CONFIG_HOME", config_home)
         .args([
             "watch",
@@ -106,13 +125,16 @@ fn start_watcher(
             "--output",
             output_dir.to_str().unwrap(),
             "--interval",
-            POLL_INTERVAL_SECONDS,
+            interval_seconds,
             "--webhook-url",
             &webhooks.url,
-        ])
-        .spawn()
-        .unwrap();
-    Watcher { child }
+        ]);
+    if !create_arguments.is_empty() {
+        command.arg("--").args(create_arguments);
+    }
+    Watcher {
+        child: command.spawn().unwrap(),
+    }
 }
 
 fn run_ffmpeg(arguments: &[&str]) {
@@ -281,5 +303,172 @@ fn a_master_create_refuses_lands_in_failed() {
         failed.len(),
         1,
         "expected one imp.failed body, got {failed:?}"
+    );
+}
+
+/// A one cue IMSC document, the subtitle sidecar the watcher looks for.
+fn make_ttml(directory: &Path, file_name: &str) -> PathBuf {
+    let path = directory.join(file_name);
+    std::fs::write(
+        &path,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xml:lang="en">
+  <body><div>
+    <p begin="00:00:00.100" end="00:00:00.400">Sidecar cue</p>
+  </div></body>
+</tt>"#,
+    )
+    .unwrap();
+    path
+}
+
+/// A `.ttml` beside the master is packaged as the composition's timed text and
+/// moved into `done/` with it, the same way the `.wav` sidecar is.
+#[test]
+fn a_ttml_sidecar_lands_in_the_package() {
+    let watch_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let scratch = TempDir::new().unwrap();
+    let config_home = TempDir::new().unwrap();
+    let webhooks = start_webhook_listener();
+    let _watcher = start_watcher(
+        watch_dir.path(),
+        output_dir.path(),
+        &webhooks,
+        config_home.path(),
+    );
+
+    let video = make_test_video(scratch.path(), "subtitled.mp4");
+    make_ttml(watch_dir.path(), "subtitled.ttml");
+    std::fs::rename(&video, watch_dir.path().join("subtitled.mp4")).unwrap();
+
+    let package_dir = output_dir.path().join("subtitled");
+    assert!(
+        wait_for(&package_dir.join("ASSETMAP.xml"), BUILD_TIMEOUT),
+        "no ASSETMAP.xml under {}",
+        package_dir.display()
+    );
+
+    assert!(
+        file_named(&package_dir, "SUBTITLE_", ".mxf").is_some(),
+        "the ttml sidecar was not wrapped: {:?}",
+        std::fs::read_dir(&package_dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect::<Vec<_>>()
+    );
+
+    let cpl = file_named(&package_dir, "CPL_", ".xml").expect("no CPL in the package");
+    let cpl_text = std::fs::read_to_string(&cpl).unwrap();
+    assert!(
+        cpl_text.contains("SubtitlesSequence"),
+        "the CPL registers no timed text track: {cpl_text}"
+    );
+
+    assert!(
+        wait_for(
+            &watch_dir.path().join("done").join("subtitled.ttml"),
+            BUILD_TIMEOUT
+        ),
+        "the ttml sidecar was not moved into done/"
+    );
+}
+
+// with this interval the watcher needs two polls to call a master settled, so
+// nothing can be built before twice it has passed
+const SLOW_INTERVAL_SECONDS: u64 = 6;
+
+/// `--interval` is the poll period, and a master is only built once two polls
+/// have measured it the same: a slow interval holds the build back, and the
+/// same master under the default interval is built while the slow one waits.
+#[test]
+fn a_slow_interval_holds_the_build_back() {
+    let watch_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let scratch = TempDir::new().unwrap();
+    let config_home = TempDir::new().unwrap();
+    let webhooks = start_webhook_listener();
+    let _watcher = start_watcher_with(
+        watch_dir.path(),
+        output_dir.path(),
+        &webhooks,
+        config_home.path(),
+        &SLOW_INTERVAL_SECONDS.to_string(),
+        &[],
+    );
+
+    let video = make_test_video(scratch.path(), "slow.mp4");
+    std::fs::rename(&video, watch_dir.path().join("slow.mp4")).unwrap();
+    let landed = Instant::now();
+
+    let log = output_dir.path().join("slow.log");
+    // the log is created as the build starts, so it dates the first build
+    assert!(
+        wait_for(&log, BUILD_TIMEOUT),
+        "the watcher never started a build"
+    );
+    let waited = landed.elapsed();
+    assert!(
+        waited >= Duration::from_secs(SLOW_INTERVAL_SECONDS),
+        "the build started after {waited:?}, inside one {SLOW_INTERVAL_SECONDS} s poll"
+    );
+}
+
+/// Flags after `--` are appended to every `create` the watcher runs, so a
+/// watched folder can deliver at a named raster and rate rather than the
+/// defaults.
+#[test]
+fn passthrough_flags_after_the_dashes_reach_the_build() {
+    const RASTER_WIDTH: u32 = 2048;
+    const RASTER_HEIGHT: u32 = 1080;
+
+    let watch_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+    let scratch = TempDir::new().unwrap();
+    let config_home = TempDir::new().unwrap();
+    let webhooks = start_webhook_listener();
+    let _watcher = start_watcher_with(
+        watch_dir.path(),
+        output_dir.path(),
+        &webhooks,
+        config_home.path(),
+        POLL_INTERVAL_SECONDS,
+        &[
+            "--raster",
+            &format!("{RASTER_WIDTH}x{RASTER_HEIGHT}"),
+            "--kind",
+            "trailer",
+        ],
+    );
+
+    let video = make_test_video(scratch.path(), "passthrough.mp4");
+    std::fs::rename(&video, watch_dir.path().join("passthrough.mp4")).unwrap();
+
+    let package_dir = output_dir.path().join("passthrough");
+    assert!(
+        wait_for(&package_dir.join("ASSETMAP.xml"), BUILD_TIMEOUT),
+        "no ASSETMAP.xml under {}: {}",
+        package_dir.display(),
+        std::fs::read_to_string(output_dir.path().join("passthrough.log")).unwrap_or_default()
+    );
+
+    // the source is 1920x1080, so this raster only appears if the flag arrived
+    let picture = file_named(&package_dir, "VIDEO_", ".mxf").expect("no picture track file");
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader.open_read(picture.to_str().unwrap()).unwrap();
+    let descriptor = reader.picture_descriptor().unwrap();
+    reader.close().unwrap();
+    assert_eq!(
+        (descriptor.stored_width, descriptor.stored_height),
+        (RASTER_WIDTH, RASTER_HEIGHT),
+        "--raster did not reach the build"
+    );
+
+    let cpl = file_named(&package_dir, "CPL_", ".xml").expect("no CPL in the package");
+    let cpl_text = std::fs::read_to_string(&cpl).unwrap();
+    assert!(
+        cpl_text.contains("<ContentKind>trailer</ContentKind>"),
+        "--kind did not reach the build: {cpl_text}"
     );
 }
