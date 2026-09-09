@@ -177,6 +177,9 @@ pub(crate) fn wrap_one(
     essence: crate::EssenceType,
     hdr: Option<asdcplib::jp2k::HdrMetadata>,
     mca: Option<postkit::mxf_wrap::McaConfig>,
+    // the segment length the timed-text track spans; picture and audio derive
+    // their own length and ignore it
+    duration: u64,
 ) -> Result<crate::MxfTrackFile, String> {
     let asset_uuid = uuid::Uuid::new_v4();
     let mxf_path = track_file_path(output_dir, prefix, &asset_uuid);
@@ -186,7 +189,7 @@ pub(crate) fn wrap_one(
         essence_type: essence,
         edit_rate_num: opts.fps_num,
         edit_rate_den: opts.fps_den,
-        duration: opts.duration,
+        duration,
         hdr,
         mca,
         asset_uuid: Some(*asset_uuid.as_bytes()),
@@ -316,6 +319,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                     crate::EssenceType::J2k,
                     Some(crate::mxf_wrap::picture_colour(comp.hdr.as_ref())),
                     None,
+                    opts.duration,
                 ) {
                     Ok(tf) => comp_tracks.push(tf),
                     Err(e) => {
@@ -389,6 +393,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 crate::EssenceType::Wav,
                 None,
                 Some(mca),
+                opts.duration,
             ) {
                 Ok(tf) => comp_tracks.push(tf),
                 Err(e) => {
@@ -412,6 +417,7 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 crate::EssenceType::TimedText,
                 None,
                 None,
+                picture_frames,
             ) {
                 Ok(tf) => comp_tracks.push(tf),
                 Err(e) => {
@@ -608,6 +614,75 @@ mod tests {
             ..Default::default()
         };
         (create_imp(&opts), out)
+    }
+
+    /// A minimal valid IMSC1 text-profile document, one cue inside the composition.
+    const IMSC1_SUBTITLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ittp="http://www.w3.org/ns/ttml/profile/imsc1#parameter"
+    xmlns:itts="http://www.w3.org/ns/ttml/profile/imsc1#styling"
+    ttp:profile="http://www.w3.org/ns/ttml/profile/imsc1/text" xml:lang="en">
+  <body><div>
+    <p begin="00:00:00.100" end="00:00:00.400">hello</p>
+  </div></body>
+</tt>"#;
+
+    const SUBTITLED_FRAMES: u64 = 24;
+
+    fn build_subtitled_imp(dir: &std::path::Path) -> (ImpResult, std::path::PathBuf) {
+        let j2k_dir = dir.join("j2k");
+        std::fs::create_dir_all(&j2k_dir).unwrap();
+        for frame in 1..=SUBTITLED_FRAMES {
+            std::fs::write(j2k_dir.join(format!("{frame:04}.j2c")), synthetic_j2k()).unwrap();
+        }
+        let subtitle = dir.join("subtitle.ttml");
+        std::fs::write(&subtitle, IMSC1_SUBTITLE).unwrap();
+        let out = dir.join("imp");
+        let opts = ImpOptions {
+            output_dir: out.clone(),
+            compositions: vec![Composition {
+                title: "SUB".into(),
+                content_kind: "feature".into(),
+                j2k_dir: Some(j2k_dir),
+                timed_text_files: vec![subtitle],
+                ..Default::default()
+            }],
+            fps_num: 24,
+            fps_den: 1,
+            duration: SUBTITLED_FRAMES,
+            ..Default::default()
+        };
+        (create_imp(&opts), out)
+    }
+
+    /// A subtitled IMP passes Photon with no errors, its subtitle resource carries
+    /// a SourceEncoding that resolves to a timed-text descriptor in the
+    /// EssenceDescriptorList, and the subtitle track spans the whole picture.
+    #[test]
+    fn subtitled_imp_is_clean_under_photon() {
+        let dir = tempfile::tempdir().unwrap();
+        let (result, out) = build_subtitled_imp(dir.path());
+        assert!(result.success, "create failed: {}", result.error);
+
+        let cpl = std::fs::read_to_string(&result.cpl_paths[0]).unwrap();
+        assert!(
+            cpl.contains("DCTimedTextDescriptor"),
+            "no timed text descriptor: {cpl}"
+        );
+
+        let photon = match crate::photon::run_photon(&out, None) {
+            Ok(photon) => photon,
+            Err(e) => panic!("Photon failed to analyse the subtitled IMP: {e}"),
+        };
+        assert!(
+            photon.errors.is_empty() && photon.warnings.is_empty(),
+            "Photon errors {:?}, warnings {:?}, findings {:?}",
+            photon.errors,
+            photon.warnings,
+            photon.details
+        );
     }
 
     /// Every `<Hash>` in the PKL, paired with the asset's `<Type>`.

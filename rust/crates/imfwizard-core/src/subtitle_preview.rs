@@ -187,16 +187,20 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&output).unwrap(), EXPECTED_SRT);
     }
 
-    /// Build a one-frame IMP into `dir`, with the timed text as its subtitle
-    /// track when one is given, and return the package directory.
+    /// Build an IMP into `dir` long enough to hold the subtitle's last cue (at
+    /// 6.25 s), with the timed text as its subtitle track when one is given, and
+    /// return the package directory.
     fn built_package(dir: &Path, subtitle: Option<PathBuf>) -> PathBuf {
+        const FRAMES: u64 = 150;
         let j2k_dir = dir.join("j2k");
         std::fs::create_dir_all(&j2k_dir).unwrap();
-        std::fs::write(
-            j2k_dir.join("0001.j2c"),
-            crate::mxf_wrap::synthetic_j2k_codestream(2048, 1080, 12),
-        )
-        .unwrap();
+        for frame in 1..=FRAMES {
+            std::fs::write(
+                j2k_dir.join(format!("{frame:04}.j2c")),
+                crate::mxf_wrap::synthetic_j2k_codestream(2048, 1080, 12),
+            )
+            .unwrap();
+        }
         let output_dir = dir.join("imp");
         let result = crate::imp::create_imp(&crate::imp::ImpOptions {
             output_dir: output_dir.clone(),
@@ -209,6 +213,7 @@ mod tests {
             }],
             fps_num: 24,
             fps_den: 1,
+            duration: FRAMES,
             ..Default::default()
         });
         assert!(result.success, "create failed: {}", result.error);

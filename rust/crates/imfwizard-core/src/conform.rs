@@ -427,6 +427,7 @@ fn wrap_event_sound(
         crate::EssenceType::Wav,
         None,
         Some(mca),
+        picture_frames,
     )
 }
 

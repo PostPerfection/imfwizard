@@ -312,7 +312,12 @@ fn make_ttml(directory: &Path, file_name: &str) -> PathBuf {
     std::fs::write(
         &path,
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<tt xmlns="http://www.w3.org/ns/ttml" xml:lang="en">
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    xmlns:ittp="http://www.w3.org/ns/ttml/profile/imsc1#parameter"
+    xmlns:itts="http://www.w3.org/ns/ttml/profile/imsc1#styling"
+    ttp:profile="http://www.w3.org/ns/ttml/profile/imsc1/text" xml:lang="en">
   <body><div>
     <p begin="00:00:00.100" end="00:00:00.400">Sidecar cue</p>
   </div></body>

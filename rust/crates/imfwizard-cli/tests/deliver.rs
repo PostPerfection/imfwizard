@@ -77,6 +77,8 @@ fn digest(path: &Path) -> String {
         .base64
 }
 
+// rsync is a unix transport; Windows has no rsync and would deliver another way.
+#[cfg(unix)]
 #[test]
 fn an_rsync_delivery_copies_every_file_and_lands_in_the_tracker() {
     let work = TempDir::new().unwrap();
@@ -133,13 +135,17 @@ fn an_rsync_delivery_copies_every_file_and_lands_in_the_tracker() {
         );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_failed_transfer_records_nothing() {
     let work = TempDir::new().unwrap();
     let imp = create_imp(work.path());
     let db = work.path().join("deliveries.db");
-    // rsync refuses a destination whose parent does not exist
-    let destination = work.path().join("missing").join("nowhere");
+    // a destination under a regular file cannot be created (ENOTDIR), which fails
+    // the same way under GNU rsync and BSD rsync
+    let blocker = work.path().join("blocker");
+    std::fs::write(&blocker, b"not a directory").unwrap();
+    let destination = blocker.join("nowhere");
 
     cmd()
         .args([

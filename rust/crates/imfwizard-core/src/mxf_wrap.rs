@@ -117,7 +117,12 @@ fn delegate(
         resource_ids: vec![],
         hdr: opts.hdr.clone(),
         asset_uuid: opts.asset_uuid,
-        timed_text_duration_frames: None,
+        // fit the subtitle to the composition so its track spans the segment; every
+        // other essence type carries its own length
+        timed_text_duration_frames: match essence_type {
+            postkit::mxf_wrap::EssenceType::TimedText => Some(opts.duration as u32),
+            _ => None,
+        },
     });
 
     if !pk.success {

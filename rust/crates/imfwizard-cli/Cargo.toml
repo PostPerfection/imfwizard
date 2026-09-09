@@ -22,7 +22,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 # the App 2E test reads the picture MXF `create` wrote back off disk
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "6d044c1" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "2f1617bf2ddf3121c8f1ace7adf80ae7d9678e8c" }
 assert_cmd = "2"
 # the Dolby Vision fixture takes the level 6 block that carries MaxCLL and MaxFALL
 dolby_vision = "3.4"

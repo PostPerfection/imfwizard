@@ -217,7 +217,7 @@ pub(crate) fn track_file_descriptor(
     let body = match kind {
         ImfTrackKind::Image => picture_descriptor_body(track_file)?,
         ImfTrackKind::Audio => sound_descriptor_body(track_file, edit_rate)?,
-        ImfTrackKind::Subtitle => return Ok(None),
+        ImfTrackKind::Subtitle => subtitle_descriptor_body(track_file)?,
     };
     Ok(Some(ImfEssenceDescriptor {
         id: uuid::Uuid::new_v4().to_string(),
@@ -276,6 +276,14 @@ fn sound_descriptor_body(sound: &Path, edit_rate: asdcplib::Rational) -> std::io
         &descriptor,
         &labels,
     ))
+}
+
+/// The subtitle MXF's own timed-text descriptor, as the RegXML the CPL's
+/// EssenceDescriptorList carries. postkit reads the InstanceID and LinkedTrackID
+/// off the MXF header so the entry matches the essence Photon reads back.
+fn subtitle_descriptor_body(subtitle: &Path) -> std::io::Result<String> {
+    postkit::timed_text_descriptor::read_timed_text_descriptor_regxml(subtitle)
+        .map_err(std::io::Error::other)
 }
 
 /// The SMPTE and xmldsig XSDs Photon vendors, which hold imf-cpl-20160411.xsd
