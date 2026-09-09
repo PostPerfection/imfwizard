@@ -286,17 +286,41 @@ fn descriptors_still_referenced(
         .collect()
 }
 
-/// Wrap one new/changed asset into an MXF track file inside the supplemental IMP.
-///
-/// Sound is padded with silence or cut to `picture_frames` first, the rule
-/// `create` follows, so the supplement's dub runs the OV picture's length rather
-/// than its own and the segment's sequences stay equal.
+// App 2E puts ColorPrimaries and TransferCharacteristic on the picture descriptor, and a replacement signals what the OV did
+fn ov_picture_colour(
+    ov_dir: &Path,
+    ov: &CplResources,
+) -> Result<asdcplib::jp2k::HdrMetadata, String> {
+    let picture = ov
+        .resources
+        .iter()
+        .find(|resource| resource.kind == ImfTrackKind::Image)
+        .ok_or("the OV CPL names no picture track to replace")?;
+    let assets = crate::timeline::parse_assetmap(ov_dir);
+    let path = assets
+        .get(&picture.uuid)
+        .map(|relative| ov_dir.join(relative))
+        .ok_or_else(|| format!("the OV ASSETMAP names no track file {}", picture.uuid))?;
+
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&path.to_string_lossy())
+        .map_err(|e| format!("cannot read the OV picture {}: {e}", path.display()))?;
+    let descriptor = reader
+        .rgba_essence_descriptor()
+        .map_err(|e| format!("cannot read the colour of {}: {e}", path.display()))?;
+    let _ = reader.close();
+    Ok(descriptor.hdr)
+}
+
+// sound is padded with silence or cut to picture_frames first, so the segment's sequences run the same length
 fn wrap_asset(
     spec: &TrackSpec,
     output_dir: &Path,
     fps_num: u32,
     fps_den: u32,
     picture_frames: Option<u64>,
+    picture_colour: Option<&asdcplib::jp2k::HdrMetadata>,
 ) -> Result<MxfTrackFile, String> {
     if !spec.path.exists() {
         return Err(format!("input not found: {}", spec.path.display()));
@@ -321,7 +345,7 @@ fn wrap_asset(
         edit_rate_num: fps_num,
         edit_rate_den: fps_den,
         duration: 0,
-        hdr: None,
+        hdr: picture_colour.cloned(),
         mca: None,
         asset_uuid: Some(*asset_uuid.as_bytes()),
     });
@@ -338,9 +362,7 @@ fn wrap_asset(
     Ok(wrap.track_file)
 }
 
-/// How long the OV's picture runs, which every sound file the supplement wraps
-/// is fitted to. `None` when the OV CPL names no image resource, and then the
-/// sound is wrapped at its own length.
+// how long the OV picture runs, the length sound is fitted to when the supplement leaves the picture alone
 fn ov_picture_frames(ov: &CplResources) -> Option<u64> {
     ov.resources
         .iter()
@@ -425,7 +447,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
     // the OV entry that described the essence it replaces
     let mut wrapped_descriptors: Vec<ImfEssenceDescriptor> = Vec::new();
     let edit_rate = asdcplib::Rational::new(ov.fps_num as i32, ov.fps_den as i32);
-    let picture_frames = ov_picture_frames(&ov);
+    let mut picture_frames = ov_picture_frames(&ov);
     let mut resources: Vec<ImfResource> = ov
         .resources
         .iter()
@@ -437,11 +459,36 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         })
         .collect();
 
-    for s in &replace_specs {
-        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den, picture_frames) {
+    // a replaced picture sets the length the sound beside it is fitted to, so it is wrapped first
+    let (image_replacements, other_replacements): (Vec<&TrackSpec>, Vec<&TrackSpec>) =
+        replace_specs
+            .iter()
+            .partition(|s| s.kind == ImfTrackKind::Image);
+
+    let picture_colour = if image_replacements.is_empty() {
+        None
+    } else {
+        match ov_picture_colour(&opts.ov_dir, &ov) {
+            Ok(colour) => Some(colour),
+            Err(e) => return SupplementResult::fail(out, e),
+        }
+    };
+
+    for s in image_replacements.into_iter().chain(other_replacements) {
+        let tf = match wrap_asset(
+            s,
+            out,
+            ov.fps_num,
+            ov.fps_den,
+            picture_frames,
+            picture_colour.as_ref(),
+        ) {
             Ok(tf) => tf,
             Err(e) => return SupplementResult::fail(out, e),
         };
+        if s.kind == ImfTrackKind::Image {
+            picture_frames = Some(tf.duration);
+        }
         // swap the Nth resource of this kind to the new track file
         let target = resources
             .iter_mut()
@@ -459,7 +506,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         present.push(tf);
     }
     for s in &add_specs {
-        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den, picture_frames) {
+        let tf = match wrap_asset(s, out, ov.fps_num, ov.fps_den, picture_frames, None) {
             Ok(tf) => tf,
             Err(e) => return SupplementResult::fail(out, e),
         };
@@ -620,11 +667,17 @@ mod tests {
             &track_files,
         )
         .unwrap();
+        let picture = &track_files[0];
+        let picture_name = picture.path.file_name().unwrap().to_string_lossy();
         std::fs::write(
             dir.join("ASSETMAP.xml"),
-            r#"<?xml version="1.0"?><AssetMap><AssetList>
+            format!(
+                r#"<?xml version="1.0"?><AssetMap><AssetList>
               <Asset><Id>urn:uuid:ov-cpl</Id><ChunkList><Chunk><Path>CPL_ov.xml</Path></Chunk></ChunkList></Asset>
+              <Asset><Id>urn:uuid:{}</Id><ChunkList><Chunk><Path>{picture_name}</Path></Chunk></ChunkList></Asset>
             </AssetList></AssetMap>"#,
+                picture.uuid
+            ),
         )
         .unwrap();
     }
@@ -775,6 +828,64 @@ mod tests {
             .filter(|name| name.starts_with(FITTED_AUDIO_PREFIX))
             .collect();
         assert!(leftovers.is_empty(), "fitted scratch left: {leftovers:?}");
+
+        let complaint = crate::cpl::st2067_3_complaint(&cpl);
+        assert!(
+            complaint.is_empty(),
+            "supplemental CPL must pass ST 2067-3 XSD:\n{complaint}"
+        );
+    }
+
+    // the OV picture is no longer in the composition once the supplement replaces it
+    #[test]
+    fn a_supplement_fits_its_dubs_to_a_replaced_picture() {
+        const SAMPLES_A_FRAME: u32 = 2000;
+        const NEW_FRAMES: u64 = OV_FRAMES + 6;
+        let dir = tempfile::tempdir().unwrap();
+        write_hlg_ov(dir.path());
+        let out = tempfile::tempdir().unwrap();
+        let sources = tempfile::tempdir().unwrap();
+
+        let frames = sources.path().join("j2k");
+        std::fs::create_dir_all(&frames).unwrap();
+        let codestream = crate::mxf_wrap::synthetic_j2k_codestream(1920, 1080, 12);
+        for frame in 1..=NEW_FRAMES {
+            std::fs::write(frames.join(format!("{frame:04}.j2c")), &codestream).unwrap();
+        }
+        let dub = sources.path().join("dub.wav");
+        let samples = OV_FRAMES as u32 * SAMPLES_A_FRAME;
+        std::fs::write(&dub, make_wav(2, 48000, 16, samples)).unwrap();
+
+        // the dub comes first, so only wrapping the picture ahead of it can fit it
+        let result = create_supplement(&SupplementOptions {
+            ov_dir: dir.path().to_path_buf(),
+            title: "New picture and dub".into(),
+            output_dir: out.path().to_path_buf(),
+            replace: vec![
+                format!("{}@audio", dub.display()),
+                format!("{}@image", frames.display()),
+            ],
+            add: vec![],
+        });
+        assert!(result.success, "supplement failed: {}", result.error);
+
+        let cpl = read_one(out.path(), "CPL_");
+        let durations: Vec<u64> = cpl
+            .split("<IntrinsicDuration>")
+            .skip(1)
+            .map(|rest| {
+                rest.split("</IntrinsicDuration>")
+                    .next()
+                    .expect("a closing tag")
+                    .parse()
+                    .expect("a frame count")
+            })
+            .collect();
+        assert_eq!(
+            durations,
+            vec![NEW_FRAMES; 2],
+            "the new picture and the dub must both run {NEW_FRAMES} frames: {cpl}"
+        );
 
         let complaint = crate::cpl::st2067_3_complaint(&cpl);
         assert!(
