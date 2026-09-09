@@ -17,11 +17,12 @@ const INTERMEDIATE_DIRECTORIES: [&str; 3] = [
 const INTERMEDIATE_FILES: [&str; 2] = [DEMUXED_AUDIO_NAME, crate::audio_map::MAPPED_AUDIO_NAME];
 
 // scratch named one per composition, per sound file or per subtitle file
-const INTERMEDIATE_PREFIXES: [&str; 5] = [
+const INTERMEDIATE_PREFIXES: [&str; 6] = [
     ENCODE_SCRATCH_PREFIX,
     crate::source_edits::DELAYED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_AUDIO_PREFIX,
     crate::source_edits::FITTED_AUDIO_PREFIX,
+    crate::source_edits::WIDENED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_SUBTITLE_PREFIX,
 ];
 
@@ -83,6 +84,7 @@ mod tests {
         let indexed = [
             format!("{}1.wav", crate::source_edits::DELAYED_AUDIO_PREFIX),
             format!("{}1.wav", crate::source_edits::TRIMMED_AUDIO_PREFIX),
+            format!("{}1.wav", crate::source_edits::WIDENED_AUDIO_PREFIX),
             format!("{}1.xml", crate::source_edits::TRIMMED_SUBTITLE_PREFIX),
         ];
         for name in &indexed {

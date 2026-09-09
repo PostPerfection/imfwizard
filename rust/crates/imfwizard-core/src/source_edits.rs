@@ -22,7 +22,12 @@ pub const TRIMMED_PICTURE_DIR: &str = "j2k_trimmed";
 pub const DELAYED_AUDIO_PREFIX: &str = "delayed_audio_";
 pub const TRIMMED_AUDIO_PREFIX: &str = "trimmed_audio_";
 pub const FITTED_AUDIO_PREFIX: &str = "fitted_audio_";
+pub const WIDENED_AUDIO_PREFIX: &str = "widened_audio_";
 pub const TRIMMED_SUBTITLE_PREFIX: &str = "trimmed_subtitle_";
+
+/// The only sample depth App 2E sound may carry. 8 and 16-bit PCM widen to it
+/// losslessly; 32-bit and float would have to drop bits to reach it.
+pub const APP2E_SOUND_BITS: u16 = 24;
 
 /// Trim and audio delay for one composition's source.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +230,63 @@ pub fn trimmed_encode_window(
         first_frame: edits.trim_start_frames,
         frame_count: frames - edits.trim_start_frames - edits.trim_end_frames,
     }))
+}
+
+// how a refusal spells what the file carries
+fn sound_depth(spec: &hound::WavSpec) -> String {
+    match spec.sample_format {
+        hound::SampleFormat::Float => format!("{}-bit float", spec.bits_per_sample),
+        hound::SampleFormat::Int => format!("{}-bit", spec.bits_per_sample),
+    }
+}
+
+/// Refuse a sound master an App 2E wrap can only carry by dropping samples.
+/// Which bits to lose is the mastering engineer's call, so the conversion is
+/// theirs to run.
+pub fn check_sound_depth(input: &Path) -> Result<(), String> {
+    let spec = hound::WavReader::open(input)
+        .map_err(|error| format!("cannot read {}: {error}", input.display()))?
+        .spec();
+    if spec.sample_format == hound::SampleFormat::Int && spec.bits_per_sample <= APP2E_SOUND_BITS {
+        return Ok(());
+    }
+    Err(format!(
+        "{path} is {} PCM and App 2E sound is {APP2E_SOUND_BITS}-bit, so packaging it would \
+         drop the samples that do not fit. Convert it first, choosing what to lose: \
+         ffmpeg -i {path} -c:a pcm_s24le sound_24.wav",
+        sound_depth(&spec),
+        path = input.display()
+    ))
+}
+
+/// Widen a shallower sound master to the 24-bit App 2E asks for, writing
+/// `output`. `None` when the input already is 24-bit and can be wrapped where it
+/// lies. Every sample is shifted up whole, so no bit of the master is lost.
+pub fn widen_sound_depth(input: &Path, output: &Path) -> Result<Option<u16>, String> {
+    check_sound_depth(input)?;
+    let mut reader = hound::WavReader::open(input)
+        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
+    let spec = reader.spec();
+    if spec.bits_per_sample == APP2E_SOUND_BITS {
+        return Ok(None);
+    }
+
+    let shift = APP2E_SOUND_BITS - spec.bits_per_sample;
+    let widened: Vec<i32> = reader
+        .samples::<i32>()
+        .map(|sample| sample.map(|sample| sample << shift))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
+    postkit::wav_io::write_interleaved_exact(
+        output,
+        hound::WavSpec {
+            bits_per_sample: APP2E_SOUND_BITS,
+            ..spec
+        },
+        &postkit::wav_io::Samples::Int(widened),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    Ok(Some(spec.bits_per_sample))
 }
 
 fn audio_facts(path: &Path) -> Result<AudioFacts, String> {
@@ -436,8 +498,8 @@ pub fn fit_audio_to_picture(
         return Ok(None);
     }
 
-    // the kept samples are copied untouched, so the output stays bit-exact for
-    // every PCM format, 32-bit int included
+    // the kept samples are copied untouched, so the output stays bit-exact at 8,
+    // 16 and 24 bits, the depths a wrap accepts
     fn refitted<T: Copy + Default>(samples: &[T], wanted: usize) -> Vec<T> {
         let mut out = vec![T::default(); wanted];
         let kept = wanted.min(samples.len());
@@ -478,8 +540,8 @@ pub fn apply_audio_delay(input: &Path, output: &Path, delay_ms: i64) -> Result<(
     )?;
     let shift = delay_shift_frames(delay_ms, sample_rate) as usize;
 
-    // the shifted samples are copied untouched, so the output stays bit-exact
-    // for every PCM format, 32-bit int included
+    // the shifted samples are copied untouched, so the output stays bit-exact at
+    // 8, 16 and 24 bits, the depths a wrap accepts
     fn shifted_window<T: Copy + Default>(
         samples: &[T],
         shift: usize,

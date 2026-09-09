@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::source_edits::{AudioFit, FITTED_AUDIO_PREFIX, fit_audio_to_picture};
+use crate::source_edits::{
+    AudioFit, FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX, fit_audio_to_picture,
+};
 
 /// Accessibility role of an audio track, carried in the CPL as an MCA essence
 /// descriptor (ST 2067-2/-3). None is normal main audio.
@@ -196,6 +198,22 @@ fn wrap_one(
     Ok(r.track_file)
 }
 
+// App 2E sound is 24-bit, so a shallower master is widened before the wrap, and
+// a deeper one was refused before the encode
+pub(crate) fn widened_sound(source: &Path, widened: &Path) -> Result<PathBuf, String> {
+    match crate::source_edits::widen_sound_depth(source, widened)? {
+        None => Ok(source.to_path_buf()),
+        Some(from_bits) => {
+            tracing::info!(
+                "Sound widened from {from_bits}-bit to {}-bit for the wrap: {}",
+                crate::source_edits::APP2E_SOUND_BITS,
+                source.display()
+            );
+            Ok(widened.to_path_buf())
+        }
+    }
+}
+
 pub(crate) fn report_audio_fit(sound: &Path, fit: &AudioFit, picture_frames: u64) {
     let what = match fit.silence_added {
         0 => format!(
@@ -320,17 +338,29 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             if !a.path.exists() {
                 continue;
             }
+            let widened = opts
+                .output_dir
+                .join(format!("{WIDENED_AUDIO_PREFIX}{index}.wav"));
+            let source = match widened_sound(&a.path, &widened) {
+                Ok(source) => source,
+                Err(e) => {
+                    return ImpResult {
+                        error: format!("Audio wrap failed: {e}"),
+                        ..Default::default()
+                    };
+                }
+            };
             let fitted = opts
                 .output_dir
                 .join(format!("{FITTED_AUDIO_PREFIX}{index}.wav"));
             let sound = match fit_audio_to_picture(
-                &a.path,
+                &source,
                 &fitted,
                 picture_frames,
                 opts.fps_num,
                 opts.fps_den,
             ) {
-                Ok(None) => a.path.clone(),
+                Ok(None) => source,
                 Ok(Some(fit)) => {
                     report_audio_fit(&a.path, &fit, picture_frames);
                     fitted

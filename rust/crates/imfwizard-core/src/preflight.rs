@@ -90,8 +90,18 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     check_burn(plan)?;
     check_app2e_picture(plan)?;
     check_hdr_signalling(plan)?;
+    check_sound_depth(plan)?;
     check_audio_map(plan)?;
     check_source_edits(plan)
+}
+
+// a master too deep for an App 2E wrap is refused here rather than after the
+// encode, where the wrap would have had to drop the bits that do not fit
+fn check_sound_depth(plan: &CreatePlan) -> Result<(), String> {
+    for wav in &plan.audio_files {
+        crate::source_edits::check_sound_depth(wav)?;
+    }
+    Ok(())
 }
 
 /// The routes that hand the encoder X'Y'Z' frames, as the refusal names them.

@@ -7,7 +7,7 @@ use quick_xml::reader::Reader;
 
 use crate::EssenceType;
 use crate::MxfTrackFile;
-use crate::source_edits::{FITTED_AUDIO_PREFIX, fit_audio_to_picture};
+use crate::source_edits::{FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX, fit_audio_to_picture};
 
 /// Options for creating a supplemental IMP.
 ///
@@ -328,14 +328,17 @@ fn wrap_asset(
     let asset_uuid = uuid::Uuid::new_v4();
     let mxf_path = output_dir.join(format!("{}_{asset_uuid}.mxf", prefix_for(spec.kind)));
 
+    let widened = output_dir.join(format!("{WIDENED_AUDIO_PREFIX}{asset_uuid}.wav"));
     let fitted = output_dir.join(format!("{FITTED_AUDIO_PREFIX}{asset_uuid}.wav"));
     let mut source = spec.path.clone();
-    if spec.kind == ImfTrackKind::Audio
-        && let Some(frames) = picture_frames
-        && let Some(fit) = fit_audio_to_picture(&spec.path, &fitted, frames, fps_num, fps_den)?
-    {
-        crate::imp::report_audio_fit(&spec.path, &fit, frames);
-        source = fitted.clone();
+    if spec.kind == ImfTrackKind::Audio {
+        source = crate::imp::widened_sound(&source, &widened)?;
+        if let Some(frames) = picture_frames
+            && let Some(fit) = fit_audio_to_picture(&source, &fitted, frames, fps_num, fps_den)?
+        {
+            crate::imp::report_audio_fit(&spec.path, &fit, frames);
+            source = fitted.clone();
+        }
     }
 
     let wrap = crate::mxf_wrap::wrap_mxf(&crate::mxf_wrap::MxfWrapOptions {
@@ -349,9 +352,9 @@ fn wrap_asset(
         mca: None,
         asset_uuid: Some(*asset_uuid.as_bytes()),
     });
-    if source == fitted {
-        let _ = std::fs::remove_file(&fitted);
-    }
+    // both scratch names sit under output_dir, so neither can be the caller's file
+    let _ = std::fs::remove_file(&fitted);
+    let _ = std::fs::remove_file(&widened);
     if !wrap.success {
         return Err(format!(
             "wrap failed for {}: {}",

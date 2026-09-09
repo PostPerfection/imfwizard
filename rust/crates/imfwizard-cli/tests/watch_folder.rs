@@ -169,10 +169,8 @@ fn make_silent_wav(directory: &Path, file_name: &str) -> PathBuf {
         "anullsrc=r=48000:cl=stereo",
         "-t",
         "0.5",
-        // 24-bit is the only depth App 2E sound may carry, and the create the
-        // watcher runs validates what it packaged
-        "-c:a",
-        "pcm_s24le",
+        // ffmpeg's default depth, which the create the watcher runs has to widen
+        // to the 24 bits App 2E allows
         path.to_str().unwrap(),
     ]);
     path

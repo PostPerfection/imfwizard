@@ -1739,8 +1739,8 @@ fn an_audio_map_writes_the_gained_lane_into_the_package() {
 }
 
 /// A rising stereo ramp, so a gained lane is checked sample by sample. 24-bit
-/// because that is the only depth App 2E sound may carry, and `create`
-/// validates what it packages.
+/// because that is what the wrap carries, so the gain is read at the depth it
+/// was mixed at with no widening in between.
 fn write_stereo_ramp_wav(path: &std::path::Path) {
     let spec = hound::WavSpec {
         channels: 2,
