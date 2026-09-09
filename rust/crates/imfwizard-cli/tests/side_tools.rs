@@ -433,25 +433,47 @@ fn package_trailer(dir: &Path, name: &str, extra: &[&str]) -> PathBuf {
     output.join("ratings_card.mp4")
 }
 
+/// The first frame of a rendered card, decoded to 8-bit RGB.
+fn card_pixels(card: &Path) -> Vec<u8> {
+    let raw = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(card)
+        .args(["-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+        .output()
+        .expect("ffmpeg");
+    assert!(raw.status.success(), "the card does not decode");
+    assert!(!raw.stdout.is_empty());
+    raw.stdout
+}
+
 /// Each rating system draws its own lowest rating on the card, so the three
-/// cards differ in the pixels the rating text covers.
+/// cards differ in the pixels the rating text covers. Two runs of one system
+/// give the same picture, so a difference between two systems is the text and
+/// not the encoder.
 #[test]
 fn every_rating_system_renders_a_card_of_its_own() {
+    let control = TempDir::new().unwrap();
+    assert_eq!(
+        card_pixels(&package_trailer(
+            control.path(),
+            "again",
+            &["--rating-system", "mpaa"]
+        )),
+        card_pixels(&package_trailer(
+            control.path(),
+            "once",
+            &["--rating-system", "mpaa"]
+        )),
+        "the same rating system renders two different cards, so this test cannot tell \
+         a rating apart from encoder noise"
+    );
+
     let mut cards: Vec<(&str, Vec<u8>)> = Vec::new();
     for system in ["mpaa", "bbfc", "fsk"] {
         let dir = TempDir::new().unwrap();
         let card = package_trailer(dir.path(), system, &["--rating-system", system]);
         assert!(card.is_file(), "{system}: no ratings card was rendered");
-
-        let raw = std::process::Command::new("ffmpeg")
-            .args(["-v", "error", "-i"])
-            .arg(&card)
-            .args(["-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
-            .output()
-            .expect("ffmpeg");
-        assert!(raw.status.success(), "{system}: the card does not decode");
-        assert!(!raw.stdout.is_empty());
-        cards.push((system, raw.stdout));
+        cards.push((system, card_pixels(&card)));
     }
 
     for (index, (system, pixels)) in cards.iter().enumerate() {
