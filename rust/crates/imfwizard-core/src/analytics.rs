@@ -66,7 +66,8 @@ pub fn analyze_imp(imp_dir: &Path) -> Result<ImpAnalytics, String> {
                             analytics.audio_tracks += 1;
                         }
                     }
-                    "ttml" | "xml" => analytics.subtitle_tracks += 1,
+                    "ttml" => analytics.subtitle_tracks += 1,
+                    "xml" if is_subtitle_xml(&path) => analytics.subtitle_tracks += 1,
                     _ => {}
                 }
             }
@@ -74,6 +75,16 @@ pub fn analyze_imp(imp_dir: &Path) -> Result<ImpAnalytics, String> {
     }
 
     Ok(analytics)
+}
+
+// the CPL, PKL and ASSETMAP are XML as well, and none of them is a subtitle
+fn is_subtitle_xml(path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    !["CompositionPlaylist", "PackingList", "AssetMap"]
+        .iter()
+        .any(|element| content.contains(element))
 }
 
 /// Analyze per-second bitrate of a video MXF file using ffprobe.

@@ -33,11 +33,16 @@ pub fn inspect_imp(imp_dir: &Path) -> Result<ImpInfo, String> {
             info.issuer = extract_xml_text(&content, "Issuer").unwrap_or_default();
             info.edit_rate = extract_xml_text(&content, "EditRate").unwrap_or_default();
 
-            // Sum segment durations
+            // the picture runs the length of the composition, so summing every
+            // sequence would count the sound track a second time
             let mut total_duration = 0u64;
+            let mut in_picture_sequence = false;
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("<IntrinsicDuration>")
+                if trimmed.contains("MainImageSequence") {
+                    in_picture_sequence = !trimmed.starts_with("</");
+                } else if in_picture_sequence
+                    && trimmed.starts_with("<IntrinsicDuration>")
                     && let Some(val) = extract_xml_text(trimmed, "IntrinsicDuration")
                 {
                     total_duration += val.parse::<u64>().unwrap_or(0);
