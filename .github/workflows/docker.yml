@@ -39,7 +39,8 @@ jobs:
           docker run --rm -v "$PWD/work:/data" --entrypoint sh imfwizard:ci -c '
             set -e
             ffmpeg -v error -f lavfi -i testsrc2=size=1920x1080:rate=24 -frames:v 12 -pix_fmt yuv420p /data/clip.mp4
-            ffmpeg -v error -f lavfi -i anullsrc=r=48000:cl=stereo -t 0.5 /data/clip.wav
+            # 24-bit is the only depth App 2E sound may carry, and create validates what it packaged
+            ffmpeg -v error -f lavfi -i anullsrc=r=48000:cl=stereo -t 0.5 -c:a pcm_s24le /data/clip.wav
             imfwizard create --title DockerCi --video /data/clip.mp4 --audio /data/clip.wav --output /data/out
           '
           test -f work/out/ASSETMAP.xml

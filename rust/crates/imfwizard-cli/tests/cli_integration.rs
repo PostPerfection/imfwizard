@@ -1738,17 +1738,19 @@ fn an_audio_map_writes_the_gained_lane_into_the_package() {
     }
 }
 
-/// A rising 16-bit stereo ramp, so a gained lane is checked sample by sample.
+/// A rising stereo ramp, so a gained lane is checked sample by sample. 24-bit
+/// because that is the only depth App 2E sound may carry, and `create`
+/// validates what it packages.
 fn write_stereo_ramp_wav(path: &std::path::Path) {
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: 48_000,
-        bits_per_sample: 16,
+        bits_per_sample: 24,
         sample_format: hound::SampleFormat::Int,
     };
     let mut writer = hound::WavWriter::create(path, spec).unwrap();
     for frame in 0..48_000i32 {
-        let sample = (frame % 30_000) as i16;
+        let sample = frame % 30_000;
         writer.write_sample(sample).unwrap();
         writer.write_sample(-sample).unwrap();
     }
