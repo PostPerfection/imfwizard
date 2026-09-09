@@ -88,11 +88,7 @@ fn essence_for(kind: ImfTrackKind) -> EssenceType {
 }
 
 fn prefix_for(kind: ImfTrackKind) -> &'static str {
-    match kind {
-        ImfTrackKind::Image => "VIDEO",
-        ImfTrackKind::Audio => "AUDIO",
-        ImfTrackKind::Subtitle => "SUBTITLE",
-    }
+    crate::imp::track_file_prefix(essence_for(kind))
 }
 
 /// One resource read from a CPL.

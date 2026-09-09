@@ -422,7 +422,6 @@ fn wrap_event_sound(
     crate::imp::wrap_one(
         options,
         output_dir,
-        "AUDIO",
         &sound,
         crate::EssenceType::Wav,
         None,

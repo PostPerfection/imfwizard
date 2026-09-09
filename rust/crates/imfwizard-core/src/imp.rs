@@ -164,6 +164,15 @@ pub fn validate_language(tag: &str) -> Result<(), String> {
 /// it, so a picture MXF written anywhere has to carry it.
 pub const PICTURE_PREFIX: &str = "VIDEO";
 
+/// Track file name prefix each essence is written under.
+pub fn track_file_prefix(essence: crate::EssenceType) -> &'static str {
+    match essence {
+        crate::EssenceType::J2k => PICTURE_PREFIX,
+        crate::EssenceType::Wav | crate::EssenceType::Atmos => "AUDIO",
+        crate::EssenceType::TimedText => "SUBTITLE",
+    }
+}
+
 /// Where a track file of `prefix` kind under `asset_uuid` goes in the IMP.
 pub fn track_file_path(output_dir: &Path, prefix: &str, asset_uuid: &uuid::Uuid) -> PathBuf {
     output_dir.join(format!("{prefix}_{asset_uuid}.mxf"))
@@ -172,7 +181,6 @@ pub fn track_file_path(output_dir: &Path, prefix: &str, asset_uuid: &uuid::Uuid)
 pub(crate) fn wrap_one(
     opts: &ImpOptions,
     output_dir: &Path,
-    prefix: &str,
     input: &Path,
     essence: crate::EssenceType,
     hdr: Option<asdcplib::jp2k::HdrMetadata>,
@@ -182,7 +190,7 @@ pub(crate) fn wrap_one(
     duration: u64,
 ) -> Result<crate::MxfTrackFile, String> {
     let asset_uuid = uuid::Uuid::new_v4();
-    let mxf_path = track_file_path(output_dir, prefix, &asset_uuid);
+    let mxf_path = track_file_path(output_dir, track_file_prefix(essence), &asset_uuid);
     let wrap_opts = crate::mxf_wrap::MxfWrapOptions {
         input_dir: input.to_path_buf(),
         output_file: mxf_path,
@@ -314,7 +322,6 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 match wrap_one(
                     opts,
                     &opts.output_dir,
-                    PICTURE_PREFIX,
                     j2k_dir,
                     crate::EssenceType::J2k,
                     Some(crate::mxf_wrap::picture_colour(comp.hdr.as_ref())),
@@ -388,7 +395,6 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             match wrap_one(
                 opts,
                 &opts.output_dir,
-                "AUDIO",
                 &sound,
                 crate::EssenceType::Wav,
                 None,
@@ -412,7 +418,6 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             match wrap_one(
                 opts,
                 &opts.output_dir,
-                "SUBTITLE",
                 tt,
                 crate::EssenceType::TimedText,
                 None,
