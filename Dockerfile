@@ -4,7 +4,7 @@
 # Watch:    docker run -v /path/to/incoming:/in -v /path/to/out:/out imfwizard watch /in --output /out
 # Photon validation needs a JRE and the photon jars mounted, set PHOTON_JAR to their path.
 
-ARG GROK_REF=v20.4.6
+ARG GROK_REF=v20.4.7
 ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
 
 FROM ubuntu:24.04 AS grok
