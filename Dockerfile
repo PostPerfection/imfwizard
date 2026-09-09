@@ -5,7 +5,7 @@
 # Photon validation needs a JRE and the photon jars mounted, set PHOTON_JAR to their path.
 
 ARG GROK_REF=v20.4.6
-ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-27-16-45/ffmpeg-n8.1.2-47-g156bb4d299-linux64-gpl-8.1.tar.xz
+ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
 
 FROM ubuntu:24.04 AS grok
 ARG GROK_REF
