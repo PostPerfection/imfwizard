@@ -169,7 +169,7 @@ pub fn track_file_path(output_dir: &Path, prefix: &str, asset_uuid: &uuid::Uuid)
     output_dir.join(format!("{prefix}_{asset_uuid}.mxf"))
 }
 
-fn wrap_one(
+pub(crate) fn wrap_one(
     opts: &ImpOptions,
     output_dir: &Path,
     prefix: &str,
@@ -230,7 +230,7 @@ pub(crate) fn report_audio_fit(sound: &Path, fit: &AudioFit, picture_frames: u64
 
 /// The MCA labels one sound track file carries: a channel label each, and a
 /// soundfield group naming the work, its version and what kind of mix it is.
-fn soundfield_config(
+pub(crate) fn soundfield_config(
     track: &AudioTrack,
     comp: &Composition,
     labels: &SoundfieldLabels,

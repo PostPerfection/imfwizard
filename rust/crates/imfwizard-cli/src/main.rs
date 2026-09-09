@@ -1173,11 +1173,23 @@ enum Commands {
         lut: Option<String>,
     },
 
-    /// Import EDL/AAF/XML timeline for conforming
+    /// Import an EDL or XML timeline for conforming
+    ///
+    /// With --media-dir and --output it builds an IMP whose CPL follows the
+    /// timeline, one picture and sound resource per event. With neither it
+    /// prints the parsed timeline and writes nothing.
     Conform {
-        /// Input timeline file (EDL, AAF, FCP XML, OTIO)
+        /// Input timeline file (EDL, FCP XML, OTIO)
         #[arg(short, long)]
         input: String,
+
+        /// Directory holding the source media the timeline names
+        #[arg(long)]
+        media_dir: Option<String>,
+
+        /// Output IMP directory
+        #[arg(short, long)]
+        output: Option<String>,
 
         /// Output as JSON
         #[arg(long)]
@@ -1547,18 +1559,6 @@ enum Commands {
 
         #[arg(short, long, default_value = "smpte", help = compliance_standard_help())]
         standard: String,
-    },
-
-    /// Import EDL/AAF/XML timeline
-    #[command(name = "edl-import")]
-    EdlImport {
-        /// Input timeline file (EDL, AAF, FCP XML, OTIO)
-        #[arg(short, long)]
-        input: String,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
     },
 
     /// Annotate CPL metadata
@@ -3338,7 +3338,12 @@ fn run() {
             }
         }
 
-        Commands::Conform { input, json } => {
+        Commands::Conform {
+            input,
+            media_dir,
+            output,
+            json,
+        } => {
             let timeline = match postkit::conform::parse_timeline(std::path::Path::new(&input)) {
                 Ok(t) => t,
                 Err(e) => {
@@ -3346,23 +3351,46 @@ fn run() {
                     std::process::exit(1);
                 }
             };
-            if json {
-                println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
-            } else {
-                println!("Timeline: {} ({:?})", timeline.title, timeline.format);
-                println!("Frame rate: {}", timeline.frame_rate);
-                println!("Events: {}", timeline.events.len());
-                for event in &timeline.events {
+            match (media_dir, output) {
+                (Some(media_dir), Some(output)) => {
+                    let plan = imfwizard_core::conform::build_plan(
+                        &timeline,
+                        std::path::Path::new(&media_dir),
+                    )
+                    .unwrap_or_else(|e| fail(e));
+                    let conformed = imfwizard_core::conform::conform_to_imp(
+                        &plan,
+                        std::path::Path::new(&output),
+                    )
+                    .unwrap_or_else(|e| fail(e));
                     println!(
-                        "  #{}: {} [{}-{}] → [{}-{}]",
-                        event.event_number,
-                        event.reel_name,
-                        event.source_in,
-                        event.source_out,
-                        event.record_in,
-                        event.record_out,
+                        "Conformed {} events into {} ({} frames)",
+                        plan.events.len(),
+                        conformed.cpl_path.display(),
+                        conformed.picture_frames
                     );
+                    println!("Conform manifest: {}", conformed.manifest_path.display());
                 }
+                (None, None) if json => {
+                    println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
+                }
+                (None, None) => {
+                    println!("Timeline: {} ({:?})", timeline.title, timeline.format);
+                    println!("Frame rate: {}", timeline.frame_rate);
+                    println!("Events: {}", timeline.events.len());
+                    for event in &timeline.events {
+                        println!(
+                            "  #{}: {} [{}-{}] → [{}-{}]",
+                            event.event_number,
+                            event.reel_name,
+                            event.source_in,
+                            event.source_out,
+                            event.record_in,
+                            event.record_out,
+                        );
+                    }
+                }
+                _ => fail("conforming to an IMP needs both --media-dir and --output"),
             }
         }
 
@@ -4259,28 +4287,6 @@ fn run() {
                     std::process::exit(1);
                 } else {
                     println!("\nPASS (with warnings): compliant with {checked}");
-                }
-            }
-        }
-
-        Commands::EdlImport { input, json } => {
-            // Alias for conform
-            let timeline = match postkit::conform::parse_timeline(std::path::Path::new(&input)) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                }
-            };
-            if json {
-                println!("{}", serde_json::to_string_pretty(&timeline).unwrap());
-            } else {
-                println!("Timeline: {}", timeline.title);
-                println!("Format: {:?}", timeline.format);
-                println!("Frame rate: {}", timeline.frame_rate);
-                println!("Events: {}", timeline.events.len());
-                for (i, evt) in timeline.events.iter().enumerate() {
-                    println!("  [{i}] {} -> {}", evt.source_in, evt.source_out);
                 }
             }
         }

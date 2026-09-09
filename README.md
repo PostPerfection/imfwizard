@@ -80,13 +80,13 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Integration & Extensibility
 - **REST API server** (`serve`), HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
-- **EDL/FCP XML import**, parse CMX 3600 EDL and Final Cut Pro 7 XML timelines
+- **EDL/FCP XML import**, `conform` parses CMX 3600 EDL and Final Cut Pro 7 XML timelines
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
 - **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
 - **Watch folder** (`watch <dir> --output <dir> [--webhook-url <url>] [--interval <seconds>] [-- <create flags>]`), build an IMP from every video file or frame folder that lands in the watched directory, once it stops changing. The file stem is the title, a same-named `.wav` and `.ttml` beside it become the sound and subtitle, the job log is written beside the package, the source moves into `done/` or `failed/` and a webhook gets `imp.created` or `imp.failed`
-- **EDL conform**, import CMX3600/FCP7 edit decisions to build a CPL timeline
+- **EDL conform**, `conform --input <timeline> --media-dir <dir> --output <imp>` builds an IMP whose CPL follows a CMX3600 or FCP7 timeline, one picture and sound resource per event, trimmed to the event's source range
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
 - **Partial restore**, extract tracks from existing IMPs back to raw files (asdcp-unwrap)
 
@@ -647,15 +647,25 @@ imfwizard doctor
 imfwizard doctor --json
 ```
 
-### EDL import
+### EDL conform
 
 ```bash
-# Parse a CMX 3600 EDL
-imfwizard edl-import -i timeline.edl
+# Print what a CMX 3600 EDL or an FCP7 XML timeline says, writing nothing
+imfwizard conform -i timeline.edl
+imfwizard conform -i project.xml --json
 
-# Parse Final Cut Pro XML
-imfwizard edl-import -i project.fcpxml
+# Build an IMP that follows the timeline
+imfwizard conform -i timeline.edl --media-dir /path/to/rushes -o /path/to/imp
 ```
+
+Each event's reel name is matched against the file names under `--media-dir`,
+and its source in and out are read as frame counts from the start of that file.
+Every event becomes one picture track file encoded from its own source range and
+one sound track file cut from the same media, and the CPL plays them in record
+order through a single main image track and a single main audio track. Every
+event's media has to carry the same raster, and either all of them carry sound
+or none does. `conform_manifest.json` beside the package records the plan and
+the track file each event became.
 
 ### Frame comparison
 

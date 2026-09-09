@@ -1,5 +1,6 @@
 // IMF packaging
 pub mod assetmap;
+pub mod conform;
 pub mod cpl;
 pub mod edl_import;
 pub mod imp;

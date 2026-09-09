@@ -106,6 +106,19 @@ build it. Closing it needs the user's Apple developer certificate, its
 password, the team id and an app-specific password in the repo secrets, and
 the `APPLE_*` variables the Tauri action reads set from them.
 
+## Open: the sequenced CPL writer belongs in postkit (2026-09-09)
+
+`cpl::write_sequenced_cpl` builds its own sequence and resource XML and puts it
+into the SequenceList `postkit::packaging::ImfCpl::to_xml` leaves empty, because
+that writer gives every resource a virtual track of its own and a conformed
+composition needs one track playing several resources. The indentation of that
+empty SequenceList is the seam, and `a_resourceless_cpl_leaves_an_empty_sequence_list`
+is what notices if postkit moves it. Closing it means `ImfCpl` taking a list of
+sequences, each with its own ordered resources carrying EntryPoint and
+SourceDuration, and `write_sequenced_cpl` shrinking to a caller of that. It
+needs a postkit change, so it waits on a postkit release the submodule can be
+pinned to.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property

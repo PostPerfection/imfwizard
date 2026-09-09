@@ -47,6 +47,17 @@ pub fn write_cpl(
         });
     }
 
+    let cpl = imf_cpl(cpl_uuid, opts, comp, resources, descriptors);
+    std::fs::write(path, cpl.to_xml())
+}
+
+fn imf_cpl(
+    cpl_uuid: &str,
+    opts: &ImpOptions,
+    comp: &Composition,
+    resources: Vec<ImfResource>,
+    descriptors: Vec<ImfEssenceDescriptor>,
+) -> ImfCpl {
     // distinct audio languages, in first-seen order
     let mut langs: Vec<String> = Vec::new();
     for a in &comp.audio_files {
@@ -57,7 +68,7 @@ pub fn write_cpl(
         }
     }
 
-    let cpl = ImfCpl {
+    ImfCpl {
         uuid: cpl_uuid.to_string(),
         title: comp.title.clone(),
         content_kind: comp.content_kind.clone(),
@@ -74,9 +85,125 @@ pub fn write_cpl(
         // the picture is full range RGB 4:4:4, which the 2016 edition's image
         // characteristics allow for PQ but not for Rec.709, and COLOR.8 is 2020 only
         app2e_edition: App2eEdition::Edition2020,
-    };
+    }
+}
 
-    std::fs::write(path, cpl.to_xml())
+/// One resource of a virtual track: the track file it names and the window of
+/// that file the composition plays.
+pub struct SequenceResource {
+    pub track_file: MxfTrackFile,
+    pub entry_point: u64,
+    pub source_duration: u64,
+}
+
+// postkit gives each resource a virtual track of its own, which is what a
+// composition built from one picture and one sound file wants. A conformed
+// timeline plays several track files through one track instead, so its
+// sequences are written here and put into the SequenceList postkit leaves empty.
+const EMPTY_SEQUENCE_LIST: &str = "      <SequenceList>\n      </SequenceList>\n";
+
+/// Write a CPL whose main image and main audio tracks each play an ordered list
+/// of resources, one Segment holding both.
+pub fn write_sequenced_cpl(
+    path: &Path,
+    cpl_uuid: &str,
+    opts: &ImpOptions,
+    comp: &Composition,
+    picture: &[SequenceResource],
+    sound: &[SequenceResource],
+) -> std::io::Result<()> {
+    let edit_rate = asdcplib::Rational::new(opts.fps_num as i32, opts.fps_den as i32);
+    let namespace = App2eEdition::Edition2020.core_constraints_namespace();
+    let mut descriptors = Vec::new();
+    let mut sequences = String::new();
+    for (kind, element, resources) in [
+        (ImfTrackKind::Image, "MainImageSequence", picture),
+        (ImfTrackKind::Audio, "MainAudioSequence", sound),
+    ] {
+        if resources.is_empty() {
+            continue;
+        }
+        sequences.push_str(&format!(
+            "        <cc:{element} xmlns:cc=\"{namespace}\">\n"
+        ));
+        sequences.push_str(&format!(
+            "          <Id>urn:uuid:{}</Id>\n",
+            uuid::Uuid::new_v4()
+        ));
+        sequences.push_str(&format!(
+            "          <TrackId>urn:uuid:{}</TrackId>\n",
+            uuid::Uuid::new_v4()
+        ));
+        sequences.push_str("          <ResourceList>\n");
+        for resource in resources {
+            let source_encoding =
+                track_file_descriptor(&resource.track_file.path, kind, edit_rate)?.map(
+                    |descriptor| {
+                        let id = descriptor.id.clone();
+                        descriptors.push(descriptor);
+                        id
+                    },
+                );
+            sequences.push_str(&resource_xml(resource, source_encoding.as_deref(), opts));
+        }
+        sequences.push_str(&format!(
+            "          </ResourceList>\n        </cc:{element}>\n"
+        ));
+    }
+
+    let cpl = imf_cpl(cpl_uuid, opts, comp, Vec::new(), descriptors);
+    let xml = cpl.to_xml();
+    if !xml.contains(EMPTY_SEQUENCE_LIST) {
+        return Err(std::io::Error::other(
+            "postkit's CPL writer no longer leaves an empty SequenceList to fill",
+        ));
+    }
+    let xml = xml.replace(
+        EMPTY_SEQUENCE_LIST,
+        &format!("      <SequenceList>\n{sequences}      </SequenceList>\n"),
+    );
+    std::fs::write(path, xml)
+}
+
+fn resource_xml(
+    resource: &SequenceResource,
+    source_encoding: Option<&str>,
+    opts: &ImpOptions,
+) -> String {
+    let mut xml = String::new();
+    // BaseResourceType is abstract, so a track file resource names its type
+    xml.push_str("            <Resource xsi:type=\"TrackFileResourceType\">\n");
+    xml.push_str(&format!(
+        "              <Id>urn:uuid:{}</Id>\n",
+        uuid::Uuid::new_v4()
+    ));
+    xml.push_str(&format!(
+        "              <EditRate>{} {}</EditRate>\n",
+        opts.fps_num, opts.fps_den
+    ));
+    xml.push_str(&format!(
+        "              <IntrinsicDuration>{}</IntrinsicDuration>\n",
+        resource.track_file.duration
+    ));
+    xml.push_str(&format!(
+        "              <EntryPoint>{}</EntryPoint>\n",
+        resource.entry_point
+    ));
+    xml.push_str(&format!(
+        "              <SourceDuration>{}</SourceDuration>\n",
+        resource.source_duration
+    ));
+    if let Some(id) = source_encoding {
+        xml.push_str(&format!(
+            "              <SourceEncoding>urn:uuid:{id}</SourceEncoding>\n"
+        ));
+    }
+    xml.push_str(&format!(
+        "              <TrackFileId>urn:uuid:{}</TrackFileId>\n",
+        resource.track_file.uuid
+    ));
+    xml.push_str("            </Resource>\n");
+    xml
 }
 
 /// One EssenceDescriptorList entry, read back out of the track file it describes
@@ -266,6 +393,22 @@ mod tests {
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<IssueDate>"));
         assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/ns/2067-21/2020</cc:ApplicationIdentification>"));
+    }
+
+    /// `write_sequenced_cpl` puts its sequences into the SequenceList postkit
+    /// leaves empty, so a change to that writer's indentation has to be seen here
+    /// rather than in a conformed package.
+    #[test]
+    fn a_resourceless_cpl_leaves_an_empty_sequence_list() {
+        let xml = imf_cpl(
+            "cpl",
+            &ImpOptions::default(),
+            &Composition::default(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .to_xml();
+        assert!(xml.contains(EMPTY_SEQUENCE_LIST), "{xml}");
     }
 
     // Photon picks its constraints validator off this string, and only the 2020
