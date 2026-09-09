@@ -142,7 +142,7 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 | **macOS** (Apple Silicon) | `imfwizard-macos-aarch64.tar.gz` | `.dmg` |
 | **Windows** (x86_64) | `imfwizard-windows-x86_64.zip` | `.msi` |
 
-The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. The Windows zip ships `grokj2k.dll` beside the exe; on Linux and macOS the library comes from the Grok install. Extract and run.
+The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. Every archive ships that library: `grokj2k.dll` beside the exe in the Windows zip, `libgrokj2k` in `lib/` beside the binary in the Linux and macOS tarballs, where the binary's rpath finds it. Extract and run, no loader path to set.
 
 ### Install from source
 
