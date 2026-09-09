@@ -39,6 +39,7 @@ pub struct Preferences {
     #[serde(alias = "show_advanced_options")]
     pub show_advanced_options: bool,
     pub show_hints_before_build: bool,
+    pub verify_after_build: bool,
     pub gpu: bool,
     pub gpu_license: String,
     pub gpu_registration_url: String,
@@ -66,6 +67,7 @@ impl Default for Preferences {
             theme: "dark".to_string(),
             show_advanced_options: false,
             show_hints_before_build: true,
+            verify_after_build: true,
             gpu: false,
             gpu_license: String::new(),
             gpu_registration_url: String::new(),
@@ -151,6 +153,7 @@ mod tests {
         assert_eq!(preferences.colourspace, "Rec.709");
         assert_eq!(preferences.hdr, "SDR");
         assert!(preferences.show_hints_before_build);
+        assert!(preferences.verify_after_build);
         assert!(!preferences.gpu);
     }
 

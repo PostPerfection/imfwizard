@@ -124,7 +124,7 @@ const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
   bandwidth: 250, colourspace: "Rec.709",
   signingCert: "", signingKey: "", outputDir: "",
-  showHintsBeforeBuild: true, gpu: false,
+  showHintsBeforeBuild: true, verifyAfterBuild: true, gpu: false,
   gpuLicense: "", gpuRegistrationUrl: "",
   preferredEncoder: "grok", channelConfig: "5.1",
   loudnessTargetLufs: -24, namingTemplate: "", theme: "dark",
@@ -195,6 +195,8 @@ function loadSettings() {
   }
   const showHints = document.getElementById("set-show-hints");
   if (showHints) showHints.checked = prefs.showHintsBeforeBuild;
+  const verifyAfterBuild = document.getElementById("set-verify-after-build");
+  if (verifyAfterBuild) verifyAfterBuild.checked = prefs.verifyAfterBuild;
   const gpu = document.getElementById("set-gpu-enable");
   if (gpu) gpu.checked = prefs.gpu;
 }
@@ -239,6 +241,7 @@ document.getElementById("settings-form")?.addEventListener("submit", async (e) =
     signingKey: document.getElementById("set-signing-key")?.value,
     outputDir: document.getElementById("set-output-dir")?.value,
     showHintsBeforeBuild: !!document.getElementById("set-show-hints")?.checked,
+    verifyAfterBuild: !!document.getElementById("set-verify-after-build")?.checked,
     gpu,
     gpuLicense: document.getElementById("set-gpu-license")?.value.trim() || "",
     gpuRegistrationUrl: document.getElementById("set-gpu-registration-url")?.value.trim() || "",

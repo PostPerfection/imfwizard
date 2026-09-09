@@ -807,6 +807,43 @@ fn format_encode_breakdown(
     measured.then(|| format!("[TIMING] {stage} breakdown: {}", progress.phase_breakdown()))
 }
 
+// the same validation `imfwizard validate` runs, over the package the build just
+// wrote. None when the verify preference is off.
+fn verify_package(
+    imp_dir: &std::path::Path,
+    preferences: &imfwizard_core::preferences::Preferences,
+) -> Option<imfwizard_core::validate::ValidationResult> {
+    preferences
+        .verify_after_build
+        .then(|| imfwizard_core::validate::validate_imp_with_photon(imp_dir, None))
+}
+
+// the `[VERIFY]` lines the job log carries, findings and all
+fn verification_log(
+    validation: Option<&imfwizard_core::validate::ValidationResult>,
+) -> Vec<String> {
+    let Some(validation) = validation else {
+        return vec!["[VERIFY] Skipped, the verify preference is off".to_string()];
+    };
+    let mut lines = vec![format!(
+        "[VERIFY] {}",
+        if validation.valid { "PASSED" } else { "FAILED" }
+    )];
+    lines.extend(
+        validation
+            .errors
+            .iter()
+            .map(|error| format!("[VERIFY]   error: {error}")),
+    );
+    lines.extend(
+        validation
+            .warnings
+            .iter()
+            .map(|warning| format!("[VERIFY]   warning: {warning}")),
+    );
+    lines
+}
+
 fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     let job_started = Instant::now();
     let queue = app.state::<JobQueue>();
@@ -1287,10 +1324,41 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         &log_file,
         &format_stage_timing("package", package_started.elapsed()),
     );
+
+    emit_progress(
+        app,
+        job.id,
+        "verify",
+        "Validating IMP...",
+        0,
+        0,
+        0.0,
+        0.0,
+        99.5,
+    );
+    let verify_started = Instant::now();
+    let preferences = imfwizard_core::preferences::load_preferences().unwrap_or_default();
+    let validation = verify_package(output, &preferences);
+    for line in verification_log(validation.as_ref()) {
+        log_to(&log_file, &line);
+    }
+    if validation.is_some() {
+        log_to(
+            &log_file,
+            &format_stage_timing("verify", verify_started.elapsed()),
+        );
+    }
     log_to(
         &log_file,
         &format_stage_timing("total", job_started.elapsed()),
     );
+    if let Some(failed) = validation.filter(|found| !found.valid) {
+        return Err(format!(
+            "The IMP was written to {} but failed validation: {}",
+            output.display(),
+            failed.errors.join("; ")
+        ));
+    }
 
     log_to(
         &log_file,
@@ -1330,7 +1398,10 @@ fn emit_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_encode_breakdown, format_stage_timing, CompositionInput, SourceSettings};
+    use super::{
+        format_encode_breakdown, format_stage_timing, verification_log, verify_package,
+        CompositionInput, SourceSettings,
+    };
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -1567,6 +1638,89 @@ mod tests {
         assert_eq!(
             format_encode_breakdown("encode composition 1", &unmeasured),
             None
+        );
+    }
+
+    const J2K_BIT_DEPTH: u8 = 12;
+
+    fn created_package(name: &str) -> PathBuf {
+        let work = scratch_directory(name);
+        let codestreams = work.join("codestreams");
+        std::fs::create_dir_all(&codestreams).unwrap();
+        std::fs::write(
+            codestreams.join("0001.j2c"),
+            imfwizard_core::mxf_wrap::synthetic_j2k_codestream(
+                APP2E_RASTER.0,
+                APP2E_RASTER.1,
+                J2K_BIT_DEPTH,
+            ),
+        )
+        .unwrap();
+
+        let imp = work.join("imp");
+        let result = imfwizard_core::imp::create_imp(&imfwizard_core::imp::ImpOptions {
+            output_dir: imp.clone(),
+            compositions: vec![imfwizard_core::imp::Composition {
+                title: "Verified".to_string(),
+                content_kind: "feature".to_string(),
+                j2k_dir: Some(codestreams),
+                ..Default::default()
+            }],
+            fps_num: FPS,
+            fps_den: 1,
+            ..Default::default()
+        });
+        assert!(result.success, "create_imp failed: {}", result.error);
+        imp
+    }
+
+    fn preferences(verify_after_build: bool) -> imfwizard_core::preferences::Preferences {
+        imfwizard_core::preferences::Preferences {
+            verify_after_build,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_build_validates_the_package_unless_the_preference_is_off() {
+        let imp = created_package("verify-stage");
+
+        let ran = verify_package(&imp, &preferences(true)).expect("the verify stage ran");
+        assert!(ran.valid, "the built package did not validate: {ran:?}");
+        assert_eq!(verification_log(Some(&ran))[0], "[VERIFY] PASSED");
+
+        assert!(
+            verify_package(&imp, &preferences(false)).is_none(),
+            "the verify stage ran with the preference off"
+        );
+        assert_eq!(
+            verification_log(None),
+            vec!["[VERIFY] Skipped, the verify preference is off"]
+        );
+    }
+
+    #[test]
+    fn a_broken_package_puts_its_errors_in_the_job_log() {
+        let imp = created_package("verify-stage-broken");
+        let cpl = std::fs::read_dir(&imp)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("CPL_"))
+            })
+            .expect("the package holds a CPL");
+        std::fs::remove_file(&cpl).unwrap();
+
+        let broken = verify_package(&imp, &preferences(true)).expect("the verify stage ran");
+        assert!(!broken.valid);
+        let log = verification_log(Some(&broken));
+        assert_eq!(log[0], "[VERIFY] FAILED");
+        assert!(
+            log.iter()
+                .any(|line| line.starts_with("[VERIFY]   error: ")),
+            "the findings are missing from the log: {log:?}"
         );
     }
 }

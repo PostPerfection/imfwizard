@@ -433,6 +433,26 @@ const SMPTE_STRUCTURAL_STANDARD: &str = "SMPTE ST 2067 structure";
 // deliver writes here and version reads here, so the two cannot drift
 const DELIVERY_DB: &str = "deliveries.db";
 
+// what `validate` prints, so `create`'s verify pass reads the same. False when
+// the package has errors.
+fn print_validation(result: &imfwizard_core::validate::ValidationResult) -> bool {
+    if result.valid {
+        println!("IMP validation PASSED");
+        for warning in &result.warnings {
+            println!("  warning: {warning}");
+        }
+        return true;
+    }
+    eprintln!("IMP validation FAILED");
+    for error in &result.errors {
+        eprintln!("  error: {error}");
+    }
+    for warning in &result.warnings {
+        eprintln!("  warning: {warning}");
+    }
+    false
+}
+
 // the timestamp a delivery record carries
 fn rfc3339_now() -> String {
     time::OffsetDateTime::now_utc()
@@ -716,6 +736,10 @@ enum Commands {
         /// once the IMP is written. A finished package holds neither.
         #[arg(long = "keep-intermediates")]
         keep_intermediates: bool,
+
+        /// Skip the validation that otherwise runs over the finished package.
+        #[arg(long = "no-verify")]
+        no_verify: bool,
     },
 
     /// Encode image sequence to J2K codestreams
@@ -1897,6 +1921,7 @@ fn run() {
             audio_map,
             check,
             keep_intermediates,
+            no_verify,
         } => {
             let CompressionArguments {
                 profile,
@@ -2496,6 +2521,21 @@ fn run() {
                 }
                 println!("  PKL: {}", result.pkl_path.display());
                 println!("  ASSETMAP: {}", result.assetmap_path.display());
+
+                if no_verify {
+                    eprintln!(
+                        "--no-verify: the package was not validated, run `imfwizard validate {}` before delivering it",
+                        result.output_dir.display()
+                    );
+                } else {
+                    let validation = imfwizard_core::validate::validate_imp_with_photon(
+                        &result.output_dir,
+                        None,
+                    );
+                    if !print_validation(&validation) {
+                        std::process::exit(1);
+                    }
+                }
             } else {
                 eprintln!("Error: {}", result.error);
                 std::process::exit(1);
@@ -2909,27 +2949,12 @@ fn run() {
             photon,
             photon_jar,
         } => {
-            let mut failed = false;
             let photon_path = photon_jar.as_deref().map(std::path::Path::new);
             let result = imfwizard_core::validate::validate_imp_with_photon(
                 std::path::Path::new(&dir),
                 photon_path,
             );
-            if result.valid {
-                println!("IMP validation PASSED");
-                for w in &result.warnings {
-                    println!("  warning: {w}");
-                }
-            } else {
-                failed = true;
-                eprintln!("IMP validation FAILED");
-                for e in &result.errors {
-                    eprintln!("  error: {e}");
-                }
-                for w in &result.warnings {
-                    eprintln!("  warning: {w}");
-                }
-            }
+            let mut failed = !print_validation(&result);
 
             if xsd {
                 let sd = schema_dir.as_deref().map(std::path::Path::new);
