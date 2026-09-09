@@ -430,6 +430,16 @@ const SLATE_TEXT_HEIGHT_DIVISOR: u32 = 15;
 
 const SMPTE_STRUCTURAL_STANDARD: &str = "SMPTE ST 2067 structure";
 
+// deliver writes here and version reads here, so the two cannot drift
+const DELIVERY_DB: &str = "deliveries.db";
+
+// the timestamp a delivery record carries
+fn rfc3339_now() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
 // what `compliance --standard` takes: a delivery profile, or None for the
 // structural checks alone, since ST 2067 fixes no raster or bit depth
 const COMPLIANCE_STANDARDS: &[(&str, Option<postkit::profiles::Platform>)] = &[
@@ -1399,6 +1409,10 @@ enum Commands {
         /// Destination path or URI
         #[arg(short, long)]
         destination: String,
+
+        /// Tracker database file, the one `version list` reads
+        #[arg(long, default_value = DELIVERY_DB)]
+        db: String,
     },
 
     /// Retime video to target frame rate
@@ -1664,7 +1678,7 @@ enum VersionAction {
     /// Record a delivery
     Record {
         /// Tracker database file
-        #[arg(long, default_value = "deliveries.db")]
+        #[arg(long, default_value = DELIVERY_DB)]
         db: String,
 
         /// Package UUID
@@ -1695,7 +1709,7 @@ enum VersionAction {
     /// List recorded deliveries
     List {
         /// Tracker database file
-        #[arg(long, default_value = "deliveries.db")]
+        #[arg(long, default_value = DELIVERY_DB)]
         db: String,
 
         /// Filter by package UUID
@@ -1710,7 +1724,7 @@ enum VersionAction {
     /// Export delivery history (format by extension: .json or .csv)
     Export {
         /// Tracker database file
-        #[arg(long, default_value = "deliveries.db")]
+        #[arg(long, default_value = DELIVERY_DB)]
         db: String,
 
         /// Output file (.json or .csv)
@@ -3793,10 +3807,19 @@ fn run() {
             }
         }
 
-        Commands::Deliver { input, destination } => {
-            let mut tracker = postkit::version_tracker::VersionTracker::new();
-            let db_path = PathBuf::from(&input).join(".imfwizard_deliveries.db");
-            tracker.open(&db_path);
+        Commands::Deliver {
+            input,
+            destination,
+            db,
+        } => {
+            let Some(composition) =
+                imfwizard_core::timeline::list_cpls(std::path::Path::new(&input))
+                    .into_iter()
+                    .next()
+            else {
+                eprintln!("No CPL found in {input}, so there is no package to deliver");
+                std::process::exit(1);
+            };
 
             let delivery_method = if destination.starts_with("s3://") {
                 "s3"
@@ -3805,17 +3828,6 @@ fn run() {
             } else {
                 "rsync"
             };
-
-            let record = postkit::version_tracker::DeliveryRecord {
-                package_uuid: String::new(),
-                title: String::new(),
-                version: String::from("1"),
-                destination: destination.clone(),
-                delivery_method: delivery_method.to_string(),
-                timestamp: String::new(),
-                verified: false,
-            };
-            tracker.record(&record);
 
             let status = match delivery_method {
                 "s3" => {
@@ -3865,6 +3877,27 @@ fn run() {
                     std::process::exit(1);
                 }
             }
+
+            // a record of a transfer that never landed is worse than none
+            let mut tracker = postkit::version_tracker::VersionTracker::new();
+            if !tracker.open(std::path::Path::new(&db)) {
+                eprintln!("Delivered, but the tracker database {db} could not be opened");
+                std::process::exit(1);
+            }
+            let record = postkit::version_tracker::DeliveryRecord {
+                package_uuid: composition.id.clone(),
+                title: composition.title.clone(),
+                version: String::from("1"),
+                destination: destination.clone(),
+                delivery_method: delivery_method.to_string(),
+                timestamp: rfc3339_now(),
+                verified: false,
+            };
+            if !tracker.record(&record) {
+                eprintln!("Delivered, but the delivery could not be recorded in {db}");
+                std::process::exit(1);
+            }
+            println!("Recorded delivery of {} in {db}", record.package_uuid);
         }
 
         Commands::Retime { input, output, fps } => {
@@ -4619,9 +4652,7 @@ fn run() {
                     verified,
                 } => {
                     let tracker = open_tracker(&db);
-                    let timestamp = time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap_or_default();
+                    let timestamp = rfc3339_now();
                     let record = DeliveryRecord {
                         package_uuid,
                         title,
