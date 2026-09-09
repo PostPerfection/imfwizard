@@ -1,3 +1,6 @@
+// the transfers run rsync
+#![cfg(unix)]
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::{Path, PathBuf};
@@ -78,7 +81,6 @@ fn digest(path: &Path) -> String {
 }
 
 // rsync is a unix transport; Windows has no rsync and would deliver another way.
-#[cfg(unix)]
 #[test]
 fn an_rsync_delivery_copies_every_file_and_lands_in_the_tracker() {
     let work = TempDir::new().unwrap();
@@ -135,7 +137,6 @@ fn an_rsync_delivery_copies_every_file_and_lands_in_the_tracker() {
         );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_failed_transfer_records_nothing() {
     let work = TempDir::new().unwrap();
