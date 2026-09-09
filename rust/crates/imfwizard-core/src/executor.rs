@@ -68,10 +68,12 @@ pub fn execute_job(job: &Job) -> Result<(), String> {
         }
         // These need parameters the queue cannot carry; fail loud instead of
         // pretending to run them.
-        JobType::Qc | JobType::Copy | JobType::Kdm => Err(format!(
+        JobType::Qc | JobType::Copy => Err(format!(
             "job type {:?} is not runnable via the queue; use the dedicated CLI command",
             job.job_type
         )),
+        // imfwizard encrypts no IMP, so it writes no KDM at all
+        JobType::Kdm => Err("job type Kdm is not runnable: imfwizard writes no KDM".to_string()),
     }
 }
 

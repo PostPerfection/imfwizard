@@ -95,7 +95,6 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
-- **KDM generation**, generate SMPTE 430-1 Key Delivery Messages for encrypted DCP
 - **Dolby Vision Profile 8.1**, HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
 - **Prometheus metrics**, `/metrics` endpoint on REST API exposing job-state gauges
 - **Shell tab completion**, bash, zsh, and fish completion scripts (`imfwizard completion bash`)
@@ -626,7 +625,7 @@ curl -H "X-Api-Key: my-secret" http://localhost:9090/api/v1/jobs/1
 A `create` job takes a directory of JPEG 2000 codestreams as its `input`, a
 `validate` job takes an IMP directory, and `encode` and `transcode` take the
 file or frame directory their CLI commands take. A job type that needs
-parameters the queue cannot carry (`qc`, `copy`, `kdm`) has no endpoint: run its
+parameters the queue cannot carry (`qc`, `copy`) has no endpoint: run its
 CLI command.
 
 `--api-key` is required on every endpoint but `/api/v1/health` and `/health`,
