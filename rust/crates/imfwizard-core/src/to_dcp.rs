@@ -926,8 +926,8 @@ mod tests {
                 Some(asdcplib::jp2k::TRANSFER_CHARACTERISTIC_BT709),
                 Some(primaries),
             );
-            let refusal = check_rec709_source_colour(&mxf)
-                .expect_err("wide gamut picture has to be refused");
+            let refusal =
+                check_rec709_source_colour(&mxf).expect_err("wide gamut picture has to be refused");
             assert!(
                 refusal.contains(named) && refusal.contains("gamut conversion"),
                 "{named} was refused as {refusal:?}"

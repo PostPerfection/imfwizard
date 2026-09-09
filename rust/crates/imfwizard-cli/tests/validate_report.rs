@@ -312,8 +312,7 @@ fn figure_after(line: &str, label: &str) -> f64 {
     let (_, rest) = line
         .split_once(label)
         .unwrap_or_else(|| panic!("no {label:?} in {line:?}"));
-    rest.trim_start()
-        .split_whitespace()
+    rest.split_whitespace()
         .next()
         .expect("a figure")
         .parse()

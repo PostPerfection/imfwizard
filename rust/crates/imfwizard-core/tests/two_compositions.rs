@@ -114,7 +114,12 @@ fn two_compositions_share_one_pkl_and_one_assetmap() {
     let packed = values_of(&pkl, "Id");
     let cpl_ids: Vec<String> = cpls
         .iter()
-        .map(|cpl| values_of(cpl, "Id").first().expect("the CPL's own Id").clone())
+        .map(|cpl| {
+            values_of(cpl, "Id")
+                .first()
+                .expect("the CPL's own Id")
+                .clone()
+        })
         .collect();
     assert_ne!(cpl_ids[0], cpl_ids[1], "the two CPLs share a UUID");
 

@@ -177,5 +177,7 @@ fn an_edit_rate_outside_the_dci_set_is_refused_naming_both() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("23/1"))
-        .stderr(predicate::str::contains("24, 25, 30, 48, 50, 60, 96, 100, 120"));
+        .stderr(predicate::str::contains(
+            "24, 25, 30, 48, 50, 60, 96, 100, 120",
+        ));
 }

@@ -123,7 +123,11 @@ fn ffmpeg(arguments: &[&str]) {
         .args(arguments)
         .output()
         .expect("ffmpeg");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 // tiff frames, the one image format imfwizard reads without ffmpeg
@@ -168,7 +172,11 @@ fn video_stream_entry(path: &Path, entry: &str) -> String {
         .arg(path)
         .output()
         .expect("ffprobe");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -181,7 +189,11 @@ fn counted_frames(path: &Path) -> u32 {
         .arg(path)
         .output()
         .expect("ffprobe");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
 }
 

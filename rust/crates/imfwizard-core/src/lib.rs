@@ -65,6 +65,7 @@ pub mod report;
 pub mod supplement;
 pub use postkit::timecode;
 pub mod to_dcp;
+pub mod trailer;
 pub mod validate;
 pub mod xsd_validate;
 

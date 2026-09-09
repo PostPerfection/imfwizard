@@ -182,9 +182,7 @@ fn the_role_labels_are_on_the_sound_track_file() {
         reader.close().unwrap();
 
         assert!(
-            labels
-                .iter()
-                .any(|label| label.tag_symbol == channel),
+            labels.iter().any(|label| label.tag_symbol == channel),
             "--audio-role {role}: the track file carries no {channel}, got {:?}",
             labels
                 .iter()

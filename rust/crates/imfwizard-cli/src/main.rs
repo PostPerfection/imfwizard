@@ -1265,9 +1265,18 @@ enum Commands {
         #[arg(long)]
         title: String,
 
-        /// Rating (e.g. PG-13, R)
-        #[arg(long)]
+        /// Rating (e.g. PG-13, R). Left out, the rating system's lowest rating
+        /// is drawn
+        #[arg(long, default_value = "")]
         rating: String,
+
+        /// Rating system the card follows: mpaa, bbfc or fsk
+        #[arg(long = "rating-system", default_value = "mpaa")]
+        rating_system: String,
+
+        /// Band colour behind the card: green, red or yellow
+        #[arg(long, default_value = "green")]
+        band: String,
     },
 
     /// Preview IMP via mpv
@@ -3505,6 +3514,8 @@ fn run() {
             output,
             title,
             rating,
+            rating_system,
+            band,
         } => {
             let opts = postkit::trailer::TrailerOptions {
                 content_dir: PathBuf::from(&content),
@@ -3512,6 +3523,9 @@ fn run() {
                 output_dir: PathBuf::from(&output),
                 title,
                 rating,
+                rating_system: imfwizard_core::trailer::rating_system_from_name(&rating_system)
+                    .unwrap_or_else(|e| fail(e)),
+                band: imfwizard_core::trailer::band_from_name(&band).unwrap_or_else(|e| fail(e)),
                 ..Default::default()
             };
             let result = postkit::trailer::package_trailer(&opts);

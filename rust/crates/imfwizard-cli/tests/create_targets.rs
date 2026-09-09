@@ -286,14 +286,20 @@ fn a_higher_psnr_target_leaves_larger_codestreams() {
     let dir = TempDir::new().unwrap();
     let clip = smooth_clip(dir.path());
 
-    let coarse = build(dir.path(), &clip, "psnr30", RASTER_2K, &[
-        "--quality-psnr",
-        "30",
-    ]);
-    let fine = build(dir.path(), &clip, "psnr60", RASTER_2K, &[
-        "--quality-psnr",
-        "60",
-    ]);
+    let coarse = build(
+        dir.path(),
+        &clip,
+        "psnr30",
+        RASTER_2K,
+        &["--quality-psnr", "30"],
+    );
+    let fine = build(
+        dir.path(),
+        &clip,
+        "psnr60",
+        RASTER_2K,
+        &["--quality-psnr", "60"],
+    );
 
     let coarse_total: u64 = codestream_sizes(&coarse).iter().sum();
     let fine_total: u64 = codestream_sizes(&fine).iter().sum();

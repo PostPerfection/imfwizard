@@ -117,18 +117,16 @@ fn start_watcher_with(
     create_arguments: &[&str],
 ) -> Watcher {
     let mut command = Command::new(env!("CARGO_BIN_EXE_imfwizard"));
-    command
-        .env("XDG_CONFIG_HOME", config_home)
-        .args([
-            "watch",
-            watch_dir.to_str().unwrap(),
-            "--output",
-            output_dir.to_str().unwrap(),
-            "--interval",
-            interval_seconds,
-            "--webhook-url",
-            &webhooks.url,
-        ]);
+    command.env("XDG_CONFIG_HOME", config_home).args([
+        "watch",
+        watch_dir.to_str().unwrap(),
+        "--output",
+        output_dir.to_str().unwrap(),
+        "--interval",
+        interval_seconds,
+        "--webhook-url",
+        &webhooks.url,
+    ]);
     if !create_arguments.is_empty() {
         command.arg("--").args(create_arguments);
     }

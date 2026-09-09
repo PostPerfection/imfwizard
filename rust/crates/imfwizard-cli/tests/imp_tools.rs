@@ -507,7 +507,12 @@ fn the_streaming_platforms_are_checked_against_their_own_preset() {
 #[test]
 fn a_package_carrying_the_presets_layout_passes_its_channel_check() {
     let directory = TempDir::new().unwrap();
-    let clip = testsrc_clip(directory.path(), "surround.mkv", SHORT_FRAMES, FRAMES_PER_SECOND);
+    let clip = testsrc_clip(
+        directory.path(),
+        "surround.mkv",
+        SHORT_FRAMES,
+        FRAMES_PER_SECOND,
+    );
     let wav = directory.path().join("surround.wav");
     ffmpeg(&[
         "-f",
