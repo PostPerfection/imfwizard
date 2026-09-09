@@ -205,6 +205,44 @@ struct CompressionArguments {
     quality_psnr: Option<f64>,
 }
 
+/// What `create` cuts and converts before the encode. Boxed for the same reason
+/// `PictureArguments` is.
+#[derive(clap::Args)]
+struct SourceEditArguments {
+    /// Shift the sound against the picture in milliseconds; positive is
+    /// later. The running time never changes: the shift is padded at one end
+    /// and truncated at the other.
+    #[arg(long = "audio-delay")]
+    audio_delay: Option<i64>,
+
+    /// Colour space the picture source carries. An App 2E picture ships the
+    /// Rec.709 RGB its essence descriptor declares: rec709 (the default) is
+    /// compressed untransformed, and p3d65, rec2020 and logc are converted
+    /// to Rec.709 RGB during the encode. xyz, p3, aces and acescg are
+    /// refused by name.
+    #[arg(long = "source-colourspace")]
+    source_colourspace: Option<String>,
+
+    /// 3D LUT (.cube) applied during decode, whose output must be Rec.709 RGB.
+    #[arg(long = "source-lut", conflicts_with = "source_colourspace")]
+    source_lut: Option<PathBuf>,
+
+    /// Remove this much from the head of the source, as frames (48f) or
+    /// seconds (2s). Picture, sound and timed text all move together.
+    #[arg(long = "trim-start")]
+    trim_start: Option<String>,
+
+    /// Remove this much from the tail of the source, spelled as --trim-start.
+    #[arg(long = "trim-end")]
+    trim_end: Option<String>,
+
+    /// Hold a single image for this long, as frames (48f) or seconds (2s).
+    /// Requires --video to name one image file rather than a video or a
+    /// directory of frames.
+    #[arg(long = "still-length")]
+    still_length: Option<String>,
+}
+
 /// What `create` does to the source picture before it is compressed. Boxed
 /// where it is flattened, so `create` does not dwarf every other subcommand in
 /// the parsed command enum.
@@ -666,38 +704,8 @@ enum Commands {
         #[arg(long = "max-fall")]
         max_fall: Option<u16>,
 
-        /// Shift the sound against the picture in milliseconds; positive is
-        /// later. The running time never changes: the shift is padded at one end
-        /// and truncated at the other.
-        #[arg(long = "audio-delay")]
-        audio_delay: Option<i64>,
-
-        /// Colour space the picture source carries. An App 2E picture ships the
-        /// Rec.709 RGB its essence descriptor declares: rec709 (the default) is
-        /// compressed untransformed, and p3d65, rec2020 and logc are converted
-        /// to Rec.709 RGB during the encode. xyz, p3, aces and acescg are
-        /// refused by name.
-        #[arg(long = "source-colourspace")]
-        source_colourspace: Option<String>,
-
-        /// 3D LUT (.cube) applied during decode, whose output must be Rec.709 RGB.
-        #[arg(long = "source-lut", conflicts_with = "source_colourspace")]
-        source_lut: Option<PathBuf>,
-
-        /// Remove this much from the head of the source, as frames (48f) or
-        /// seconds (2s). Picture, sound and timed text all move together.
-        #[arg(long = "trim-start")]
-        trim_start: Option<String>,
-
-        /// Remove this much from the tail of the source, spelled as --trim-start.
-        #[arg(long = "trim-end")]
-        trim_end: Option<String>,
-
-        /// Hold a single image for this long, as frames (48f) or seconds (2s).
-        /// Requires --video to name one image file rather than a video or a
-        /// directory of frames.
-        #[arg(long = "still-length")]
-        still_length: Option<String>,
+        #[command(flatten)]
+        source_edits: Box<SourceEditArguments>,
 
         #[command(flatten)]
         picture: Box<PictureArguments>,
@@ -1820,12 +1828,7 @@ fn run() {
             mastering_display,
             max_cll,
             max_fall,
-            audio_delay,
-            source_colourspace,
-            source_lut,
-            trim_start,
-            trim_end,
-            still_length,
+            source_edits,
             picture: picture_arguments,
             audio_map,
             check,
@@ -1837,6 +1840,14 @@ fn run() {
                 bitrate,
                 quality_psnr,
             } = *compression;
+            let SourceEditArguments {
+                audio_delay,
+                source_colourspace,
+                source_lut,
+                trim_start,
+                trim_end,
+                still_length,
+            } = *source_edits;
             // the HDR detail flags only make sense with an HDR preset
             for (name, given) in [
                 ("--mastering-display", mastering_display.is_some()),
