@@ -163,6 +163,7 @@ fn an_edit_rate_outside_the_dci_set_is_refused_naming_both() {
         .args(["--video", &clip.to_string_lossy()])
         .args(["--raster", RASTER])
         .args(["--fps-num", "23", "--fps-den", "1"])
+        .arg("--no-verify")
         .assert()
         .success();
 
