@@ -2983,26 +2983,16 @@ fn run() {
             subtitles,
             output,
         } => {
-            let status = std::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-i")
-                .arg(&input)
-                .arg("-vf")
-                .arg(format!("subtitles={}", subtitles))
-                .arg("-c:a")
-                .arg("copy")
-                .arg(&output)
-                .status();
-            match status {
-                Ok(s) if s.success() => {
-                    println!("Burned subtitles into: {output}");
-                }
-                Ok(s) => {
-                    eprintln!("Error: ffmpeg exited with code {}", s.code().unwrap_or(-1));
-                    std::process::exit(1);
-                }
+            let opts = postkit::burnin::BurninOptions {
+                input: PathBuf::from(&input),
+                output: PathBuf::from(&output),
+                subtitle_file: Some(PathBuf::from(&subtitles)),
+                ..Default::default()
+            };
+            match postkit::burnin::burnin(&opts) {
+                Ok(()) => println!("Burned subtitles into: {output}"),
                 Err(e) => {
-                    eprintln!("Error: Failed to run ffmpeg: {e}");
+                    eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
             }
