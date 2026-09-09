@@ -68,6 +68,36 @@ checking them. `cpl.rs` asserts their name, namespace and value directly to
 cover the gap. What closes it: a 2020 edition App 2E XSD among the fixtures, and
 the `st2067_3_complaint` driver importing it under that namespace.
 
+## Open: the ctlrender ACES path has never run (2026-09-09)
+
+README line 65 sells `aces` through ctlrender with an ffmpeg fallback. The
+ffmpeg fallback is tested (`aces_falls_back_to_ffmpeg_when_ctlrender_is_missing`)
+and is a colorimetric AP0 to Rec.709 conversion with no RRT. ctlrender is
+installed on no CI runner and AMPAS CTL is not packaged for any of the three
+runner OSes, so the IDT, RRT, ODT path in `aces.rs` has no test and no recorded
+run. Closing it means building CTL on each runner (or vendoring a binary) and a
+test that reads the rendered frame back.
+
+## Open: `compliance -s dolby` names a profile postkit does not have (2026-09-09)
+
+README line 57 lists Dolby among the platform profiles. postkit's `profiles.rs`
+carries Netflix, Amazon, Disney, Apple, HBO, broadcast, archival and DCI, and
+nothing for Dolby, so the CLI refuses `-s dolby` by name (an unknown name used
+to fall through to Netflix). Closing it means a Dolby delivery profile with
+sourced raster, bit depth and audio numbers, and a row in
+`compliance_checks_the_platform_the_standard_names`.
+
+## Open: Dolby Vision MEL/FEL mapping and profile 4 have no input (2026-09-09)
+
+README line 98 names MEL/FEL mapping and profile 4 to 8.1 conversion. What runs
+and is tested is profile 5 retargeted to 8.1 and 8.4
+(`dv_convert_retargets_profile_5`). MEL and FEL only exist in a profile 7 RPU
+and profile 4 in a profile 4 one; postkit's `write_dolby_vision_fixture` makes
+5, 8.1 and 8.4 and dovi_tool generates neither, so `DvMode::Mode1` (ToMel) and
+`Mode4` are unreachable from `dv-convert --target-profile`, which takes 8.1 and
+8.4 only. Closing it means a profile 7 and a profile 4 fixture source, then the
+two modes on the flag and a read back through dovi_tool.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
