@@ -192,3 +192,41 @@ fn photon_names_the_cpl_it_rejects() {
         .success()
         .stdout(predicate::str::contains("Photon: PASS"));
 }
+
+// what a schema error out of dcpdoctor's Photon pass says, as against the
+// "[Photon] deep IMF checks skipped" line a missing Photon produces
+const PHOTON_SCHEMA_FINDING: &str = "[Photon] Line Number";
+
+fn photon_jars() -> String {
+    std::env::var("PHOTON_JAR").expect("PHOTON_JAR names the Photon jars fetch_photon.sh wrote")
+}
+
+// dcpdoctor searches its own cache when nothing names Photon, so an empty cache
+// leaves the wizard's location as the only way its IMF pass can find the jars
+#[test]
+fn the_imf_pass_runs_photon_from_the_wizards_own_location() {
+    let work = TempDir::new().unwrap();
+    let imp = copy_of_the_good_imp(work.path());
+    edit_cpl(&imp, "<EssenceDescriptor>", "<EssenceDescriptorZZ>");
+    edit_cpl(&imp, "</EssenceDescriptor>", "</EssenceDescriptorZZ>");
+    let empty_cache = TempDir::new().unwrap();
+    let jars = photon_jars();
+
+    cmd()
+        .env_remove("PHOTON_DIR")
+        .env("PHOTON_JAR", &jars)
+        .env("XDG_CACHE_HOME", empty_cache.path())
+        .args(["validate", &imp.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(PHOTON_SCHEMA_FINDING));
+
+    cmd()
+        .env_remove("PHOTON_DIR")
+        .env_remove("PHOTON_JAR")
+        .env("XDG_CACHE_HOME", empty_cache.path())
+        .args(["validate", "--photon-jar", &jars, &imp.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(PHOTON_SCHEMA_FINDING));
+}

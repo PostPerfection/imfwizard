@@ -17,7 +17,16 @@ pub struct ValidationResult {
 /// Uses dcpdoctor-core for ASSETMAP/PKL/hash verification (shared structure
 /// between DCP and IMP), plus IMF-specific checks.
 pub fn validate_imp(imp_dir: &Path) -> ValidationResult {
-    validate_imp_with_options(imp_dir, dcpdoctor_core::VerifyOptions::standard())
+    validate_imp_with_photon(imp_dir, None)
+}
+
+// dcpdoctor reads PHOTON_DIR and its own cache, neither of which is where the wizard puts Photon
+pub fn validate_imp_with_photon(imp_dir: &Path, photon: Option<&Path>) -> ValidationResult {
+    let options = dcpdoctor_core::VerifyOptions {
+        photon: crate::photon::photon_path(photon),
+        ..dcpdoctor_core::VerifyOptions::standard()
+    };
+    validate_imp_with_options(imp_dir, options)
 }
 
 /// Validate an IMP for the QC report, which reads the picture essence itself.
@@ -28,6 +37,7 @@ pub fn validate_imp_for_report(imp_dir: &Path) -> ValidationResult {
     let options = dcpdoctor_core::VerifyOptions {
         check_picture_details: true,
         scan_every_frame: true,
+        photon: crate::photon::photon_path(None),
         ..dcpdoctor_core::VerifyOptions::standard()
     };
     validate_imp_with_options(imp_dir, options)

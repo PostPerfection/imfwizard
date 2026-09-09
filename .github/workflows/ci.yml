@@ -153,9 +153,6 @@ jobs:
             jars=$(cygpath -w "$jars")
           fi
           echo "PHOTON_JAR=$jars" >> "$GITHUB_ENV"
-          # dcpdoctor-core reads PHOTON_DIR for its own Photon pass during
-          # `validate`. Without it, it clones and gradle-builds Photon itself.
-          echo "PHOTON_DIR=$jars" >> "$GITHUB_ENV"
 
       - name: Install dovi_tool and hdr10plus_tool (Linux)
         if: runner.os == 'Linux'

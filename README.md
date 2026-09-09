@@ -527,8 +527,6 @@ imfwizard validate /path/to/imp/ --xsd
 scripts/fetch_photon.sh ~/.cache/imfwizard/photon
 imfwizard validate /path/to/imp/ --photon --photon-jar ~/.cache/imfwizard/photon
 # or set PHOTON_JAR=~/.cache/imfwizard/photon
-# Set PHOTON_DIR to the same directory as well: plain `validate` runs a second
-# Photon pass via dcpdoctor, which otherwise clones and gradle-builds Photon.
 ```
 
 ### Display IMP info

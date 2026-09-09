@@ -128,10 +128,14 @@ fn find_java() -> Option<PathBuf> {
 /// Java expands a trailing `*` classpath entry to every jar in that directory.
 const CLASSPATH_WILDCARD: &str = "*";
 
-fn find_classpath(explicit: Option<&Path>) -> Option<String> {
-    let candidate = explicit
+pub fn photon_path(explicit: Option<&Path>) -> Option<PathBuf> {
+    explicit
         .map(|p| p.to_path_buf())
-        .or_else(|| std::env::var("PHOTON_JAR").ok().map(PathBuf::from))?;
+        .or_else(|| std::env::var_os("PHOTON_JAR").map(PathBuf::from))
+}
+
+fn find_classpath(explicit: Option<&Path>) -> Option<String> {
+    let candidate = photon_path(explicit)?;
     if candidate.is_dir() {
         return Some(candidate.join(CLASSPATH_WILDCARD).to_string_lossy().into());
     }

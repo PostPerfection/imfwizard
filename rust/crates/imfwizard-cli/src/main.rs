@@ -2848,7 +2848,11 @@ fn run() {
             photon_jar,
         } => {
             let mut failed = false;
-            let result = imfwizard_core::validate::validate_imp(std::path::Path::new(&dir));
+            let photon_path = photon_jar.as_deref().map(std::path::Path::new);
+            let result = imfwizard_core::validate::validate_imp_with_photon(
+                std::path::Path::new(&dir),
+                photon_path,
+            );
             if result.valid {
                 println!("IMP validation PASSED");
                 for w in &result.warnings {
@@ -2892,8 +2896,7 @@ fn run() {
             }
 
             if photon {
-                let jar = photon_jar.as_deref().map(std::path::Path::new);
-                match imfwizard_core::photon::run_photon(std::path::Path::new(&dir), jar) {
+                match imfwizard_core::photon::run_photon(std::path::Path::new(&dir), photon_path) {
                     Ok(p) => {
                         if p.errors.is_empty() && p.warnings.is_empty() {
                             println!("  Photon: PASS");

@@ -11,8 +11,7 @@
 # The aws-java-nio-spi-for-s3 runtime dependency is left out: Photon only reaches
 # it for s3:// inputs and it pulls in the whole AWS SDK.
 #
-# Point both PHOTON_JAR and PHOTON_DIR at the result: imfwizard's own --photon
-# path reads the first, dcpdoctor-core's Photon pass reads the second.
+# Point PHOTON_JAR at the result: imfwizard hands it to dcpdoctor's IMF pass too.
 set -euo pipefail
 
 destination="${1:-${PHOTON_DIR:-$HOME/.cache/imfwizard/photon}}"
