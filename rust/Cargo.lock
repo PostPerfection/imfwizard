@@ -1143,6 +1143,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "ctrlc",
+ "dolby_vision",
  "hound",
  "imfwizard-core",
  "postkit",

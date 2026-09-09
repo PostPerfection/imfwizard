@@ -340,6 +340,280 @@ fn photon_rejects_a_colour_the_cpl_invents() {
     );
 }
 
+// the x265 master-display string of the ST 2086 block, and the values it holds:
+// G,B,R and the white point in 0.00002 units, the luminances in 0.0001 cd/m²
+const MASTERING_DISPLAY: &str =
+    "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)";
+// the x265 string lists green, blue, red and ST 2086 stores red, green, blue
+const MASTERING_DISPLAY_PRIMARIES: [[u16; 2]; 3] = [[34000, 16000], [13250, 34500], [7500, 3000]];
+const MASTERING_DISPLAY_WHITE_POINT: [u16; 2] = [15635, 16450];
+const MASTERING_DISPLAY_MAX_LUMINANCE: u32 = 40_000_000;
+const MASTERING_DISPLAY_MIN_LUMINANCE: u32 = 50;
+const MEASURED_MAX_CLL: u16 = 993;
+const MEASURED_MAX_FALL: u16 = 362;
+
+/// ST 2086 goes on the MXF RGBA descriptor, and ST 2067-21 clause 7.5 puts the
+/// content light levels in the CPL instead. Both are read back off what was
+/// written: the descriptor out of the track file, the light levels out of the CPL.
+#[test]
+fn the_mastering_display_lands_on_the_descriptor_and_the_light_levels_in_the_cpl() {
+    let dir = TempDir::new().unwrap();
+    let clip = tagged_clip(dir.path(), PQ_TRANSFER_TAG);
+
+    let imp = dir.path().join("imp_st2086");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &imp.to_string_lossy(),
+            "-t",
+            "Mastered",
+            "--video",
+            &clip.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--hdr",
+            "pq-bt2020",
+            "--mastering-display",
+            MASTERING_DISPLAY,
+            "--max-cll",
+            &MEASURED_MAX_CLL.to_string(),
+            "--max-fall",
+            &MEASURED_MAX_FALL.to_string(),
+            "--fps-num",
+            &FPS.to_string(),
+            "--fps-den",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let picture = file_starting_with(&imp, imfwizard_core::imp::PICTURE_PREFIX);
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&picture.to_string_lossy())
+        .expect("the picture MXF opens");
+    let hdr = reader.hdr_metadata().expect("the RGBA descriptor's colour");
+    reader.close().unwrap();
+
+    assert_eq!(
+        hdr.mastering_display_primaries,
+        Some(MASTERING_DISPLAY_PRIMARIES)
+    );
+    assert_eq!(
+        hdr.mastering_display_white_point,
+        Some(MASTERING_DISPLAY_WHITE_POINT)
+    );
+    assert_eq!(
+        hdr.mastering_display_max_luminance,
+        Some(MASTERING_DISPLAY_MAX_LUMINANCE)
+    );
+    assert_eq!(
+        hdr.mastering_display_min_luminance,
+        Some(MASTERING_DISPLAY_MIN_LUMINANCE)
+    );
+
+    let cpl = std::fs::read_to_string(file_starting_with(&imp, "CPL_")).unwrap();
+    assert_eq!(
+        extension_property(&cpl, "MaxCLL").as_deref(),
+        Some(MEASURED_MAX_CLL.to_string().as_str())
+    );
+    assert_eq!(
+        extension_property(&cpl, "MaxFALL").as_deref(),
+        Some(MEASURED_MAX_FALL.to_string().as_str())
+    );
+    // the descriptor in the CPL is the track file's own, so it repeats the block
+    assert!(
+        cpl.contains(&MASTERING_DISPLAY_MAX_LUMINANCE.to_string()),
+        "the CPL EssenceDescriptor carries no mastering display maximum: {cpl}"
+    );
+
+    assert_photon_finds_only(&imp, "pq-bt2020", &[NO_SOUND_TRACK]);
+}
+
+// the light levels the fixture RPU carries in its level 6 block
+const RPU_MAX_CONTENT_LIGHT_LEVEL: u16 = 993;
+const RPU_MAX_FRAME_AVERAGE_LIGHT_LEVEL: u16 = 362;
+const RPU_MASTERING_DISPLAY_MAX_NITS: u16 = 1000;
+const RPU_MASTERING_DISPLAY_MIN_STEPS: u16 = 1;
+
+/// A profile 8.1 master: an HEVC base layer with an RPU after every slice,
+/// remuxed to MP4 so `create --video` takes it.
+fn dolby_vision_master(dir: &Path) -> PathBuf {
+    let annex_b = postkit::dolby_vision::write_dolby_vision_fixture(
+        dir,
+        "dv81.hevc",
+        postkit::dolby_vision::DolbyVisionFixtureProfile::Profile81,
+        Some(
+            dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlockLevel6 {
+                max_display_mastering_luminance: RPU_MASTERING_DISPLAY_MAX_NITS,
+                min_display_mastering_luminance: RPU_MASTERING_DISPLAY_MIN_STEPS,
+                max_content_light_level: RPU_MAX_CONTENT_LIGHT_LEVEL,
+                max_frame_average_light_level: RPU_MAX_FRAME_AVERAGE_LIGHT_LEVEL,
+            },
+        ),
+        None,
+    )
+    .expect("the Dolby Vision fixture");
+
+    let mp4 = dir.join("dv81.mp4");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-i"])
+        .arg(&annex_b)
+        .args(["-c", "copy"])
+        .arg(&mp4)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    mp4
+}
+
+/// The text of an App 2E ExtensionProperty in a CPL, by its local name. The
+/// element carries the 2067-21 namespace declaration, so the open tag is not
+/// just the name.
+fn extension_property(cpl: &str, name: &str) -> Option<String> {
+    let start = cpl.find(&format!("<app2e:{name}"))?;
+    let (_, after_tag) = cpl[start..].split_once('>')?;
+    let (value, _) = after_tag.split_once('<')?;
+    Some(value.trim().to_string())
+}
+
+/// ST 2067-21 clause 7.5 carries MaxCLL and MaxFALL in the CPL, and a Dolby
+/// Vision 8.1 master already measured them into its RPU, so `--hdr` alone is
+/// enough: the level 6 block reaches the CPL without either flag being passed.
+#[test]
+fn a_dolby_vision_rpu_fills_the_light_levels_no_flag_passed() {
+    let dir = TempDir::new().unwrap();
+    let master = dolby_vision_master(dir.path());
+
+    let imp = dir.path().join("imp_dv");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &imp.to_string_lossy(),
+            "-t",
+            "Dolby Vision 8.1",
+            "--video",
+            &master.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--hdr",
+            "pq-bt2020",
+            "--fps-num",
+            "25",
+            "--fps-den",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let cpl = std::fs::read_to_string(file_starting_with(&imp, "CPL_")).unwrap();
+    assert_eq!(
+        extension_property(&cpl, "MaxCLL").as_deref(),
+        Some(RPU_MAX_CONTENT_LIGHT_LEVEL.to_string().as_str()),
+        "the RPU's MaxCLL did not reach the CPL: {cpl}"
+    );
+    assert_eq!(
+        extension_property(&cpl, "MaxFALL").as_deref(),
+        Some(RPU_MAX_FRAME_AVERAGE_LIGHT_LEVEL.to_string().as_str()),
+        "the RPU's MaxFALL did not reach the CPL: {cpl}"
+    );
+}
+
+/// The flags are the operator's own measurement, so a passed value stands
+/// instead of the RPU's.
+#[test]
+fn a_passed_light_level_beats_the_rpu() {
+    let dir = TempDir::new().unwrap();
+    let master = dolby_vision_master(dir.path());
+    let measured = RPU_MAX_CONTENT_LIGHT_LEVEL + 100;
+
+    let imp = dir.path().join("imp_measured");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &imp.to_string_lossy(),
+            "-t",
+            "Dolby Vision 8.1",
+            "--video",
+            &master.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--hdr",
+            "pq-bt2020",
+            "--max-cll",
+            &measured.to_string(),
+            "--fps-num",
+            "25",
+            "--fps-den",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let cpl = std::fs::read_to_string(file_starting_with(&imp, "CPL_")).unwrap();
+    assert_eq!(
+        extension_property(&cpl, "MaxCLL").as_deref(),
+        Some(measured.to_string().as_str())
+    );
+    assert!(
+        extension_property(&cpl, "MaxFALL").is_none(),
+        "MaxFALL was neither passed nor taken from the RPU: {cpl}"
+    );
+}
+
+/// Profile 5 carries no HDR10 base layer, so it is refused rather than packaged
+/// as if its light levels applied.
+#[test]
+fn a_profile_5_master_is_refused_by_name() {
+    let dir = TempDir::new().unwrap();
+    let annex_b = postkit::dolby_vision::write_dolby_vision_fixture(
+        dir.path(),
+        "dv5.hevc",
+        postkit::dolby_vision::DolbyVisionFixtureProfile::Profile5,
+        None,
+        None,
+    )
+    .expect("the Dolby Vision fixture");
+    let mp4 = dir.path().join("dv5.mp4");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-i"])
+        .arg(&annex_b)
+        .args(["-c", "copy"])
+        .arg(&mp4)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &dir.path().join("imp").to_string_lossy(),
+            "-t",
+            "Profile 5",
+            "--video",
+            &mp4.to_string_lossy(),
+            "--raster",
+            RASTER,
+            "--hdr",
+            "pq-bt2020",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("5"));
+}
+
 /// A sine WAV of exactly `sample_frames` stereo sample frames at 48 kHz.
 fn sine_wav(dir: &Path, name: &str, sample_frames: u32) -> PathBuf {
     let wav = dir.join(format!("{name}.wav"));

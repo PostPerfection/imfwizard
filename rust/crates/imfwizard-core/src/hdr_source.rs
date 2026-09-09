@@ -8,6 +8,11 @@ use crate::hdr_wcg::{HdrWcg, TRANSFER_CHARACTERISTIC_HLG, presets_with_transfer}
 const PQ_TRANSFER_TAG: &str = "smpte2084";
 const HLG_TRANSFER_TAG: &str = "arib-std-b67";
 const DOLBY_VISION_SIDE_DATA: &str = "DOVI";
+// ffprobe spells the per frame RPU differently from the stream's configuration record
+const DOLBY_VISION_FRAME_SIDE_DATA: &str = "Dolby Vision";
+// an RPU sits on every coded picture, so the first few packets settle it. one
+// packet is not enough: the parameter sets can take the first before a picture does
+const DOLBY_VISION_PROBE_INTERVAL: &str = "%+#8";
 // both front ends read these refusals, so each names the flag and the control that carry the preset
 const PRESET_CONTROLS: &str = "--hdr, the HDR panel control in the GUI";
 
@@ -71,7 +76,54 @@ pub fn probe(picture: &Path) -> Result<SourceHdr, String> {
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
-    Ok(classify(&String::from_utf8_lossy(&out.stdout)))
+    let classified = classify(&String::from_utf8_lossy(&out.stdout));
+    // an HLG source is left alone: profile 8.4 sits on the HLG transfer and the
+    // preset that packages it is the HLG one
+    if matches!(classified, SourceHdr::Untagged | SourceHdr::Pq)
+        && dolby_vision_in_first_frame(picture)?
+    {
+        return Ok(SourceHdr::DolbyVision);
+    }
+    Ok(classified)
+}
+
+// the stream side data is the configuration record a container carries, and a
+// raw elementary stream has none, so the head of the stream is decoded as well
+fn dolby_vision_in_first_frame(picture: &Path) -> Result<bool, String> {
+    let out = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-read_intervals",
+            DOLBY_VISION_PROBE_INTERVAL,
+            "-show_frames",
+            "-of",
+            "json",
+        ])
+        .arg(picture)
+        .output()
+        .map_err(|e| format!("Failed to run ffprobe on {}: {e}", picture.display()))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ffprobe failed to decode the first frame of {}: {}",
+            picture.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let probed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default();
+    Ok(probed["frames"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|frame| frame["side_data_list"].as_array().into_iter().flatten())
+        .any(|side_data| {
+            side_data["side_data_type"]
+                .as_str()
+                .is_some_and(|kind| kind.contains(DOLBY_VISION_FRAME_SIDE_DATA))
+        }))
 }
 
 fn classify(ffprobe_json: &str) -> SourceHdr {

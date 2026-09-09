@@ -117,6 +117,209 @@ fn codestream_directory(root: &Path) -> std::path::PathBuf {
     frames
 }
 
+fn ffmpeg(arguments: &[&str]) {
+    let out = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error"])
+        .args(arguments)
+        .output()
+        .expect("ffmpeg");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+// tiff frames, the one image format imfwizard reads without ffmpeg
+fn tiff_sequence(root: &Path) -> std::path::PathBuf {
+    let frames = root.join("frames");
+    std::fs::create_dir_all(&frames).unwrap();
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        &format!("testsrc=s={WIDTH}x{HEIGHT}:r=24"),
+        "-frames:v",
+        &FRAMES.to_string(),
+        "-pix_fmt",
+        "rgb24",
+        &frames.join("frame_%06d.tif").to_string_lossy(),
+    ]);
+    frames
+}
+
+fn testsrc_clip(root: &Path) -> std::path::PathBuf {
+    let clip = root.join("source.mp4");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=s=320x180:r=24",
+        "-frames:v",
+        "12",
+        "-pix_fmt",
+        "yuv420p",
+        &clip.to_string_lossy(),
+    ]);
+    clip
+}
+
+fn video_stream_entry(path: &Path, entry: &str) -> String {
+    let out = std::process::Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+        .arg(format!("stream={entry}"))
+        .args(["-of", "default=nw=1:nk=1"])
+        .arg(path)
+        .output()
+        .expect("ffprobe");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+// matroska records no frame count in its header, so they are counted on the way past
+fn counted_frames(path: &Path) -> u32 {
+    let out = std::process::Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-count_frames"])
+        .args(["-show_entries", "stream=nb_read_frames"])
+        .args(["-of", "default=nw=1:nk=1"])
+        .arg(path)
+        .output()
+        .expect("ffprobe");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+}
+
+/// `/tools` is the `doctor` check over HTTP: the body has to be the real probe,
+/// so ffmpeg (which these tests just ran) must come back available.
+#[test]
+fn tools_reports_the_dependencies_the_doctor_probes() {
+    let address = serve();
+    let answer = request(address, "GET", "/api/v1/tools", Some(API_KEY));
+    assert_eq!(answer.status, 200, "{}", answer.body);
+
+    let body = answer.json();
+    let tools = body["tools"].as_array().expect("a tools array");
+    let ffmpeg = tools
+        .iter()
+        .find(|tool| tool["name"] == "ffmpeg")
+        .expect("ffmpeg among the probed tools");
+    assert_eq!(
+        ffmpeg["status"], "available",
+        "ffmpeg ran in this test, so the probe must find it: {body}"
+    );
+    assert!(
+        ffmpeg["version"].as_str().is_some_and(|v| !v.is_empty()),
+        "the probe must report a version: {ffmpeg}"
+    );
+    assert_eq!(
+        body["available"].as_u64().unwrap_or_default() as usize
+            + body["missing"].as_u64().unwrap_or_default() as usize,
+        tools.len(),
+        "every tool is counted once: {body}"
+    );
+}
+
+/// `/profiles` serves the delivery presets themselves, values and all.
+#[test]
+fn profiles_serves_every_delivery_preset_with_its_values() {
+    let address = serve();
+    let answer = request(address, "GET", "/api/v1/profiles", Some(API_KEY));
+    assert_eq!(answer.status, 200, "{}", answer.body);
+
+    let served = answer.json();
+    let served = served.as_array().expect("an array of presets");
+    let expected = imfwizard_core::profiles::all_profiles();
+    assert_eq!(served.len(), expected.len());
+
+    let netflix = served
+        .iter()
+        .find(|profile| profile["name"] == "Netflix IMF")
+        .expect("the Netflix preset");
+    assert_eq!(netflix["width"], 3840);
+    assert_eq!(netflix["height"], 2160);
+    assert_eq!(netflix["bitrate_mbps"], 400.0);
+    assert_eq!(netflix["colour_space"], "Rec.2020");
+
+    let cinema = served
+        .iter()
+        .find(|profile| profile["name"] == "DCI 2K Theatrical")
+        .expect("the DCI 2K preset");
+    assert_eq!(cinema["width"], 2048);
+    assert_eq!(cinema["bitrate_mbps"], 250.0);
+}
+
+/// `/encode` runs the App 2E encoder, so the job leaves one codestream a frame.
+#[test]
+fn an_encode_job_writes_a_codestream_for_every_frame() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let frames = tiff_sequence(directory.path());
+    let output = directory.path().join("encoded");
+
+    let id = submit(address, "/api/v1/encode", &frames, &output, "encode");
+    let job = wait_for_job(address, id);
+    assert_eq!(job["state"], "Completed", "{job}");
+
+    let codestreams: Vec<_> = std::fs::read_dir(output.join("j2k"))
+        .expect("the j2k output directory")
+        .flatten()
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "j2c" || extension == "j2k")
+        })
+        .collect();
+    assert_eq!(codestreams.len(), FRAMES);
+    for codestream in &codestreams {
+        let bytes = std::fs::read(codestream.path()).unwrap();
+        assert_eq!(
+            &bytes[..4],
+            &[0xff, 0x4f, 0xff, 0x51],
+            "{:?} does not start with the JPEG 2000 SOC and SIZ markers",
+            codestream.path()
+        );
+    }
+}
+
+/// `/transcode` runs ffmpeg, so the job leaves a file the prober can read back.
+#[test]
+fn a_transcode_job_writes_a_playable_file() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let clip = testsrc_clip(directory.path());
+    let output = directory.path().join("transcoded.mkv");
+
+    let id = submit(address, "/api/v1/transcode", &clip, &output, "transcode");
+    let job = wait_for_job(address, id);
+    assert_eq!(job["state"], "Completed", "{job}");
+
+    assert!(output.is_file(), "the transcode wrote no file");
+    assert_eq!(video_stream_entry(&output, "width"), "320");
+    assert_eq!(video_stream_entry(&output, "height"), "180");
+    assert_eq!(counted_frames(&output), 12);
+}
+
+/// A transcode ffmpeg cannot run fails the job in ffmpeg's own words.
+#[test]
+fn a_transcode_job_on_a_file_ffmpeg_cannot_read_fails() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let broken = directory.path().join("broken.mp4");
+    std::fs::write(&broken, b"not a container").unwrap();
+
+    let id = submit(
+        address,
+        "/api/v1/transcode",
+        &broken,
+        &directory.path().join("out.mkv"),
+        "broken",
+    );
+    let job = wait_for_job(address, id);
+    assert_eq!(job["state"], "Failed", "{job}");
+    let error = job["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("broken.mp4"),
+        "the error must name the input, got {error:?}"
+    );
+}
+
 #[test]
 fn health_answers_without_a_key() {
     let address = serve();
