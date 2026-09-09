@@ -6,6 +6,7 @@ pub mod edl_import;
 pub mod imp;
 pub mod mxf_wrap;
 pub mod overlapped_picture;
+pub mod partial_version;
 pub mod pkl;
 pub mod timeline;
 

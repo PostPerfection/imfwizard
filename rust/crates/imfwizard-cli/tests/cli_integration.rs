@@ -69,7 +69,7 @@ fn the_gpu_preference_stays_on_the_cpu_when_no_plugin_loads() {
         .args(["validate", missing.to_str().unwrap()])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("stays on the CPU"));
+        .stderr(predicate::str::contains("stays on the CPU"));
 
     cmd()
         .env("XDG_CONFIG_HOME", directory.path())
@@ -77,8 +77,8 @@ fn the_gpu_preference_stays_on_the_cpu_when_no_plugin_loads() {
         .args(["--gpu", "validate", missing.to_str().unwrap()])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("did not initialise"))
-        .stdout(predicate::str::contains("stays on the CPU").not());
+        .stderr(predicate::str::contains("did not initialise"))
+        .stderr(predicate::str::contains("stays on the CPU").not());
 }
 
 #[test]
@@ -1943,8 +1943,8 @@ fn the_pre_build_check_prints_the_first_cue_hint() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("The first subtitle in cues.srt"))
-        .stdout(predicate::str::contains("at least 4 seconds"));
+        .stderr(predicate::str::contains("The first subtitle in cues.srt"))
+        .stderr(predicate::str::contains("at least 4 seconds"));
 
     assert!(!output.exists(), "the check must write nothing");
 }

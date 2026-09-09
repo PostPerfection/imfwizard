@@ -425,6 +425,40 @@ const D65_WHITE_POINT: (u16, u16) = (15635, 16450);
 const MASTERING_DISPLAY_MAX_LUMINANCE: u32 = 10_000_000;
 const MASTERING_DISPLAY_MIN_LUMINANCE: u32 = 1;
 
+// slate text a fifteenth of the picture height, 72 points on a 1080 line raster
+const SLATE_TEXT_HEIGHT_DIVISOR: u32 = 15;
+
+const SMPTE_STRUCTURAL_STANDARD: &str = "SMPTE ST 2067 structure";
+
+// what `compliance --standard` takes: a delivery profile, or None for the
+// structural checks alone, since ST 2067 fixes no raster or bit depth
+const COMPLIANCE_STANDARDS: &[(&str, Option<postkit::profiles::Platform>)] = &[
+    ("smpte", None),
+    ("netflix", Some(postkit::profiles::Platform::Netflix)),
+    ("amazon", Some(postkit::profiles::Platform::AmazonPrime)),
+    ("prime", Some(postkit::profiles::Platform::AmazonPrime)),
+    ("disney", Some(postkit::profiles::Platform::Disney)),
+    ("disney+", Some(postkit::profiles::Platform::Disney)),
+    ("apple", Some(postkit::profiles::Platform::Apple)),
+    ("appletv", Some(postkit::profiles::Platform::Apple)),
+    ("hbo", Some(postkit::profiles::Platform::Hbo)),
+    ("broadcast", Some(postkit::profiles::Platform::Broadcast)),
+    (
+        "archival",
+        Some(postkit::profiles::Platform::ArchivalPreservation),
+    ),
+    ("dci-2k", Some(postkit::profiles::Platform::TheatricalDci2k)),
+    (
+        "cinema-2k",
+        Some(postkit::profiles::Platform::TheatricalDci2k),
+    ),
+    ("dci-4k", Some(postkit::profiles::Platform::TheatricalDci4k)),
+    (
+        "cinema-4k",
+        Some(postkit::profiles::Platform::TheatricalDci4k),
+    ),
+];
+
 /// The SMPTE ST 2086 mastering display `hdr10-inject` writes as HEVC SEI.
 #[derive(clap::Args)]
 struct MasteringDisplayArguments {
@@ -751,7 +785,7 @@ enum Commands {
     #[command(name = "analytics")]
     Analytics {
         /// IMP directory to analyze
-        #[arg(long = "dir", short)]
+        #[arg(long = "dir", short = 'd')]
         input: PathBuf,
 
         /// Output as JSON
@@ -1474,8 +1508,7 @@ enum Commands {
         #[arg(short, long)]
         input: String,
 
-        /// Standard (smpte, netflix, dolby, amazon)
-        #[arg(short, long, default_value = "smpte")]
+        #[arg(short, long, default_value = "smpte", help = compliance_standard_help())]
         standard: String,
     },
 
@@ -1755,7 +1788,9 @@ fn run() {
     let cli = Cli::parse();
 
     let level = if cli.verbose { "debug" } else { "info" };
+    // stdout carries the JSON a `--json` run is piped for, so the log goes beside it
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| level.into()),
         )
@@ -3723,33 +3758,23 @@ fn run() {
         }
 
         Commands::PartialVersion { input, output, cpl } => {
-            // Copy only files referencing the target CPL UUID
-            std::fs::create_dir_all(&output).unwrap();
-            let input_dir = std::path::Path::new(&input);
-            let output_dir = std::path::Path::new(&output);
-            let mut copied = 0u32;
-            if let Ok(entries) = std::fs::read_dir(input_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "xml" || e == "mxf") {
-                        // Check if file references the CPL
-                        let name = path.file_name().unwrap().to_string_lossy();
-                        if name.contains(&cpl) {
-                            std::fs::copy(&path, output_dir.join(path.file_name().unwrap()))
-                                .unwrap();
-                            copied += 1;
-                        } else if path.extension().is_some_and(|e| e == "xml")
-                            && let Ok(content) = std::fs::read_to_string(&path)
-                            && content.contains(&cpl)
-                        {
-                            std::fs::copy(&path, output_dir.join(path.file_name().unwrap()))
-                                .unwrap();
-                            copied += 1;
-                        }
-                    }
+            match imfwizard_core::partial_version::create_partial_version(
+                std::path::Path::new(&input),
+                std::path::Path::new(&output),
+                &cpl,
+            ) {
+                Ok(partial) => {
+                    println!(
+                        "Partial version created: {} and {} track file(s) copied to {output}",
+                        partial.cpl_path.display(),
+                        partial.track_files.len()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
                 }
             }
-            println!("Partial version created: {copied} files copied to {output}");
         }
 
         Commands::Deliver { input, destination } => {
@@ -3856,19 +3881,30 @@ fn run() {
             text,
             frames,
         } => {
+            let Some(picture) = postkit::probe::probe_video(std::path::Path::new(&input)) else {
+                eprintln!("Cannot read the picture size and frame rate of {input}");
+                std::process::exit(1);
+            };
+            // concat refuses a join unless both sides carry the same raster,
+            // pixel format and aspect, so the slate is cut to the picture
+            let slate = format!(
+                "color=black:s={width}x{height}:r={fps_num}/{fps_den},\
+                 drawtext=text='{text}':fontsize={font_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2,\
+                 trim=end_frame={frames},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[slate];\
+                 [0:v]format=yuv420p,setsar=1[picture];\
+                 [slate][picture]concat=n=2:v=1:a=0[out]",
+                width = picture.width,
+                height = picture.height,
+                fps_num = picture.fps_num,
+                fps_den = picture.fps_den,
+                font_size = (picture.height / SLATE_TEXT_HEIGHT_DIVISOR).max(1),
+            );
             let status = std::process::Command::new("ffmpeg")
                 .arg("-y")
-                .arg("-f")
-                .arg("lavfi")
-                .arg("-i")
-                .arg(format!(
-                    "color=black:s=1920x1080:d={},drawtext=text='{text}':fontsize=72:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
-                    frames as f64 / 24.0
-                ))
                 .arg("-i")
                 .arg(&input)
                 .arg("-filter_complex")
-                .arg("[0:v][1:v]concat=n=2:v=1:a=0[out]")
+                .arg(&slate)
                 .arg("-map")
                 .arg("[out]")
                 .arg(&output)
@@ -4115,29 +4151,36 @@ fn run() {
 
         Commands::Compliance { input, standard } => {
             // Validate IMP against platform-specific delivery requirements
-            let platform = match standard.to_lowercase().as_str() {
-                "netflix" => postkit::profiles::Platform::Netflix,
-                "amazon" | "prime" => postkit::profiles::Platform::AmazonPrime,
-                "disney" | "disney+" => postkit::profiles::Platform::Disney,
-                "apple" | "appletv" => postkit::profiles::Platform::Apple,
-                "hbo" => postkit::profiles::Platform::Hbo,
-                "broadcast" => postkit::profiles::Platform::Broadcast,
-                "archival" => postkit::profiles::Platform::ArchivalPreservation,
-                "dci-2k" | "cinema-2k" => postkit::profiles::Platform::TheatricalDci2k,
-                "dci-4k" | "cinema-4k" => postkit::profiles::Platform::TheatricalDci4k,
-                _ => postkit::profiles::Platform::Netflix,
+            let Some(&(_, platform)) = COMPLIANCE_STANDARDS
+                .iter()
+                .find(|(name, _)| *name == standard.to_lowercase())
+            else {
+                eprintln!(
+                    "Unknown standard: {standard} (known: {})",
+                    compliance_standard_names()
+                );
+                std::process::exit(1);
             };
-            let profile = postkit::profiles::profile_for(platform);
-            println!("Checking compliance against: {}", profile.name);
-            println!(
-                "  Required: {}x{} @ {}fps, {} colour, {}-bit, {} audio",
-                profile.width,
-                profile.height,
-                profile.frame_rate,
-                profile.colour_space,
-                profile.bit_depth,
-                profile.audio_channels
-            );
+            let profile = platform.map(postkit::profiles::profile_for);
+            let checked = match &profile {
+                Some(profile) => {
+                    println!("Checking compliance against: {}", profile.name);
+                    println!(
+                        "  Required: {}x{} @ {}fps, {} colour, {}-bit, {} audio",
+                        profile.width,
+                        profile.height,
+                        profile.frame_rate,
+                        profile.colour_space,
+                        profile.bit_depth,
+                        profile.audio_channels
+                    );
+                    profile.name.clone()
+                }
+                None => {
+                    println!("Checking compliance against: {SMPTE_STRUCTURAL_STANDARD}");
+                    SMPTE_STRUCTURAL_STANDARD.to_string()
+                }
+            };
             println!();
 
             // Structural validation
@@ -4147,7 +4190,9 @@ fn run() {
 
             // Probe MXF files for platform-specific parameter checks
             let imp_path = std::path::Path::new(&input);
-            if imp_path.is_dir() {
+            if let Some(profile) = &profile
+                && imp_path.is_dir()
+            {
                 let mxf_files: Vec<_> = std::fs::read_dir(imp_path)
                     .into_iter()
                     .flatten()
@@ -4248,7 +4293,7 @@ fn run() {
 
             // Report
             if errors.is_empty() && warnings.is_empty() {
-                println!("PASS: compliant with {}", profile.name);
+                println!("PASS: compliant with {checked}");
             } else {
                 if !errors.is_empty() {
                     println!("ERRORS ({}):", errors.len());
@@ -4263,10 +4308,10 @@ fn run() {
                     }
                 }
                 if !errors.is_empty() {
-                    println!("\nFAIL: not compliant with {}", profile.name);
+                    println!("\nFAIL: not compliant with {checked}");
                     std::process::exit(1);
                 } else {
-                    println!("\nPASS (with warnings): compliant with {}", profile.name);
+                    println!("\nPASS (with warnings): compliant with {checked}");
                 }
             }
         }
@@ -4294,22 +4339,25 @@ fn run() {
         }
 
         Commands::Annotate { imp, text } => {
-            // Alias for metadata-edit annotation
-            let imp_dir = std::path::Path::new(&imp);
-            let cpls = imfwizard_core::timeline::list_cpls(imp_dir);
-            if cpls.is_empty() {
-                eprintln!("Error: no CPLs found in {imp}");
-                std::process::exit(1);
-            }
-            let cpl_path = imp_dir.join(&cpls[0].file_path);
-            let annotation = imfwizard_core::cpl_annotation::CplAnnotation {
-                author: String::from("imfwizard"),
-                timestamp: String::new(),
-                text,
-                revision: String::from("1"),
+            let edit = postkit::package_edit::PackageEdit {
+                input: PathBuf::from(&imp),
+                annotation: Some(text),
+                ..Default::default()
             };
-            match imfwizard_core::cpl_annotation::annotate_cpl(&cpl_path, &annotation) {
-                Ok(()) => println!("Annotated: {}", cpl_path.display()),
+            match postkit::package_edit::edit_package(&edit) {
+                Ok(edited) => {
+                    println!(
+                        "Annotated {imp}: {} now carries composition id {}",
+                        edited.cpl_path.display(),
+                        edited.composition_id
+                    );
+                    if !edited.unsigned_documents.is_empty() {
+                        println!(
+                            "Wrote unsigned, the rewrite changed the bytes their signature covered: {}. Re-sign the package if it has to stay signed",
+                            edited.unsigned_documents.join(", ")
+                        );
+                    }
+                }
                 Err(e) => {
                     eprintln!("Error: {e}");
                     std::process::exit(1);
@@ -4611,6 +4659,18 @@ fn run() {
             postkit::grok_encoder::accelerated_frames()
         );
     }
+}
+
+fn compliance_standard_names() -> String {
+    COMPLIANCE_STANDARDS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn compliance_standard_help() -> String {
+    format!("Standard to check against: {}", compliance_standard_names())
 }
 
 fn prores_container_help() -> String {
