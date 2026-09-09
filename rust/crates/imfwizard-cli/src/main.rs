@@ -3264,24 +3264,26 @@ fn run() {
             annotation,
             issuer,
         } => {
-            let imp_dir = std::path::Path::new(&imp);
-            let cpls = imfwizard_core::timeline::list_cpls(imp_dir);
-            if cpls.is_empty() {
-                eprintln!("Error: No CPL found in {imp}");
-                std::process::exit(1);
-            }
-            let cpl_path = imp_dir.join(&cpls[0].file_path);
-            let text = title
-                .or(annotation)
-                .unwrap_or_else(|| "Updated by imfwizard".to_string());
-            let ann = imfwizard_core::cpl_annotation::CplAnnotation {
-                author: issuer.unwrap_or_else(|| "imfwizard".to_string()),
-                timestamp: String::new(),
-                text,
-                revision: String::new(),
+            let edit = postkit::package_edit::PackageEdit {
+                input: PathBuf::from(&imp),
+                annotation: title.or(annotation),
+                issuer,
+                ..Default::default()
             };
-            match imfwizard_core::cpl_annotation::annotate_cpl(&cpl_path, &ann) {
-                Ok(()) => println!("Metadata updated for {}", cpl_path.display()),
+            match postkit::package_edit::edit_package(&edit) {
+                Ok(edited) => {
+                    println!(
+                        "Metadata updated for {}: it now carries composition id {}",
+                        edited.cpl_path.display(),
+                        edited.composition_id
+                    );
+                    if !edited.unsigned_documents.is_empty() {
+                        println!(
+                            "Wrote unsigned, the rewrite changed the bytes their signature covered: {}. Re-sign the package if it has to stay signed",
+                            edited.unsigned_documents.join(", ")
+                        );
+                    }
+                }
                 Err(e) => {
                     eprintln!("Error: {e}");
                     std::process::exit(1);

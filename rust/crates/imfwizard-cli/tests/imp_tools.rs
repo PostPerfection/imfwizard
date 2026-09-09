@@ -293,6 +293,51 @@ fn annotate_writes_the_note_into_a_cpl_the_package_still_matches() {
 }
 
 #[test]
+fn metadata_edit_writes_the_note_and_author_the_package_still_matches() {
+    let directory = TempDir::new().unwrap();
+    let imp = build_imp(
+        directory.path(),
+        "edited",
+        "Edited",
+        SHORT_FRAMES,
+        FRAMES_PER_SECOND,
+    );
+    let note = "Conform check passed";
+    let author = "QC desk";
+
+    cmd()
+        .args([
+            "metadata-edit",
+            "-i",
+            &imp.to_string_lossy(),
+            "-a",
+            note,
+            "--issuer",
+            author,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("now carries composition id"));
+
+    let cpl = std::fs::read_to_string(imp.join(format!("CPL_{}.xml", cpl_uuid(&imp)))).unwrap();
+    assert!(
+        cpl.contains(&format!("<Annotation>{note}</Annotation>")),
+        "the note is not in the CPL"
+    );
+    assert!(
+        cpl.contains(&format!("<Issuer>{author}</Issuer>")),
+        "the author is not in the CPL"
+    );
+
+    // the CPL changed, so the PKL hash and the ASSETMAP have to have moved with it
+    cmd()
+        .args(["validate", &imp.to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP validation PASSED"));
+}
+
+#[test]
 fn partial_version_copies_the_track_files_the_cpl_names() {
     let directory = TempDir::new().unwrap();
     let imp = build_imp(
