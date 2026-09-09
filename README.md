@@ -46,7 +46,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Quality Control
 - **Pre-build check**, `create --check` runs every refusal `create` can make and prints the advisory hints, then stops without encoding or writing anything under `--output`. Every refusal that could once fire after the encode (an illegal raster on a J2K directory, a trim or delay longer than the source, timed text a trim cannot move, a bad audio map) now fires here first
 - **Pre-build hints**, advisory findings that build but are usually wrong for the audience: audio true peak above -3 dBTP, sound with no language set, a first subtitle before 4 seconds, a cue under 15 frames, cues less than 2 frames apart, more than 3 lines in a cue, and lines over 52 or 79 characters. The CLI prints them before the encode, the GUI shows them in a dialog you can build through
-- **Loudness analysis**, EBU R128 integrated/true-peak measurement (measure only, no normalization)
+- **Loudness analysis**, EBU R128 integrated/true-peak measurement, and `loudness --adjust-to <LUFS> -o <out.wav>` writes the level-adjusted WAV
 - **Native XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
 - **Structural validation** via dcpdoctor-core (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification
 - **Verified on the way out**, `create` runs that same validation over the package it just wrote and exits non-zero on any error, leaving the package in place to look at. `create --no-verify` skips it and says so. A desktop build runs it as its last stage and writes the findings into the job log, unless Settings turns it off
