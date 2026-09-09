@@ -119,8 +119,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Packaging & Deployment
 - **Docker image**, headless batch processing (`docker run imfwizard create ...`)
-- **Flatpak**, Linux desktop distribution via Flathub
-- **macOS .dmg**, universal binary with code signing and notarization
+- **macOS .dmg** for Apple Silicon
 - REST API mode with Prometheus-compatible `/metrics` endpoint
 
 ### Mastering & Compliance

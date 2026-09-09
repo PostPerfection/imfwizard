@@ -98,6 +98,14 @@ and profile 4 in a profile 4 one; postkit's `write_dolby_vision_fixture` makes
 8.4 only. Closing it means a profile 7 and a profile 4 fixture source, then the
 two modes on the flag and a read back through dovi_tool.
 
+## Open: the macOS .dmg is unsigned and unnotarised (2026-09-09)
+
+`release.yml` builds the GUI on `macos-15` and bundles a `dmg`, and nothing
+signs or notarises it, so Gatekeeper refuses it on any machine that did not
+build it. Closing it needs the user's Apple developer certificate, its
+password, the team id and an app-specific password in the repo secrets, and
+the `APPLE_*` variables the Tauri action reads set from them.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
