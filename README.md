@@ -551,7 +551,9 @@ imfwizard prores \
   -p hq
 
 # An IMP directory exports its first CPL's picture and main sound as ProRes 4444
-# at the CPL's edit rate. --cpl <uuid> picks another composition.
+# at the CPL's edit rate. --cpl <uuid> picks another composition. --ov <dir>
+# names the OV a supplemental IMP was built against, so the track files its CPL
+# references but does not carry are resolved through the OV's ASSETMAP.
 imfwizard prores \
   -i /path/to/imp/ \
   -o /path/to/delivery.mov \
