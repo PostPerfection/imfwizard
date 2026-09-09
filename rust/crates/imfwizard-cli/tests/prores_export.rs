@@ -226,6 +226,122 @@ fn a_file_input_still_encodes_at_the_default_profile() {
     assert_eq!(probe(&movie, "v:0", "width"), "1920");
 }
 
+fn only_cpl(imp: &Path) -> PathBuf {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(imp)
+        .expect("the IMP directory")
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("CPL_"))
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "expected one CPL in {imp:?}");
+    found.pop().unwrap()
+}
+
+fn counted_frames(movie: &Path) -> u32 {
+    let output = std::process::Command::new("ffprobe")
+        .args(["-v", "error", "-count_frames", "-select_streams", "v:0"])
+        .args(["-show_entries", "stream=nb_read_frames"])
+        .args(["-of", "csv=p=0"])
+        .arg(movie)
+        .output()
+        .expect("ffprobe");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .expect("a frame count")
+}
+
+// the created CPL holds one segment over the whole track file, so cutting it in
+// two is the only way to get a multi-segment composition out of `create`
+fn cut_into_two_segments(imp: &Path, first_frames: u32, second_frames: u32) {
+    const SEGMENT_OPEN: &str = "    <Segment>\n";
+    const SEGMENT_CLOSE: &str = "    </Segment>\n";
+    let cpl = only_cpl(imp);
+    let xml = std::fs::read_to_string(&cpl).expect("the CPL");
+    let start = xml.find(SEGMENT_OPEN).expect("a segment");
+    let end = xml.find(SEGMENT_CLOSE).expect("a closed segment") + SEGMENT_CLOSE.len();
+    let segment = &xml[start..end];
+
+    let source_duration = format!("<SourceDuration>{FRAMES}</SourceDuration>");
+    let cut = |entry_point: u32, frames: u32| {
+        let cut_resource = format!(
+            "<EntryPoint>{entry_point}</EntryPoint><SourceDuration>{frames}</SourceDuration>"
+        );
+        segment.replace(&source_duration, &cut_resource)
+    };
+    let two = format!(
+        "{}{}",
+        cut(0, first_frames),
+        cut(first_frames, second_frames)
+    );
+    std::fs::write(&cpl, format!("{}{two}{}", &xml[..start], &xml[end..])).expect("the edited CPL");
+}
+
+#[test]
+fn every_segment_of_a_composition_reaches_the_export() {
+    const FIRST_SEGMENT_FRAMES: u32 = 2;
+    const SECOND_SEGMENT_FRAMES: u32 = 3;
+    let dir = TempDir::new().unwrap();
+    let imp = build_sound_imp(dir.path(), "imp_segments");
+    cut_into_two_segments(&imp, FIRST_SEGMENT_FRAMES, SECOND_SEGMENT_FRAMES);
+    let movie = dir.path().join("segments.mov");
+
+    cmd()
+        .args(["prores", "-i", &imp.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .assert()
+        .success();
+
+    assert_eq!(probe(&movie, "v:0", "codec_name"), "prores");
+    assert_eq!(probe(&movie, "a:0", "codec_name"), "pcm_s24le");
+    assert_eq!(
+        counted_frames(&movie),
+        FIRST_SEGMENT_FRAMES + SECOND_SEGMENT_FRAMES,
+        "the export must hold both segments and nothing else"
+    );
+}
+
+#[test]
+fn a_supplemental_imp_exports_against_the_ov_it_names() {
+    let dir = TempDir::new().unwrap();
+    let ov = build_sound_imp(dir.path(), "ov_imp");
+    let dub = sine_wav(dir.path());
+    let supplement = dir.path().join("supplemental_imp");
+    cmd()
+        .args(["supplement", "--ov", &ov.to_string_lossy()])
+        .args(["-t", "French dub", "-o", &supplement.to_string_lossy()])
+        .args(["--replace", &format!("{}@audio", dub.display())])
+        .assert()
+        .success();
+
+    let movie = dir.path().join("supplemental.mov");
+    cmd()
+        .args(["prores", "-i", &supplement.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("names no picture track file"))
+        .stderr(predicate::str::contains("--ov"));
+
+    cmd()
+        .args(["prores", "-i", &supplement.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .args(["--ov", &ov.to_string_lossy()])
+        .assert()
+        .success();
+
+    assert_is_prores_4444_with_sound(&movie);
+}
+
 #[test]
 fn a_directory_without_a_cpl_is_refused_by_name() {
     let dir = TempDir::new().unwrap();

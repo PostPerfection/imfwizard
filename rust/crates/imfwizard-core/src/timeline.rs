@@ -37,6 +37,11 @@ fn strip_urn(s: &str) -> String {
 
 /// Parse an IMF CPL and return its segment/resource timeline.
 pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
+    get_timeline_with_ov(cpl_path, None)
+}
+
+// a supplemental IMP's own ASSETMAP names only what it ships, the rest is in the OV's
+pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<SegmentEntry> {
     let imp_dir = cpl_path.parent().unwrap_or(Path::new("."));
     let content = match std::fs::read_to_string(cpl_path) {
         Ok(c) => c,
@@ -46,7 +51,7 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
         }
     };
 
-    let asset_map = parse_assetmap(imp_dir);
+    let asset_map = resolved_assets(imp_dir, ov_dir);
     let mut entries = Vec::new();
     let mut segment_number = 0u32;
 
@@ -142,11 +147,11 @@ pub fn get_timeline(cpl_path: &Path) -> Vec<SegmentEntry> {
                         if in_segment {
                             seg.video_file = asset_map
                                 .get(&seg.video_track_file_id)
-                                .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
+                                .map(|p| p.to_string_lossy().into_owned())
                                 .unwrap_or_default();
                             seg.audio_file = asset_map
                                 .get(&seg.audio_track_file_id)
-                                .map(|p| imp_dir.join(p).to_string_lossy().into_owned())
+                                .map(|p| p.to_string_lossy().into_owned())
                                 .unwrap_or_default();
                             entries.push(std::mem::take(&mut seg));
                         }
@@ -200,6 +205,20 @@ fn is_xml_file(path: &Path) -> bool {
 /// Asset id to the path it names, relative to the IMP directory.
 pub(crate) fn parse_assetmap(imp_dir: &Path) -> HashMap<String, String> {
     read_assetmap_assets(imp_dir).into_iter().collect()
+}
+
+// the local ASSETMAP wins, so a supplemental's own track file is the one its CPL gets
+fn resolved_assets(imp_dir: &Path, ov_dir: Option<&Path>) -> HashMap<String, std::path::PathBuf> {
+    let under = |dir: &Path| {
+        let dir = dir.to_path_buf();
+        read_assetmap_assets(&dir)
+            .into_iter()
+            .map(move |(id, path)| (id, dir.join(path)))
+    };
+    let mut assets: HashMap<String, std::path::PathBuf> =
+        ov_dir.map(under).into_iter().flatten().collect();
+    assets.extend(under(imp_dir));
+    assets
 }
 
 /// Read (id, path) pairs from an ASSETMAP, with ids stripped of the `urn:uuid:` prefix.

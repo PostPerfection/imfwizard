@@ -1325,6 +1325,10 @@ enum Commands {
         /// UUID of the IMP's CPL to export, when it holds more than one
         #[arg(long)]
         cpl: Option<String>,
+
+        /// OV directory holding the track files a supplemental IMP does not ship
+        #[arg(long)]
+        ov: Option<String>,
     },
 
     /// Create partial IMP version
@@ -3687,6 +3691,7 @@ fn run() {
             profile,
             container,
             cpl,
+            ov,
         } => {
             let input_path = PathBuf::from(&input);
             if input_path.is_dir() {
@@ -3704,6 +3709,7 @@ fn run() {
                     &PathBuf::from(&output),
                     cpl.as_deref(),
                     raster,
+                    ov.as_deref().map(std::path::Path::new),
                 ) {
                     Ok(()) => println!("ProRes 4444 exported: {output}"),
                     Err(e) => {
