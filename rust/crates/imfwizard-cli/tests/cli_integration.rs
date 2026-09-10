@@ -285,10 +285,10 @@ fn an_unknown_source_colourspace_is_refused_by_name() {
         .stderr(predicate::str::contains("rec601"));
 }
 
-/// ACES and ACEScg are scene-referred, so the refusal has to name the one route
-/// that converts them.
+/// ACES and ACEScg are scene-referred, so the refusal has to say a render is
+/// needed and name the flag that takes one.
 #[test]
-fn a_scene_referred_colourspace_is_refused_naming_the_route_that_converts_it() {
+fn a_scene_referred_colourspace_is_refused_naming_the_render_it_needs() {
     let dir = TempDir::new().unwrap();
     for space in ["aces", "acescg"] {
         cmd()
@@ -303,7 +303,8 @@ fn a_scene_referred_colourspace_is_refused_naming_the_route_that_converts_it() {
             ])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("imfwizard aces"));
+            .stderr(predicate::str::contains("rendering transform"))
+            .stderr(predicate::str::contains("--source-lut"));
     }
 }
 
