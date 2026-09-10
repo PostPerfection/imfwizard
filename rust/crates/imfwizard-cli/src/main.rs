@@ -4459,8 +4459,8 @@ fn run() {
             target_profile,
         } => {
             let mode = match target_profile.as_str() {
-                "8.1" => postkit::dolby_vision::DvMode::Mode2,
-                "8.4" => postkit::dolby_vision::DvMode::Mode5,
+                "8.1" => postkit::dolby_vision::DvMode::To81,
+                "8.4" => postkit::dolby_vision::DvMode::To84,
                 other => {
                     eprintln!("Unsupported target profile: {other} (supported: 8.1, 8.4)");
                     std::process::exit(1);
