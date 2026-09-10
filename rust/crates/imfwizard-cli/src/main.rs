@@ -492,25 +492,58 @@ enum ComplianceTarget {
 
 const COMPLIANCE_STANDARDS: &[(&str, ComplianceTarget)] = &[
     ("smpte", ComplianceTarget::Structural),
-    ("netflix", ComplianceTarget::Delivery(postkit::profiles::Platform::Netflix)),
-    ("amazon", ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime)),
-    ("prime", ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime)),
-    ("disney", ComplianceTarget::Delivery(postkit::profiles::Platform::Disney)),
-    ("disney+", ComplianceTarget::Delivery(postkit::profiles::Platform::Disney)),
-    ("apple", ComplianceTarget::Delivery(postkit::profiles::Platform::Apple)),
-    ("appletv", ComplianceTarget::Delivery(postkit::profiles::Platform::Apple)),
-    ("hbo", ComplianceTarget::Delivery(postkit::profiles::Platform::Hbo)),
-    ("broadcast", ComplianceTarget::Delivery(postkit::profiles::Platform::Broadcast)),
+    (
+        "netflix",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Netflix),
+    ),
+    (
+        "amazon",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime),
+    ),
+    (
+        "prime",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime),
+    ),
+    (
+        "disney",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Disney),
+    ),
+    (
+        "disney+",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Disney),
+    ),
+    (
+        "apple",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Apple),
+    ),
+    (
+        "appletv",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Apple),
+    ),
+    (
+        "hbo",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Hbo),
+    ),
+    (
+        "broadcast",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::Broadcast),
+    ),
     (
         "archival",
         ComplianceTarget::Delivery(postkit::profiles::Platform::ArchivalPreservation),
     ),
-    ("dci-2k", ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci2k)),
+    (
+        "dci-2k",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci2k),
+    ),
     (
         "cinema-2k",
         ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci2k),
     ),
-    ("dci-4k", ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci4k)),
+    (
+        "dci-4k",
+        ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci4k),
+    ),
     (
         "cinema-4k",
         ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci4k),
@@ -4121,7 +4154,9 @@ fn run() {
                 std::process::exit(1);
             };
             let profile = match target {
-                ComplianceTarget::Delivery(platform) => Some(postkit::profiles::profile_for(platform)),
+                ComplianceTarget::Delivery(platform) => {
+                    Some(postkit::profiles::profile_for(platform))
+                }
                 ComplianceTarget::Structural | ComplianceTarget::DolbyVision => None,
             };
             let checked = match &profile {
