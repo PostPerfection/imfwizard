@@ -1,3 +1,5 @@
+import { escapeHtml } from "../../extern/guikit/src/html.js";
+
 const RECENT_KEY = "imfwizard-recent-projects";
 const RECENT_COLLAPSED_KEY = "imfwizard-recent-projects-collapsed";
 const MAX_RECENT = 20;
@@ -53,17 +55,21 @@ export function renderRecentProjects() {
   const recent = getRecentProjects();
   if (recent.length === 0) { section.hidden = true; return; }
   section.hidden = false;
-  list.innerHTML = recent.map(r => `
-    <div class="recent-item" data-path="${r.path}" title="${r.path}">
+  list.innerHTML = recent.map(r => {
+    const path = escapeHtml(r.path);
+    const title = escapeHtml(r.title || r.path.split(/[/\\]/).pop());
+    return `
+    <div class="recent-item" data-path="${path}" title="${path}">
       <div class="recent-item-text">
-        <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
-        <span class="recent-path">${r.path}</span>
+        <span class="recent-title">${title}</span>
+        <span class="recent-path">${path}</span>
       </div>
-      <button class="recent-queue" data-path="${r.path}" title="Add this IMP to the playlist">+</button>
-      <button class="recent-retitle" data-path="${r.path}" title="Give this IMP a new content title">✎</button>
-      <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
+      <button class="recent-queue" data-path="${path}" title="Add this IMP to the playlist">+</button>
+      <button class="recent-retitle" data-path="${path}" title="Give this IMP a new content title">✎</button>
+      <button class="recent-delete" data-path="${path}" title="Delete this IMP from disk">✕</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
   list.querySelectorAll('.recent-queue').forEach(el => {
     el.addEventListener('click', (event) => {
       event.stopPropagation();

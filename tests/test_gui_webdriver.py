@@ -464,7 +464,14 @@ def test_the_build_shows_hints_progress_and_the_post_build_actions(finished_buil
     assert jobs[0]["config"]["title"] == BUILD_TITLE
 
 
-def test_the_queue_and_the_recent_list_come_back_after_a_restart(finished_build):
+def test_the_queue_the_recent_list_and_the_theme_come_back_after_a_restart(finished_build):
+    finished_build.window.click("#theme-toggle")
+    preferences_file = finished_build.root / XDG_DIRECTORIES["XDG_CONFIG_HOME"] / "imfwizard/preferences.json"
+    wait_until(
+        "the light theme was never saved",
+        lambda: preferences_file.is_file() and json.loads(preferences_file.read_text())["theme"] == "light",
+        STATUS_TIMEOUT_SECONDS,
+    )
     finished_build.window.close()
     window = open_window(finished_build.environment, finished_build.root / "restart.log")
     try:
@@ -483,6 +490,8 @@ def test_the_queue_and_the_recent_list_come_back_after_a_restart(finished_build)
         window.press("ctrl+1")
         wait_for_view(session, "view-project")
         assert session.execute(RECENT_PATHS) == [str(finished_build.output)]
+        assert "light" in body_classes(session)
+        assert session.text("#theme-toggle") == "☀️"
     finally:
         window.close()
 

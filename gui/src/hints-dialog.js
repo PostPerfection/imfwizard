@@ -1,6 +1,4 @@
 export function showHintsDialog(hints, { dialog, list, silence, buildButton, backButton, onSilence, onClose }) {
-  if (!dialog || !list) return Promise.resolve(true);
-
   list.innerHTML = "";
   for (const hint of hints) {
     const item = document.createElement("li");

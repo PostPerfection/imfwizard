@@ -192,3 +192,12 @@ test('a header click flips the collapsed state and stores it', () => {
   assert.equal(store.get(COLLAPSED_KEY), 'true');
   assert.ok(section.classes.has('collapsed'));
 });
+
+test('a quote or an angle bracket in a path stays text', () => {
+  const { list } = setup();
+
+  addRecentProject('/imps/Say "hi" <now>', '');
+
+  assert.ok(list.innerHTML.includes('data-path="/imps/Say &quot;hi&quot; &lt;now&gt;"'));
+  assert.ok(!list.innerHTML.includes('<now>'));
+});

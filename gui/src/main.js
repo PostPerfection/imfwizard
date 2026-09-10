@@ -9,6 +9,7 @@ import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
+import { escapeHtml } from "../../extern/guikit/src/html.js";
 import { PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, BUTTON_SHORTCUTS, VIEW_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
 import { progressStatsText, stageLabel, titleForProgress } from "./build-progress.js";
@@ -49,10 +50,17 @@ document.getElementById("set-gpu-license-show")?.addEventListener("click", (even
   event.currentTarget.textContent = hidden ? "Hide" : "Show";
 });
 
-document.getElementById("theme-toggle")?.addEventListener("click", () => {
-  document.body.classList.toggle("light");
+function applyTheme(theme) {
+  const light = theme === "light";
+  document.body.classList.toggle("light", light);
   const btn = document.getElementById("theme-toggle");
-  btn.textContent = document.body.classList.contains("light") ? "☀️" : "🌙";
+  if (btn) btn.textContent = light ? "☀️" : "🌙";
+}
+
+document.getElementById("theme-toggle")?.addEventListener("click", () => {
+  const theme = document.body.classList.contains("light") ? "dark" : "light";
+  applyTheme(theme);
+  savePrefs({ ...getPrefs(), theme });
 });
 
 // === Keyboard shortcuts ===
@@ -159,6 +167,7 @@ async function initializePreferences() {
 
   loadSettings();
   const preferences = getPrefs();
+  applyTheme(preferences.theme);
   applyGpuSetting(
     preferences.gpu,
     preferences.gpuLicense,
@@ -381,8 +390,8 @@ function renderAssets() {
   list.innerHTML = project.assets.map(a => `
     <div class="asset-item" data-asset-id="${a.id}" draggable="true">
       <span class="asset-icon">${icons[a.type]}</span>
-      <span class="asset-name" title="${a.path}">${a.name}</span>
-      <span class="asset-meta">${a.meta || a.type}</span>
+      <span class="asset-name" title="${escapeHtml(a.path)}">${escapeHtml(a.name)}</span>
+      <span class="asset-meta">${escapeHtml(a.meta || a.type)}</span>
       <button class="asset-remove" data-remove-id="${a.id}" title="Remove from project">✕</button>
     </div>
   `).join('');
@@ -421,15 +430,15 @@ function renderSegments() {
       <div class="reel-tracks">
         <div class="track track-picture" data-seg-id="${seg.id}" data-track="picture">
           <span class="track-label">Picture</span>
-          <span class="track-info ${seg.picture ? 'has-content' : ''}">${seg.picture ? seg.picture.name : 'Drop video here'}</span>
+          <span class="track-info ${seg.picture ? 'has-content' : ''}">${seg.picture ? escapeHtml(seg.picture.name) : 'Drop video here'}</span>
         </div>
         <div class="track track-sound" data-seg-id="${seg.id}" data-track="sound">
           <span class="track-label">Sound</span>
-          <span class="track-info ${seg.sound ? 'has-content' : ''}">${seg.sound ? seg.sound.name : 'Drop audio here'}</span>
+          <span class="track-info ${seg.sound ? 'has-content' : ''}">${seg.sound ? escapeHtml(seg.sound.name) : 'Drop audio here'}</span>
         </div>
         <div class="track track-subtitle" data-seg-id="${seg.id}" data-track="subtitle">
           <span class="track-label">Timed Text</span>
-          <span class="track-info ${seg.subtitle ? 'has-content' : ''}">${seg.subtitle ? seg.subtitle.name : 'Optional'}</span>
+          <span class="track-info ${seg.subtitle ? 'has-content' : ''}">${seg.subtitle ? escapeHtml(seg.subtitle.name) : 'Optional'}</span>
         </div>
       </div>
     </div>
@@ -773,7 +782,7 @@ async function renderAudioMap() {
     audioMapShape = { path: sound.path, ...shape };
   } catch (e) {
     audioMapShape = null;
-    container.innerHTML = `<div class="audio-map-empty">${e}</div>`;
+    container.innerHTML = `<div class="audio-map-empty">${escapeHtml(e)}</div>`;
     return;
   }
   const header = audioMapShape.destination_names.map((name) => `<th>${name}</th>`).join("");
@@ -953,9 +962,10 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   statsEl.textContent = "";
   setStatus("");
 
+  currentJobId = null;
   const unlisten = await listen("pipeline-progress", (event) => {
     const p = event.payload;
-    if (currentJobId && p.job_id !== currentJobId) return;
+    if (p.job_id !== currentJobId) return;
     progressBar.value = p.percent;
     stageEl.textContent = stageLabel(p.stage);
     setTitleProgress(p.percent, p.stage);
