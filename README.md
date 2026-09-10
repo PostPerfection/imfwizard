@@ -88,7 +88,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Watch folder** (`watch <dir> --output <dir> [--webhook-url <url>] [--interval <seconds>] [-- <create flags>]`), build an IMP from every video file or frame folder that lands in the watched directory, once it stops changing. The file stem is the title, a same-named `.wav` and `.ttml` beside it become the sound and subtitle, the job log is written beside the package, the source moves into `done/` or `failed/` and a webhook gets `imp.created` or `imp.failed`
 - **EDL conform**, `conform --input <timeline> --media-dir <dir> --output <imp>` builds an IMP whose CPL follows a CMX3600 or FCP7 timeline, one picture and sound resource per event, trimmed to the event's source range
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
-- **Partial restore**, extract tracks from existing IMPs back to raw files (asdcp-unwrap)
+- **Partial restore** (`restore --input <imp> --output <dir> [--video-only|--audio-only]`), unwraps every track file the IMP's CPLs name, in process: a picture track becomes one numbered `.j2c` codestream per frame and a sound track becomes one WAV at the channel count, rate and depth the track file declares, each under a directory named after the track file
 
 ### Comparison & Analysis
 - **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate) or pixel PSNR/SSIM/VMAF with `--pixel`/`--vmaf`

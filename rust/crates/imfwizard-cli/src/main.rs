@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use imfwizard_core::prores::ContainerRaster;
-use std::path::PathBuf;
+use postkit::restore::{RestoreSelection, TrackKind};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -4352,90 +4353,53 @@ fn run() {
             video_only,
             audio_only,
         } => {
-            let input_path = PathBuf::from(&input);
-            let output_path = PathBuf::from(&output);
-            std::fs::create_dir_all(&output_path).unwrap_or_default();
-
-            let mxf_files: Vec<PathBuf> = std::fs::read_dir(&input_path)
-                .unwrap_or_else(|e| {
-                    eprintln!("Cannot read IMP directory: {e}");
+            let selection = match (video_only, audio_only) {
+                (true, true) => {
+                    eprintln!("Error: --video-only and --audio-only ask for different tracks");
                     std::process::exit(1);
-                })
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| e.eq_ignore_ascii_case("mxf"))
-                })
-                .collect();
-
-            if mxf_files.is_empty() {
-                eprintln!("No MXF files found in {input}");
+                }
+                (true, false) => RestoreSelection::PictureOnly,
+                (false, true) => RestoreSelection::SoundOnly,
+                (false, false) => RestoreSelection::All,
+            };
+            let report = match postkit::restore::restore_package(
+                Path::new(&input),
+                Path::new(&output),
+                selection,
+                None,
+            ) {
+                Ok(report) => report,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                }
+            };
+            for skipped in &report.skipped {
+                eprintln!(
+                    "Skipped {}: {}",
+                    skipped.track_file.display(),
+                    skipped.reason
+                );
+            }
+            for track in &report.restored {
+                let written = match track.kind {
+                    TrackKind::Picture => format!("{} codestreams", track.written),
+                    TrackKind::Sound => format!("{} samples a channel", track.written),
+                };
+                println!(
+                    "{} -> {} ({written})",
+                    track.track_file.display(),
+                    track.output.display()
+                );
+            }
+            if report.restored.is_empty() {
+                eprintln!("No track file the CPLs of {input} name matched the selection");
                 std::process::exit(1);
             }
-
-            let mut extracted = 0u32;
-            for mxf in &mxf_files {
-                let stem = mxf.file_stem().unwrap_or_default().to_string_lossy();
-                let track_dir = output_path.join(stem.as_ref());
-                std::fs::create_dir_all(&track_dir).unwrap_or_default();
-
-                // Use asdcp-unwrap to extract essence from MXF
-                let status = std::process::Command::new("asdcp-unwrap")
-                    .arg(mxf)
-                    .arg("-d")
-                    .arg(&track_dir)
-                    .status();
-
-                match status {
-                    Ok(s) if s.success() => {
-                        // Check if we should filter by type
-                        let has_j2c = std::fs::read_dir(&track_dir)
-                            .map(|rd| {
-                                rd.filter_map(|e| e.ok()).any(|e| {
-                                    e.path()
-                                        .extension()
-                                        .and_then(|x| x.to_str())
-                                        .is_some_and(|x| x == "j2c")
-                                })
-                            })
-                            .unwrap_or(false);
-                        let has_wav = std::fs::read_dir(&track_dir)
-                            .map(|rd| {
-                                rd.filter_map(|e| e.ok()).any(|e| {
-                                    e.path()
-                                        .extension()
-                                        .and_then(|x| x.to_str())
-                                        .is_some_and(|x| x == "wav" || x == "pcm")
-                                })
-                            })
-                            .unwrap_or(false);
-
-                        if (video_only && !has_j2c) || (audio_only && !has_wav) {
-                            // Remove the track dir if it doesn't match the filter
-                            let _ = std::fs::remove_dir_all(&track_dir);
-                            continue;
-                        }
-
-                        println!("Extracted {}", mxf.display());
-                        extracted += 1;
-                    }
-                    Ok(s) => {
-                        eprintln!(
-                            "asdcp-unwrap failed for {} (exit {})",
-                            mxf.display(),
-                            s.code().unwrap_or(-1)
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to run asdcp-unwrap: {e}");
-                        eprintln!("Install asdcplib tools or ensure asdcp-unwrap is in PATH");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            println!("Restored {extracted} track(s) to {output}");
+            println!(
+                "Restored {} track file(s) to {output}",
+                report.restored.len()
+            );
         }
 
         Commands::DvConvert {
