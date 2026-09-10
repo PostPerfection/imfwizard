@@ -78,16 +78,18 @@ runner OSes, so the IDT, RRT, ODT path in `aces.rs` has no test and no recorded
 run. Closing it means building CTL on each runner (or vendoring a binary) and a
 test that reads the rendered frame back.
 
-## Open: Dolby Vision MEL/FEL mapping and profile 4 have no input (2026-09-09)
+## Open: Dolby Vision FEL and profile 4 have no input (2026-09-09)
 
-README line 98 names MEL/FEL mapping and profile 4 to 8.1 conversion. What runs
-and is tested is profile 5 retargeted to 8.1 and 8.4
-(`dv_convert_retargets_profile_5`). MEL and FEL only exist in a profile 7 RPU
-and profile 4 in a profile 4 one; postkit's `write_dolby_vision_fixture` makes
-5, 8.1 and 8.4 and dovi_tool generates neither, so `DvMode::Mode1` (ToMel) and
-`Mode4` are unreachable from `dv-convert --target-profile`, which takes 8.1 and
-8.4 only. Closing it means a profile 7 and a profile 4 fixture source, then the
-two modes on the flag and a read back through dovi_tool.
+README line 98 names MEL/FEL mapping and profile 4 to 8.1 conversion. MEL is
+done: `dv-convert --target-profile mel` runs `ConversionMode::ToMel`, which the
+crate accepts on profile 7 or 8, and an 8.1 RPU comes back profile 7 MEL
+(`dv_convert_retargets_to_mel`). FEL is not: a full enhancement layer carries
+NLQ residual data that neither `dovi_tool generate` nor the crate's
+`GenerateProfile` can synthesise, and nothing in the tree has one. Profile 4 is
+worse than untested: `convert_with_mode` takes `To81` on profiles 7, 8 and 5
+only, so a profile 4 RPU is refused by the library and the README's profile 4
+to 8.1 conversion cannot happen at all. Closing FEL means a real profile 7 FEL
+source. Closing profile 4 means the conversion existing first.
 
 ## Open: the macOS .dmg is unsigned and unnotarised (2026-09-09)
 

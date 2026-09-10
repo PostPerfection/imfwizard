@@ -531,3 +531,31 @@ fn every_subcommand_names_a_missing_input() {
             .stderr(predicate::str::contains(named));
     }
 }
+
+/// README line 98 names MEL mapping. A minimum enhancement layer is an
+/// enhancement layer, so the converted RPU comes back as profile 7.
+#[test]
+fn dv_convert_retargets_to_mel() {
+    let directory = TempDir::new().unwrap();
+    let fixture = profile81_fixture(directory.path());
+    let rpu = directory.path().join("profile81.bin");
+    extract_rpu(&fixture, &rpu);
+
+    let converted = directory.path().join("mel.bin");
+    cmd()
+        .arg("dv-convert")
+        .arg("-i")
+        .arg(&rpu)
+        .arg("-o")
+        .arg(&converted)
+        .args(["--target-profile", "mel"])
+        .assert()
+        .success();
+
+    let exported = exported_rpus(&converted);
+    assert_eq!(exported.len(), DOLBY_VISION_FIXTURE_FRAMES);
+    for parsed in &exported {
+        assert_eq!(parsed["dovi_profile"], 7);
+        assert_eq!(parsed["el_type"], "MEL");
+    }
+}

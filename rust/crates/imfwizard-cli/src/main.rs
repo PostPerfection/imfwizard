@@ -1611,7 +1611,7 @@ enum Commands {
         #[arg(short, long)]
         output: String,
 
-        /// Target DV profile (8.1, 8.4)
+        /// Target DV profile (8.1, 8.4, mel)
         #[arg(long, default_value = "8.1")]
         target_profile: String,
     },
@@ -4461,8 +4461,10 @@ fn run() {
             let mode = match target_profile.as_str() {
                 "8.1" => postkit::dolby_vision::DvMode::To81,
                 "8.4" => postkit::dolby_vision::DvMode::To84,
+                // a minimum enhancement layer makes the result profile 7
+                "mel" => postkit::dolby_vision::DvMode::ToMel,
                 other => {
-                    eprintln!("Unsupported target profile: {other} (supported: 8.1, 8.4)");
+                    eprintln!("Unsupported target profile: {other} (supported: 8.1, 8.4, mel)");
                     std::process::exit(1);
                 }
             };
