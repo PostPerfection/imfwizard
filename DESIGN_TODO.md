@@ -70,7 +70,7 @@ the `st2067_3_complaint` driver importing it under that namespace.
 
 ## Open: the ctlrender ACES path has never run (2026-09-09)
 
-README line 65 sells `aces` through ctlrender with an ffmpeg fallback. The
+The README names the ctlrender path as untested since 2026-09-10. The
 ffmpeg fallback is tested (`aces_falls_back_to_ffmpeg_when_ctlrender_is_missing`)
 and is a colorimetric AP0 to Rec.709 conversion with no RRT. ctlrender is
 installed on no CI runner and AMPAS CTL is not packaged for any of the three
@@ -80,7 +80,7 @@ test that reads the rendered frame back.
 
 ## Open: Dolby Vision FEL and profile 4 have no input (2026-09-09)
 
-README line 98 names MEL/FEL mapping and profile 4 to 8.1 conversion. MEL is
+The README stopped selling FEL and profile 4 on 2026-09-10. MEL is
 done: `dv-convert --target-profile mel` runs `ConversionMode::ToMel`, which the
 crate accepts on profile 7 or 8, and an 8.1 RPU comes back profile 7 MEL
 (`dv_convert_retargets_to_mel`). FEL is not: a full enhancement layer carries

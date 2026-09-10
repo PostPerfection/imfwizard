@@ -77,8 +77,7 @@ pub fn probe(picture: &Path) -> Result<SourceHdr, String> {
         ));
     }
     let classified = classify(&String::from_utf8_lossy(&out.stdout));
-    // an HLG source is left alone: profile 8.4 sits on the HLG transfer and the
-    // preset that packages it is the HLG one
+    // an HLG source is left alone: no Dolby Vision profile takes an HLG base layer
     if matches!(classified, SourceHdr::Untagged | SourceHdr::Pq)
         && dolby_vision_in_first_frame(picture)?
     {

@@ -63,7 +63,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
-- **ACES pipeline**, full IDT→RRT→ODT pipeline via ctlrender (with ffmpeg fallback)
+- **ACES conversion**, `aces` runs ctlrender's IDT, RRT and ODT when ctlrender is installed, a path no test covers. Without ctlrender, ffmpeg converts AP0 to Rec.709 with no rendering transform
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
 - **Dolby Atmos ADM BWF import**, parse ADM metadata and wrap the PCM essence to MXF (not a Dolby IAB bitstream)
@@ -95,7 +95,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
-- **Dolby Vision Profile 8.1**, HDR10-compatible single-layer DV (MEL/FEL mapping, profile 4→8.1 conversion)
+- **Dolby Vision profile 8.1**, `dv-extract`, `dv-convert --target-profile 8.1|mel` and `dv-inject` retarget and rewrap an RPU. A profile 7 MEL comes from an 8.1 RPU. FEL and profile 4 have no input and are not converted
 - **Prometheus metrics**, `/metrics` endpoint on REST API exposing job-state gauges
 - **Shell tab completion**, bash, zsh, and fish completion scripts (`imfwizard completion bash`)
 

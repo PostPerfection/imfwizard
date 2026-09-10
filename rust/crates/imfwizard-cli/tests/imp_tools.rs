@@ -597,8 +597,8 @@ fn dolby_vision_base_layer(directory: &Path) -> PathBuf {
 }
 
 /// Dolby Vision profiles and levels V1.2.92 table 1 gives profile 8 a PQ
-/// BT.2020 base layer, and cross-compatibility 1 is CTA HDR10, so the level 6
-/// light levels have to be there too.
+/// BT.2020 base layer, and cross-compatibility 1 is CTA HDR10, whose level 6
+/// light levels are reported when present.
 #[test]
 fn compliance_passes_a_dolby_vision_master_signalled_the_way_table_1_says() {
     let directory = TempDir::new().unwrap();
@@ -680,5 +680,69 @@ fn compliance_names_the_dolby_level_a_package_fits() {
         .success()
         .stdout(predicate::str::contains("Dolby Vision level 03 fhd24"))
         .stdout(predicate::str::contains("base layer VUI 1,1,1,0"))
+        .stdout(predicate::str::contains("PASS"));
+}
+
+const PQ_MAX_CONTENT_LIGHT_LEVEL: u16 = 993;
+const PQ_MAX_FRAME_AVERAGE_LIGHT_LEVEL: u16 = 362;
+
+// create reads the source colour off these tags
+const PQ_BT2020_TAGS: [&str; 8] = [
+    "-color_primaries",
+    "bt2020",
+    "-color_trc",
+    "smpte2084",
+    "-colorspace",
+    "bt2020nc",
+    "-color_range",
+    "tv",
+];
+
+fn pq_bt2020_clip(directory: &Path, frames: u32, fps: u32) -> PathBuf {
+    let clip = directory.join("pq_bt2020.mkv");
+    let source = format!("testsrc=size={RASTER}:rate={fps}");
+    let frames = frames.to_string();
+    let output = clip.to_string_lossy().to_string();
+    let mut arguments = vec!["-f", "lavfi", "-i", source.as_str()];
+    arguments.extend(PQ_BT2020_TAGS);
+    arguments.extend([
+        "-frames:v",
+        frames.as_str(),
+        "-c:v",
+        "ffv1",
+        "-pix_fmt",
+        "yuv420p10le",
+        output.as_str(),
+    ]);
+    ffmpeg(&arguments);
+    clip
+}
+
+#[test]
+fn compliance_grades_a_pq_bt2020_package_against_table_1() {
+    let directory = TempDir::new().unwrap();
+    let clip = pq_bt2020_clip(directory.path(), SHORT_FRAMES, FRAMES_PER_SECOND);
+    let imp = directory.path().join("pq_bt2020");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy()])
+        .args(["-t", "Dolby"])
+        .args(["--video", &clip.to_string_lossy()])
+        .args(["--raster", RASTER])
+        .args(["--hdr", "pq-bt2020"])
+        .args(["--max-cll", &PQ_MAX_CONTENT_LIGHT_LEVEL.to_string()])
+        .args(["--max-fall", &PQ_MAX_FRAME_AVERAGE_LIGHT_LEVEL.to_string()])
+        .args(["--fps-num", &FRAMES_PER_SECOND.to_string()])
+        .args(["--fps-den", "1"])
+        .assert()
+        .success();
+
+    cmd()
+        .args(["compliance", "-i", &imp.to_string_lossy(), "-s", "dolby"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("base layer VUI 16,9,9,0"))
+        .stdout(predicate::str::contains(format!(
+            "MaxCLL {PQ_MAX_CONTENT_LIGHT_LEVEL}"
+        )))
         .stdout(predicate::str::contains("PASS"));
 }

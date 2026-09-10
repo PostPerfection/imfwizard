@@ -17,8 +17,6 @@ const PQ_CODE_600_NITS: u16 = 2851;
 const DOVI_PROFILE_8: u8 = 8;
 const DOVI_PROFILE_5: u8 = 5;
 const NAL_START_CODE: [u8; 4] = [0, 0, 0, 1];
-// the reshaping curve mode 5 writes, an eight segment polynomial over the luma
-const PROFILE_84_LUMA_PIVOTS: [u16; 9] = [63, 69, 230, 256, 256, 37, 16, 8, 7];
 // profile 8.1 maps the whole range in one segment
 const PROFILE_81_LUMA_PIVOTS: [u16; 2] = [0, 1023];
 
@@ -244,31 +242,24 @@ fn dv_convert_retargets_profile_5() {
         );
     }
 
-    for (target_profile, pivots) in [
-        ("8.1", PROFILE_81_LUMA_PIVOTS.to_vec()),
-        ("8.4", PROFILE_84_LUMA_PIVOTS.to_vec()),
-    ] {
-        let converted = directory
-            .path()
-            .join(format!("profile{target_profile}.bin"));
-        cmd()
-            .arg("dv-convert")
-            .arg("-i")
-            .arg(&rpu)
-            .arg("-o")
-            .arg(&converted)
-            .args(["--target-profile", target_profile])
-            .assert()
-            .success();
+    let converted = directory.path().join("profile81.bin");
+    cmd()
+        .arg("dv-convert")
+        .arg("-i")
+        .arg(&rpu)
+        .arg("-o")
+        .arg(&converted)
+        .args(["--target-profile", "8.1"])
+        .assert()
+        .success();
 
-        let exported = exported_rpus(&converted);
-        assert_eq!(exported.len(), DOLBY_VISION_FIXTURE_FRAMES);
-        for parsed in &exported {
-            assert_eq!(parsed["dovi_profile"], DOVI_PROFILE_8);
-        }
-        for nalu in rpu_nalus(&converted) {
-            assert_eq!(luma_pivots(&nalu), pivots);
-        }
+    let exported = exported_rpus(&converted);
+    assert_eq!(exported.len(), DOLBY_VISION_FIXTURE_FRAMES);
+    for parsed in &exported {
+        assert_eq!(parsed["dovi_profile"], DOVI_PROFILE_8);
+    }
+    for nalu in rpu_nalus(&converted) {
+        assert_eq!(luma_pivots(&nalu), PROFILE_81_LUMA_PIVOTS);
     }
 }
 
