@@ -310,12 +310,53 @@ fn a_higher_psnr_target_leaves_larger_codestreams() {
 }
 
 /// Under a quality target the bitrate becomes a per-frame byte ceiling, and a
-/// frame the target pushes over it is refused by name rather than shipped.
+/// frame the target pushes over it is encoded again by ratio to fit.
 #[test]
-fn a_psnr_target_that_breaks_the_byte_cap_is_refused_naming_the_frame() {
+fn a_psnr_target_over_the_byte_cap_is_held_to_the_cap() {
     let dir = TempDir::new().unwrap();
     let clip = detailed_clip(dir.path());
     let cap_mbps = 1.0;
+    let cap_bytes =
+        imfwizard_core::encode::codestream_byte_cap_for_bitrate(f64::from(FPS), cap_mbps);
+
+    let capped = dir.path().join("capped");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &capped.to_string_lossy(),
+            "-t",
+            "Capped",
+            "--video",
+            &clip.to_string_lossy(),
+            "--raster",
+            RASTER_2K,
+            "--bitrate",
+            &cap_mbps.to_string(),
+            "--quality-psnr",
+            "60",
+            "--fps-num",
+            &FPS.to_string(),
+            "--fps-den",
+            "1",
+            "--keep-intermediates",
+        ])
+        .assert()
+        .success();
+    let largest = codestream_sizes(&capped).into_iter().max().unwrap();
+    assert!(
+        largest <= cap_bytes,
+        "a frame reached {largest} bytes over the {cap_bytes} byte cap"
+    );
+}
+
+/// A cap below what a codestream's headers alone take cannot be met by any
+/// allocation, so the frame is refused by name rather than shipped over it.
+#[test]
+fn a_byte_cap_no_frame_can_meet_is_refused_naming_the_frame() {
+    let dir = TempDir::new().unwrap();
+    let clip = detailed_clip(dir.path());
+    let cap_mbps = 0.001;
     let cap_bytes =
         imfwizard_core::encode::codestream_byte_cap_for_bitrate(f64::from(FPS), cap_mbps);
 
