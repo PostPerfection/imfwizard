@@ -1525,6 +1525,61 @@ mod tests {
     }
 
     #[test]
+    fn a_dolby_vision_source_fills_the_light_levels_the_panel_left_unset() {
+        let directory = scratch_directory("hdr-dolby-vision-levels");
+        let picture = postkit::dolby_vision::write_dolby_vision_fixture(
+            &directory,
+            "dv81.hevc",
+            postkit::dolby_vision::DolbyVisionFixtureProfile::Profile81,
+            Some(
+                dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlockLevel6 {
+                    max_display_mastering_luminance: 1000,
+                    min_display_mastering_luminance: 1,
+                    max_content_light_level: 993,
+                    max_frame_average_light_level: 362,
+                },
+            ),
+            None,
+        )
+        .expect("the Dolby Vision fixture");
+
+        // create takes a container, not a raw hevc stream
+        let signalled = directory.join("dv81.mp4");
+        run_ffmpeg(&[
+            "-i",
+            &picture.to_string_lossy(),
+            "-c",
+            "copy",
+            "-color_primaries",
+            "bt2020",
+            "-color_trc",
+            PQ_TRANSFER_TAG,
+            "-colorspace",
+            "bt2020nc",
+            &signalled.to_string_lossy(),
+        ]);
+        let mut compositions = vec![composition(&signalled)];
+
+        super::plan_compositions(&mut compositions, &shared_plan(Some("pq-bt2020"))).unwrap();
+
+        let filled = compositions[0].hdr.as_ref().expect("the settled hdr");
+        assert_eq!(filled.max_cll, Some(993));
+        assert_eq!(filled.max_fall, Some(362));
+
+        // the panel's own levels win over the RPU
+        let measured = imfwizard_core::hdr_wcg::HdrWcg::from_flags("pq-bt2020", None)
+            .unwrap()
+            .with_content_light_levels(Some(500), Some(100))
+            .unwrap();
+        let kept = imfwizard_core::hdr_source::resolve(Some(&signalled), Some(measured))
+            .unwrap()
+            .expect("the settled hdr");
+        assert_eq!(kept.max_cll, Some(500));
+        assert_eq!(kept.max_fall, Some(100));
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
     fn a_source_whose_transfer_contradicts_the_preset_is_refused_naming_both() {
         let directory = scratch_directory("hdr-contradicts-preset");
         let mut compositions = vec![

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`watermark`, `dcdm` and the S3 and Aspera deliveries run in tests**: `watermark.rs` reads the marked frames back and finds the mark in the bottom left with the picture above it unchanged, `dcdm.rs` reads the X'Y'Z' TIFFs back at the D65 white codes 3883, 3960 and 4092 and through a halving LUT, and `deliver.rs` puts a stand-in `aws` and `ascp` on PATH and checks the argv each was handed and the tracker row. The desktop pipeline's Dolby Vision fill is tested too: `a_dolby_vision_source_fills_the_light_levels_the_panel_left_unset` drives an 8.1 source through `plan_compositions` and reads MaxCLL 993 and MaxFALL 362 back off the composition.
+
 ### Removed
 - **The `aces` ctlrender path is gone and the subcommand says what it does**: `aces` advertised an IDT, RRT and ODT chain through ctlrender, which has never run here and which AMPAS packages for none of the CI runner operating systems, so the only path any test ever reached was the ffmpeg fallback under it. `--idt`, `--odt` and `--ctl-dir` are gone, and so is `--target`, which sent the run through postkit's colour converter instead. The subcommand takes `-i` and `-o` only and calls `aces::convert_ap0_to_rec709`: the AP0 to AP1 and AP1 to Rec.709 matrices as two `colorchannelmixer` stages, then `zscale=transferin=linear:transfer=bt709`, with no rendering transform and no fallback message. `doctor` no longer checks for ctlrender. `media_tools.rs` converts a neutral frame and a saturated one and reads both back, holding each channel to the published AP0 to Rec.709 matrix followed by the BT.1886 encoding. `--source-colourspace aces` and `acescg` stay refused, and the refusal points at `--source-lut` rather than at flags that no longer exist.
 
