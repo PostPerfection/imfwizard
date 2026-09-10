@@ -9,6 +9,11 @@ import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
+import { PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, BUTTON_SHORTCUTS, VIEW_SHORTCUTS } from "./shortcut-bindings.js";
+import { showHintsDialog } from "./hints-dialog.js";
+import { progressStatsText, stageLabel, titleForProgress } from "./build-progress.js";
+import { notifyBuildComplete } from "./build-notification.js";
+import { initRecentProjects, getRecentProjects, addRecentProject, removeRecentProject, renderRecentProjects } from "./recent-projects.js";
 
 // === Browse wrapper ===
 const LAST_BROWSE_DIR_KEY = "imfwizard-last-browse-dir";
@@ -63,17 +68,6 @@ function switchView(viewName) {
 
 const SHORTCUTS_KEY = "imfwizard-shortcuts";
 
-const PROJECT_BUTTON_SHORTCUTS = [
-  { id: "new-project", label: "New IMP", binding: "Ctrl+N", buttonId: "btn-new-project" },
-  { id: "open-project", label: "Open IMP", binding: "Ctrl+O", buttonId: "btn-open-project" },
-  { id: "supplement", label: "Create supplement", binding: "Ctrl+Shift+S", buttonId: "btn-supplement" },
-  { id: "build", label: "Create IMP", binding: "Ctrl+B", buttonId: "btn-build" },
-  { id: "preview", label: "Preview", binding: "Ctrl+P", buttonId: "btn-preview" },
-  { id: "import-video", label: "Import video", binding: "Ctrl+I", buttonId: "import-video" },
-];
-const THEME_BUTTON_SHORTCUT = { id: "toggle-theme", label: "Toggle light / dark theme", binding: "Ctrl+Shift+T", buttonId: "theme-toggle" };
-const BUTTON_SHORTCUTS = [...PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT];
-
 function clickAction({ id, label, binding, buttonId }, category) {
   return { id, label, category, binding, handler: () => document.getElementById(buttonId)?.click() };
 }
@@ -100,13 +94,7 @@ initShortcuts({
   onChange: refreshButtonTooltips,
   actions: [
     ...PROJECT_BUTTON_SHORTCUTS.map((shortcut) => clickAction(shortcut, "Project")),
-    viewAction("project", "Project", "Ctrl+1"),
-    viewAction("timeline", "Timeline", "Ctrl+2"),
-    viewAction("validate", "Validate", "Ctrl+3"),
-    viewAction("tools", "Tools", "Ctrl+4"),
-    viewAction("deliver", "Deliver", "Ctrl+5"),
-    viewAction("jobs", "Jobs", "Ctrl+6"),
-    viewAction("settings", "Settings", "Ctrl+7"),
+    ...VIEW_SHORTCUTS.map(({ view, label, binding }) => viewAction(view, label, binding)),
     previewAction("preview-play-pause", "Play / pause", "Space", previewPlayPause),
     previewAction("preview-back", `Back ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowLeft", () => previewSeek(-PREVIEW_SEEK_SECONDS)),
     previewAction("preview-forward", `Forward ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowRight", () => previewSeek(PREVIEW_SEEK_SECONDS)),
@@ -252,34 +240,15 @@ document.getElementById("settings-form")?.addEventListener("submit", async (e) =
 });
 
 // Advisory findings the pre-build check made. Returns true to build anyway.
-function showHintsDialog(hints) {
-  const dialog = document.getElementById("hints-dialog");
-  const list = document.getElementById("hints-list");
-  const silence = document.getElementById("hints-silence");
-  if (!dialog || !list) return Promise.resolve(true);
-
-  list.innerHTML = "";
-  for (const hint of hints) {
-    const item = document.createElement("li");
-    item.textContent = hint;
-    list.appendChild(item);
-  }
-  silence.checked = false;
-  dialog.hidden = false;
-
-  return new Promise((resolve) => {
-    const close = (build) => {
-      dialog.hidden = true;
-      if (silence.checked) savePrefs({ ...getPrefs(), showHintsBeforeBuild: false });
-      loadSettings();
-      document.getElementById("hints-build").removeEventListener("click", onBuild);
-      document.getElementById("hints-back").removeEventListener("click", onBack);
-      resolve(build);
-    };
-    const onBuild = () => close(true);
-    const onBack = () => close(false);
-    document.getElementById("hints-build").addEventListener("click", onBuild);
-    document.getElementById("hints-back").addEventListener("click", onBack);
+function askToBuildAnyway(hints) {
+  return showHintsDialog(hints, {
+    dialog: document.getElementById("hints-dialog"),
+    list: document.getElementById("hints-list"),
+    silence: document.getElementById("hints-silence"),
+    buildButton: document.getElementById("hints-build"),
+    backButton: document.getElementById("hints-back"),
+    onSilence: () => savePrefs({ ...getPrefs(), showHintsBeforeBuild: false }),
+    onClose: loadSettings,
   });
 }
 
@@ -988,14 +957,9 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     const p = event.payload;
     if (currentJobId && p.job_id !== currentJobId) return;
     progressBar.value = p.percent;
-    stageEl.textContent = p.stage.charAt(0).toUpperCase() + p.stage.slice(1);
+    stageEl.textContent = stageLabel(p.stage);
     setTitleProgress(p.percent, p.stage);
-    const elapsed = formatTime(p.elapsed_secs);
-    let eta = "";
-    if (p.percent > 0 && p.percent < 100) {
-      eta = ` ETA ${formatTime((p.elapsed_secs / p.percent) * (100 - p.percent))}`;
-    }
-    statsEl.textContent = `${elapsed}${p.fps > 0 ? ` ${p.fps.toFixed(1)}fps` : ''}${eta}`;
+    statsEl.textContent = progressStatsText(p);
     if (p.stage === "done") {
       setStatus("Build complete");
       setTitleProgress(-1);
@@ -1030,7 +994,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     });
     let result = await submit(!getPrefs().showHintsBeforeBuild);
     if (result.jobId === null) {
-      if (!await showHintsDialog(result.hints)) {
+      if (!await askToBuildAnyway(result.hints)) {
         progressSection.style.display = "none";
         setStatus("Build cancelled");
         endBuild();
@@ -1376,7 +1340,6 @@ function setStatus(text) {
     el.title = text;
   }
 }
-function formatTime(secs) { const m = Math.floor(secs / 60); const s = Math.floor(secs % 60); return m > 0 ? `${m}m${s}s` : `${s}s`; }
 
 // === Free disk ===
 const DISK_REFRESH_MS = 30000;
@@ -1419,136 +1382,57 @@ document.getElementById("prop-title")?.addEventListener("input", (e) => {
 });
 
 // === Recent Projects ===
-const RECENT_KEY = "imfwizard-recent-projects";
-const RECENT_COLLAPSED_KEY = "imfwizard-recent-projects-collapsed";
-const MAX_RECENT = 20;
-
-function recentProjectsCollapsed() {
-  return localStorage.getItem(RECENT_COLLAPSED_KEY) !== "false";
-}
-
-function applyRecentProjectsCollapsed() {
-  const section = document.getElementById("recent-projects");
-  const toggle = document.getElementById("recent-toggle");
-  if (!section) return;
-  const collapsed = recentProjectsCollapsed();
-  section.classList.toggle("collapsed", collapsed);
-  if (toggle) {
-    toggle.textContent = collapsed ? "▶" : "▼";
-    toggle.setAttribute("aria-expanded", String(!collapsed));
+async function retitleRecentProject(dir) {
+  const title = prompt("New content title:", dir.split(/[/\\]/).pop());
+  if (!title?.trim()) return;
+  const ok = await tauriConfirm(
+    `Retitle to ${title}? The CPL gets a new composition id, so any KDM, supplemental IMP or delivery made from the old one no longer matches. A signed package loses its signature.`,
+    { title: "Retitle IMP", kind: "warning" },
+  );
+  if (!ok) return;
+  let newPath;
+  try {
+    newPath = await invoke("retitle_imp", { path: dir, title });
+  } catch (e) {
+    tauriMessage(String(e), { title: "Retitle failed", kind: "error" });
+    return;
   }
+  removeRecentProject(dir);
+  addRecentProject(newPath, title.trim());
+  setStatus(`Retitled to ${title.trim()}`);
 }
 
-document.getElementById("recent-header")?.addEventListener("click", () => {
-  localStorage.setItem(RECENT_COLLAPSED_KEY, String(!recentProjectsCollapsed()));
-  applyRecentProjectsCollapsed();
+async function deleteRecentProject(dir) {
+  const ok = await tauriConfirm(`Delete ${dir} and everything in it?`, {
+    title: "Delete IMP",
+    kind: "warning",
+  });
+  if (!ok) return;
+  try {
+    await invoke("delete_imp", { path: dir });
+  } catch (e) {
+    tauriMessage(String(e), { title: "Delete failed", kind: "error" });
+    return;
+  }
+  removeRecentProject(dir);
+  setStatus(`Deleted ${dir}`);
+  refreshDiskSpace();
+}
+
+initRecentProjects({
+  section: document.getElementById("recent-projects"),
+  list: document.getElementById("recent-list"),
+  header: document.getElementById("recent-header"),
+  toggle: document.getElementById("recent-toggle"),
+  onOpen: (path) => openImp(path),
+  onQueue: (path) => addToPlaylist(path, recentTitleFor(path)),
+  onRetitle: retitleRecentProject,
+  onDelete: deleteRecentProject,
+  afterRender: applyPreviewSelection,
+  setStatus,
 });
 
-function getRecentProjects() {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
-  catch { return []; }
-}
-
-function addRecentProject(path, title) {
-  let recent = getRecentProjects().filter(r => r.path !== path);
-  recent.unshift({ path, title, time: Date.now() });
-  if (recent.length > MAX_RECENT) recent = recent.slice(0, MAX_RECENT);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-  renderRecentProjects();
-}
-
-function removeRecentProject(path) {
-  const recent = getRecentProjects().filter(r => r.path !== path);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-  renderRecentProjects();
-}
-
-function renderRecentProjects() {
-  const section = document.getElementById("recent-projects");
-  const list = document.getElementById("recent-list");
-  if (!section || !list) return;
-  applyRecentProjectsCollapsed();
-  const recent = getRecentProjects();
-  if (recent.length === 0) { section.hidden = true; return; }
-  section.hidden = false;
-  list.innerHTML = recent.map(r => `
-    <div class="recent-item" data-path="${r.path}" title="${r.path}">
-      <div class="recent-item-text">
-        <span class="recent-title">${r.title || r.path.split(/[/\\]/).pop()}</span>
-        <span class="recent-path">${r.path}</span>
-      </div>
-      <button class="recent-queue" data-path="${r.path}" title="Add this IMP to the playlist">+</button>
-      <button class="recent-retitle" data-path="${r.path}" title="Give this IMP a new content title">✎</button>
-      <button class="recent-delete" data-path="${r.path}" title="Delete this IMP from disk">✕</button>
-    </div>
-  `).join('');
-  list.querySelectorAll('.recent-queue').forEach(el => {
-    el.addEventListener('click', (event) => {
-      event.stopPropagation();
-      addToPlaylist(el.dataset.path, recentTitleFor(el.dataset.path));
-      setStatus(`Queued: ${el.dataset.path}`);
-    });
-  });
-  list.querySelectorAll('.recent-retitle').forEach(el => {
-    el.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const dir = el.dataset.path;
-      const title = prompt("New content title:", dir.split(/[/\\]/).pop());
-      if (!title?.trim()) return;
-      const ok = await tauriConfirm(
-        `Retitle to ${title}? The CPL gets a new composition id, so any KDM, supplemental IMP or delivery made from the old one no longer matches. A signed package loses its signature.`,
-        { title: "Retitle IMP", kind: "warning" },
-      );
-      if (!ok) return;
-      let newPath;
-      try {
-        newPath = await invoke("retitle_imp", { path: dir, title });
-      } catch (e) {
-        tauriMessage(String(e), { title: "Retitle failed", kind: "error" });
-        return;
-      }
-      removeRecentProject(dir);
-      addRecentProject(newPath, title.trim());
-      setStatus(`Retitled to ${title.trim()}`);
-    });
-  });
-  list.querySelectorAll('.recent-delete').forEach(el => {
-    el.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const dir = el.dataset.path;
-      const ok = await tauriConfirm(`Delete ${dir} and everything in it?`, {
-        title: "Delete IMP",
-        kind: "warning",
-      });
-      if (!ok) return;
-      try {
-        await invoke("delete_imp", { path: dir });
-      } catch (e) {
-        tauriMessage(String(e), { title: "Delete failed", kind: "error" });
-        return;
-      }
-      removeRecentProject(dir);
-      setStatus(`Deleted ${dir}`);
-      refreshDiskSpace();
-    });
-  });
-  list.querySelectorAll('.recent-item').forEach(el => {
-    el.addEventListener('click', () => openImp(el.dataset.path));
-  });
-  applyPreviewSelection();
-}
-
 // === Desktop Notifications ===
-function notifyBuildComplete(success, title) {
-  if (Notification.permission === "granted") {
-    new Notification(success ? "Build Complete" : "Build Failed", {
-      body: success ? `"${title}" built successfully` : `"${title}" build failed`,
-    });
-  } else if (Notification.permission !== "denied") {
-    Notification.requestPermission();
-  }
-}
-
 if ("Notification" in window && Notification.permission === "default") {
   Notification.requestPermission();
 }
@@ -1677,11 +1561,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
 
 // === Progress in Title Bar ===
 function setTitleProgress(percent, stage) {
-  if (percent >= 0 && percent < 100) {
-    document.title = `IMF Wizard — ${stage} ${Math.round(percent)}%`;
-  } else {
-    document.title = "IMF Wizard";
-  }
+  document.title = titleForProgress(percent, stage);
 }
 
 // === Asset Filter ===

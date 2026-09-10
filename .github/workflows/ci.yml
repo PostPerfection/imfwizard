@@ -269,6 +269,8 @@ jobs:
 
   gui:
     runs-on: ubuntu-24.04
+    env:
+      TAURI_DRIVER_VERSION: 2.0.6
     steps:
       - uses: actions/checkout@v4
         with:
@@ -289,7 +291,25 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb xdotool
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb xdotool webkit2gtk-driver
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors -o ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
+          tar -xJf ffmpeg.tar.xz
+          echo "$PWD/$(ls -d ffmpeg-*linux64-gpl-8.1)/bin" >> "$GITHUB_PATH"
+
+      - name: Cache tauri-driver
+        id: cache-tauri-driver
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/tauri-driver
+          key: tauri-driver-${{ env.TAURI_DRIVER_VERSION }}
+
+      - name: Install tauri-driver
+        if: steps.cache-tauri-driver.outputs.cache-hit != 'true'
+        run: cargo install tauri-driver --locked --version ${{ env.TAURI_DRIVER_VERSION }}
 
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1.1.2
@@ -306,6 +326,10 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+
+      - name: Frontend tests
+        working-directory: gui
+        run: pnpm test
 
       - name: Build CLI sidecar
         working-directory: rust
@@ -337,6 +361,13 @@ jobs:
         run: |
           xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             uv run --no-project --with pytest --with python-xlib pytest tests/test_gui.py -q
+
+      - name: GUI end to end tests
+        env:
+          GRK_NO_PLUGIN: "1"
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            uv run --no-project --with pytest --with python-xlib pytest tests/test_gui_webdriver.py -q
 
   deny:
     runs-on: ubuntu-24.04
