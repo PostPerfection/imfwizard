@@ -449,6 +449,7 @@ const MASTERING_DISPLAY_MIN_LUMINANCE: u32 = 1;
 const SLATE_TEXT_HEIGHT_DIVISOR: u32 = 15;
 
 const SMPTE_STRUCTURAL_STANDARD: &str = "SMPTE ST 2067 structure";
+const DOLBY_VISION_STANDARD: &str = "Dolby Vision profiles and levels V1.2.92";
 
 // deliver writes here and version reads here, so the two cannot drift
 const DELIVERY_DB: &str = "deliveries.db";
@@ -480,33 +481,41 @@ fn rfc3339_now() -> String {
         .unwrap_or_default()
 }
 
-// what `compliance --standard` takes: a delivery profile, or None for the
-// structural checks alone, since ST 2067 fixes no raster or bit depth
-const COMPLIANCE_STANDARDS: &[(&str, Option<postkit::profiles::Platform>)] = &[
-    ("smpte", None),
-    ("netflix", Some(postkit::profiles::Platform::Netflix)),
-    ("amazon", Some(postkit::profiles::Platform::AmazonPrime)),
-    ("prime", Some(postkit::profiles::Platform::AmazonPrime)),
-    ("disney", Some(postkit::profiles::Platform::Disney)),
-    ("disney+", Some(postkit::profiles::Platform::Disney)),
-    ("apple", Some(postkit::profiles::Platform::Apple)),
-    ("appletv", Some(postkit::profiles::Platform::Apple)),
-    ("hbo", Some(postkit::profiles::Platform::Hbo)),
-    ("broadcast", Some(postkit::profiles::Platform::Broadcast)),
+// what `compliance --standard` takes. Dolby is its own kind: Dolby Vision fixes
+// a base layer VUI and a level ceiling rather than one raster.
+#[derive(Clone, Copy)]
+enum ComplianceTarget {
+    Structural,
+    Delivery(postkit::profiles::Platform),
+    DolbyVision,
+}
+
+const COMPLIANCE_STANDARDS: &[(&str, ComplianceTarget)] = &[
+    ("smpte", ComplianceTarget::Structural),
+    ("netflix", ComplianceTarget::Delivery(postkit::profiles::Platform::Netflix)),
+    ("amazon", ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime)),
+    ("prime", ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime)),
+    ("disney", ComplianceTarget::Delivery(postkit::profiles::Platform::Disney)),
+    ("disney+", ComplianceTarget::Delivery(postkit::profiles::Platform::Disney)),
+    ("apple", ComplianceTarget::Delivery(postkit::profiles::Platform::Apple)),
+    ("appletv", ComplianceTarget::Delivery(postkit::profiles::Platform::Apple)),
+    ("hbo", ComplianceTarget::Delivery(postkit::profiles::Platform::Hbo)),
+    ("broadcast", ComplianceTarget::Delivery(postkit::profiles::Platform::Broadcast)),
     (
         "archival",
-        Some(postkit::profiles::Platform::ArchivalPreservation),
+        ComplianceTarget::Delivery(postkit::profiles::Platform::ArchivalPreservation),
     ),
-    ("dci-2k", Some(postkit::profiles::Platform::TheatricalDci2k)),
+    ("dci-2k", ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci2k)),
     (
         "cinema-2k",
-        Some(postkit::profiles::Platform::TheatricalDci2k),
+        ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci2k),
     ),
-    ("dci-4k", Some(postkit::profiles::Platform::TheatricalDci4k)),
+    ("dci-4k", ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci4k)),
     (
         "cinema-4k",
-        Some(postkit::profiles::Platform::TheatricalDci4k),
+        ComplianceTarget::Delivery(postkit::profiles::Platform::TheatricalDci4k),
     ),
+    ("dolby", ComplianceTarget::DolbyVision),
 ];
 
 /// The SMPTE ST 2086 mastering display `hdr10-inject` writes as HEVC SEI.
@@ -4101,7 +4110,7 @@ fn run() {
 
         Commands::Compliance { input, standard } => {
             // Validate IMP against platform-specific delivery requirements
-            let Some(&(_, platform)) = COMPLIANCE_STANDARDS
+            let Some(&(_, target)) = COMPLIANCE_STANDARDS
                 .iter()
                 .find(|(name, _)| *name == standard.to_lowercase())
             else {
@@ -4111,7 +4120,10 @@ fn run() {
                 );
                 std::process::exit(1);
             };
-            let profile = platform.map(postkit::profiles::profile_for);
+            let profile = match target {
+                ComplianceTarget::Delivery(platform) => Some(postkit::profiles::profile_for(platform)),
+                ComplianceTarget::Structural | ComplianceTarget::DolbyVision => None,
+            };
             let checked = match &profile {
                 Some(profile) => {
                     println!("Checking compliance against: {}", profile.name);
@@ -4126,6 +4138,10 @@ fn run() {
                     );
                     profile.name.clone()
                 }
+                None if matches!(target, ComplianceTarget::DolbyVision) => {
+                    println!("Checking compliance against: {DOLBY_VISION_STANDARD}");
+                    DOLBY_VISION_STANDARD.to_string()
+                }
                 None => {
                     println!("Checking compliance against: {SMPTE_STRUCTURAL_STANDARD}");
                     SMPTE_STRUCTURAL_STANDARD.to_string()
@@ -4133,13 +4149,36 @@ fn run() {
             };
             println!();
 
-            // Structural validation
-            let report = imfwizard_core::validate::validate_imp(std::path::Path::new(&input));
+            let imp_path = std::path::Path::new(&input);
+            let dolby_vision = matches!(target, ComplianceTarget::DolbyVision);
+
+            // Structural validation. A Dolby Vision master is one HEVC file and
+            // the IMP structure checks have nothing to read in it.
+            let report = if dolby_vision && !imp_path.is_dir() {
+                imfwizard_core::validate::ValidationResult::default()
+            } else {
+                imfwizard_core::validate::validate_imp(imp_path)
+            };
             let mut errors: Vec<String> = report.errors;
             let mut warnings: Vec<String> = report.warnings;
 
+            if dolby_vision {
+                let findings = if imp_path.is_dir() {
+                    imfwizard_core::dolby_vision::check_package(imp_path)
+                } else {
+                    imfwizard_core::dolby_vision::check_master(imp_path)
+                };
+                for line in &findings.checked {
+                    println!("  {line}");
+                }
+                if !findings.checked.is_empty() {
+                    println!();
+                }
+                errors.extend(findings.errors);
+                warnings.extend(findings.warnings);
+            }
+
             // Probe MXF files for platform-specific parameter checks
-            let imp_path = std::path::Path::new(&input);
             if let Some(profile) = &profile
                 && imp_path.is_dir()
             {

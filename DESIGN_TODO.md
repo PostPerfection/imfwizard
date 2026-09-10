@@ -78,15 +78,6 @@ runner OSes, so the IDT, RRT, ODT path in `aces.rs` has no test and no recorded
 run. Closing it means building CTL on each runner (or vendoring a binary) and a
 test that reads the rendered frame back.
 
-## Open: `compliance -s dolby` names a profile postkit does not have (2026-09-09)
-
-README line 57 lists Dolby among the platform profiles. postkit's `profiles.rs`
-carries Netflix, Amazon, Disney, Apple, HBO, broadcast, archival and DCI, and
-nothing for Dolby, so the CLI refuses `-s dolby` by name (an unknown name used
-to fall through to Netflix). Closing it means a Dolby delivery profile with
-sourced raster, bit depth and audio numbers, and a row in
-`compliance_checks_the_platform_the_standard_names`.
-
 ## Open: Dolby Vision MEL/FEL mapping and profile 4 have no input (2026-09-09)
 
 README line 98 names MEL/FEL mapping and profile 4 to 8.1 conversion. What runs

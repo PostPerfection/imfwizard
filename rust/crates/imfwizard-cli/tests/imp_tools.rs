@@ -567,3 +567,114 @@ fn assert_close(reported: f64, computed: f64) {
         "reported {reported}, the samples give {computed}"
     );
 }
+
+// the light levels the profile 8.1 fixture carries in its level 6 block
+const DOLBY_MAX_CONTENT_LIGHT_LEVEL: u16 = 993;
+const DOLBY_MAX_FRAME_AVERAGE_LIGHT_LEVEL: u16 = 362;
+const DOLBY_MASTERING_DISPLAY_MAX_NITS: u16 = 1000;
+const DOLBY_MASTERING_DISPLAY_MIN_STEPS: u16 = 1;
+
+fn dolby_vision_base_layer(directory: &Path) -> PathBuf {
+    postkit::dolby_vision::write_dolby_vision_fixture(
+        directory,
+        "dv81.hevc",
+        postkit::dolby_vision::DolbyVisionFixtureProfile::Profile81,
+        Some(
+            dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlockLevel6 {
+                max_display_mastering_luminance: DOLBY_MASTERING_DISPLAY_MAX_NITS,
+                min_display_mastering_luminance: DOLBY_MASTERING_DISPLAY_MIN_STEPS,
+                max_content_light_level: DOLBY_MAX_CONTENT_LIGHT_LEVEL,
+                max_frame_average_light_level: DOLBY_MAX_FRAME_AVERAGE_LIGHT_LEVEL,
+            },
+        ),
+        None,
+    )
+    .expect("the Dolby Vision fixture")
+}
+
+/// Dolby Vision profiles and levels V1.2.92 table 1 gives profile 8 a PQ
+/// BT.2020 base layer, and cross-compatibility 1 is CTA HDR10, so the level 6
+/// light levels have to be there too.
+#[test]
+fn compliance_passes_a_dolby_vision_master_signalled_the_way_table_1_says() {
+    let directory = TempDir::new().unwrap();
+    let annex_b = dolby_vision_base_layer(directory.path());
+
+    // the colr box carries the base layer signalling an mp4 delivery is read by
+    let signalled = directory.path().join("dv81.mp4");
+    ffmpeg(&[
+        "-i",
+        &annex_b.to_string_lossy(),
+        "-c",
+        "copy",
+        "-color_primaries",
+        "bt2020",
+        "-color_trc",
+        "smpte2084",
+        "-colorspace",
+        "bt2020nc",
+        &signalled.to_string_lossy(),
+    ]);
+
+    cmd()
+        .args([
+            "compliance",
+            "-i",
+            &signalled.to_string_lossy(),
+            "-s",
+            "dolby",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Dolby Vision profiles and levels"))
+        .stdout(predicate::str::contains("Dolby Vision profile 8"))
+        .stdout(predicate::str::contains("base layer VUI 16,9,9,0"))
+        .stdout(predicate::str::contains(format!(
+            "MaxCLL {DOLBY_MAX_CONTENT_LIGHT_LEVEL}"
+        )))
+        .stdout(predicate::str::contains("PASS"));
+}
+
+/// An unsignalled base layer under a profile 8.1 RPU is none of the rows table 1
+/// gives that profile.
+#[test]
+fn compliance_refuses_a_dolby_vision_master_whose_base_layer_signals_nothing() {
+    let directory = TempDir::new().unwrap();
+    let annex_b = dolby_vision_base_layer(directory.path());
+
+    cmd()
+        .args([
+            "compliance",
+            "-i",
+            &annex_b.to_string_lossy(),
+            "-s",
+            "dolby",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "base layer VUI 2,2,2,0 is not what table 1 allows profile 8",
+        ));
+}
+
+/// Table 3 gives 1920x1080x24 the level fhd24, and a Rec.709 package is the
+/// cross-compatibility 2 row, which carries no light level requirement.
+#[test]
+fn compliance_names_the_dolby_level_a_package_fits() {
+    let directory = TempDir::new().unwrap();
+    let imp = build_imp(
+        directory.path(),
+        "dolby",
+        "Dolby",
+        SHORT_FRAMES,
+        FRAMES_PER_SECOND,
+    );
+
+    cmd()
+        .args(["compliance", "-i", &imp.to_string_lossy(), "-s", "dolby"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Dolby Vision level 03 fhd24"))
+        .stdout(predicate::str::contains("base layer VUI 1,1,1,0"))
+        .stdout(predicate::str::contains("PASS"));
+}
