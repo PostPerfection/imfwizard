@@ -10,7 +10,7 @@ version = "1.2.0"
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
-dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", rev = "cabe2fd2f22de18e0ae11cb90f042b2e9d3423e7" }
+dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", rev = "cfa78f2e75cf753f88c1601e0e519c5ced1aa9ca" }
 postkit = { path = "../extern/postkit", features = ["grok-ffi"] }
 quick-xml = "0.37"
 serde = { version = "1", features = ["derive"] }

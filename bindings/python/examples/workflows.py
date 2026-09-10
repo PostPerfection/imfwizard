@@ -10,7 +10,7 @@ def batch_workflow():
     There is no single batch-deliver command; this loops the real `create` and
     `compliance` operations.
     """
-    for target in ("netflix", "dolby", "amazon", "smpte"):
+    for target in ("netflix", "dolby", "disney", "smpte"):
         out = imfwizard.create(
             title=f"My Film ({target})",
             video="/path/to/master.mov",

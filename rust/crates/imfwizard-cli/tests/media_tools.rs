@@ -18,6 +18,12 @@ const PICTURE_MIN_MEAN_LUMA: f64 = 50.0;
 // zimg encodes to Rec.709 with the BT.1886 display gamma
 const REC709_DISPLAY_GAMMA: f64 = 2.4;
 const SIXTEEN_BIT_FULL_SCALE: f64 = 65535.0;
+// the published ACES AP0 to Rec.709 matrix with the Bradford adaptation to D65
+const AP0_TO_REC709: [[f64; 3]; 3] = [
+    [2.52168619, -1.13413099, -0.38755520],
+    [-0.27647857, 1.37272209, -0.09624352],
+    [-0.01538556, -0.15298155, 1.16836710],
+];
 
 fn cmd() -> Command {
     Command::cargo_bin("imfwizard").unwrap()
@@ -403,58 +409,70 @@ fn av_sync_separates_a_constant_offset_from_a_drift() {
     );
 }
 
-#[test]
-fn aces_falls_back_to_ffmpeg_when_ctlrender_is_missing() {
-    let directory = TempDir::new().unwrap();
-    let scene_linear = directory.path().join("aces.tiff");
+fn aces_converted(directory: &Path, name: &str, colour: &str) -> ([f64; 3], [f64; 3]) {
+    let scene_linear = directory.join(format!("{name}-ap0.tiff"));
     ffmpeg(&[
         "-f",
         "lavfi",
         "-i",
-        "color=c=0x2E2E2E:s=64x64",
+        &format!("color=c={colour}:s=64x64"),
         "-frames:v",
         "1",
         "-pix_fmt",
         "gbrp16le",
         &scene_linear.to_string_lossy(),
     ]);
-    let display = directory.path().join("rec709.tiff");
+    let display = directory.join(format!("{name}-rec709.tiff"));
 
     cmd()
         .args(["aces", "-i", &scene_linear.to_string_lossy()])
         .args(["-o", &display.to_string_lossy()])
-        .args(["--idt", "ACEScc", "--odt", "Rec709"])
         .assert()
-        .success()
-        .stderr(predicate::str::contains("ctlrender is not installed"));
+        .success();
 
-    let source = first_pixel(&scene_linear);
+    (first_pixel(&scene_linear), first_pixel(&display))
+}
+
+#[test]
+fn aces_converts_ap0_to_rec709_with_the_ap0_matrix_and_no_rendering_transform() {
+    const TOLERANCE: f64 = 0.002;
+    let directory = TempDir::new().unwrap();
+
+    let (source, converted) = aces_converted(directory.path(), "neutral", "0x2E2E2E");
     assert!(
         source[0] == source[1] && source[1] == source[2],
         "the fixture is not neutral: {source:?}"
     );
-    let converted = first_pixel(&display);
     assert!(
         converted[0] == converted[1] && converted[1] == converted[2],
         "a neutral came out coloured: {converted:?}"
     );
-
     // a neutral keeps its value through the matrices, so only the transfer moves it
     let expected = source[0].powf(1.0 / REC709_DISPLAY_GAMMA);
-    const TOLERANCE: f64 = 0.002;
     assert!(
         (converted[0] - expected).abs() < TOLERANCE,
         "linear {} came out at {}, not {expected}",
         source[0],
         converted[0]
     );
+
+    let (source, converted) = aces_converted(directory.path(), "saturated", "0x4C2619");
+    for channel in 0..3 {
+        let linear: f64 = (0..3).map(|c| AP0_TO_REC709[channel][c] * source[c]).sum();
+        let expected = linear.powf(1.0 / REC709_DISPLAY_GAMMA);
+        assert!(
+            (converted[channel] - expected).abs() < TOLERANCE,
+            "channel {channel} of {source:?} came out at {}, not {expected}",
+            converted[channel]
+        );
+    }
 }
 
 #[test]
 fn doctor_reports_the_version_of_every_tool_it_finds() {
     let report = stdout_of(cmd().arg("doctor").assert().success());
     assert!(report.contains("[OK] ffmpeg"), "{report}");
-    assert!(report.contains("ctlrender — NOT FOUND"), "{report}");
+    assert!(report.contains("ascp — NOT FOUND"), "{report}");
 
     let json = stdout_of(cmd().args(["doctor", "--json"]).assert().success());
     let result: Value = serde_json::from_str(&json).expect("the doctor json");
@@ -477,10 +495,10 @@ fn doctor_reports_the_version_of_every_tool_it_finds() {
     );
     assert!(ffmpeg["path"].as_str().is_some());
 
-    // nothing installs ctlrender, so the ACES pipeline reports it as optional
-    let ctlrender = tool("ctlrender");
-    assert_eq!(ctlrender["status"], "missing");
-    assert_eq!(ctlrender["required"], false);
+    // nothing installs the Aspera client
+    let ascp = tool("ascp");
+    assert_eq!(ascp["status"], "missing");
+    assert_eq!(ascp["required"], false);
 
     assert_eq!(
         result["available"].as_u64().unwrap() + result["missing"].as_u64().unwrap(),

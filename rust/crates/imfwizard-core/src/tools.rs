@@ -48,7 +48,7 @@ struct ToolDef {
 const TOOL_DEFS: &[ToolDef] = &[
     ToolDef {
         name: "ffmpeg",
-        purpose: "Transcoding, burn-in, loudness, LUT, ACES fallback, audio description, slate",
+        purpose: "Transcoding, burn-in, loudness, LUT, ACES conversion, audio description, slate",
         required: true,
         version_args: &["-version"],
     },
@@ -61,12 +61,6 @@ const TOOL_DEFS: &[ToolDef] = &[
     ToolDef {
         name: "dovi_tool",
         purpose: "Dolby Vision RPU injection/extraction",
-        required: false,
-        version_args: &["--version"],
-    },
-    ToolDef {
-        name: "ctlrender",
-        purpose: "ACES CTL transforms (IDT/RRT/ODT)",
         required: false,
         version_args: &["--version"],
     },
@@ -239,9 +233,6 @@ pub fn has_ffprobe() -> bool {
 }
 pub fn has_dovi_tool() -> bool {
     tool_available("dovi_tool")
-}
-pub fn has_ctlrender() -> bool {
-    tool_available("ctlrender")
 }
 pub fn has_xmllint() -> bool {
     tool_available("xmllint")

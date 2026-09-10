@@ -27,36 +27,13 @@ map, and the gamut conversion is the same matrix work as
 
 `create --source-colourspace` converts P3-D65, Rec.2020 and LogC with postkit's
 `Rec709Transform`. ACES and ACEScg stay refused: reaching a display space from
-scene-referred picture needs a rendering transform, and `imfwizard aces --idt
-<IDT> --odt <ODT>` is the route that runs one. `p3` stays refused because its
+scene-referred picture needs a rendering transform, and nothing here runs one
+(see "`aces` runs no rendering transform"). `p3` stays refused because its
 white is DCI rather than D65 and neither this repo nor postkit adapts a white
 point. An `--hdr` picture takes no converting source at all, since every
 conversion lands on Rec.709 SDR while the preset's descriptor declares PQ:
 converting into the preset's own primaries and transfer is the matrix and curve
 postkit does not have.
-
-## Open: a 4:4:4 YCbCr App 2E track file previews as RGB
-
-postkit's `grok_decoder` upsamples a subsampled codestream and reads it as
-YCbCr, which ST 2067-21 allows only as CDCI, and `render_imf_frame` tone maps PQ
-and HLG and converts P3-D65 and BT.2020 into Rec.709, so `frame-extract` and
-the stepped preview show every IMP `create` writes. A 4:4:4 codestream could be
-RGB or YCbCr and only the CDCI descriptor says which, which the AS-02 reader
-binding does not expose, so a 4:4:4 CDCI master from elsewhere shows with its
-chroma planes taken for green and blue. The embedded player decodes through the
-same function, so it shows the same misread rather than a second one. Same
-entries in postkit's DESIGN_TODO.
-
-## Open: dcpdoctor does not decode an App 2E frame
-
-dcpdoctor checks an App 2E MainImage track's descriptor: the Rsiz is an IMF
-profile, ColorPrimaries and TransferCharacteristic are present, the coding
-label matches the Rsiz and the pixel layout matches the codestream
-(`picture_not_imf_profile` and its three siblings). The cinema-profile X'Y'Z'
-IMPs this repo shipped before `create` was fixed fail it. It decodes nothing,
-so a codestream whose Rsiz and label say IMF but whose samples are X'Y'Z' would
-still pass, and `app2e_picture.rs` reading a decoded frame back stays the proof
-of that here.
 
 ## Open: MaxCLL and MaxFALL are not schema validated
 
@@ -68,15 +45,17 @@ checking them. `cpl.rs` asserts their name, namespace and value directly to
 cover the gap. What closes it: a 2020 edition App 2E XSD among the fixtures, and
 the `st2067_3_complaint` driver importing it under that namespace.
 
-## Open: the ctlrender ACES path has never run (2026-09-09)
+## Open: `aces` runs no rendering transform (2026-09-10)
 
-The README names the ctlrender path as untested since 2026-09-10. The
-ffmpeg fallback is tested (`aces_falls_back_to_ffmpeg_when_ctlrender_is_missing`)
-and is a colorimetric AP0 to Rec.709 conversion with no RRT. ctlrender is
-installed on no CI runner and AMPAS CTL is not packaged for any of the three
-runner OSes, so the IDT, RRT, ODT path in `aces.rs` has no test and no recorded
-run. Closing it means building CTL on each runner (or vendoring a binary) and a
-test that reads the rendered frame back.
+`aces` converts AP0 to Rec.709 with an ffmpeg colour matrix and nothing else,
+so a scene-referred ACES frame comes out without the RRT and ODT a display
+render needs. The ctlrender path that would have run the IDT, RRT and ODT was
+removed on 2026-09-10: ctlrender had never run here, AMPAS CTL is packaged for
+none of the three runner OSes, and its only test proved the fallback. Closing
+it means a rendering transform this repo can prove: build CTL with OpenEXR on
+each runner or vendor a binary, or port the ACES 1.3 RRT and a Rec.709 ODT into
+postkit's colour code, then a test that reads a rendered frame back against
+known output values.
 
 ## Open: Dolby Vision FEL and profile 4 have no input (2026-09-09)
 

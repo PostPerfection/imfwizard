@@ -116,8 +116,8 @@ fn build(dir: &Path, clip: &Path, name: &str, raster: &str, extra: &[&str]) -> P
 }
 
 /// `--profile <name>` aims the encoder at the preset's bitrate and nothing
-/// else: the broadcast preset is 200 Mb/s and the Netflix one 400, so the same
-/// source under the two leaves codestreams whose sizes are two to one.
+/// else: the broadcast preset is 200 Mb/s and the Netflix one 800, so the same
+/// source under the two leaves codestreams whose sizes are four to one.
 #[test]
 fn two_presets_leave_codestreams_in_the_ratio_of_their_bitrates() {
     let dir = TempDir::new().unwrap();
@@ -159,8 +159,8 @@ fn two_presets_leave_codestreams_in_the_ratio_of_their_bitrates() {
 
 /// The preset carries a raster, a colour space, a frame rate and an audio
 /// layout as well, and `create` applies none of them: the picture keeps the
-/// `--raster` it was given and declares Rec.709 rather than the preset's
-/// Rec.2020. Anything the preset says beyond the bitrate is documentation.
+/// `--raster` it was given rather than the preset's UHD one. Anything the
+/// preset says beyond the bitrate is documentation.
 #[test]
 fn a_preset_sets_the_bitrate_and_leaves_the_raster_alone() {
     let dir = TempDir::new().unwrap();

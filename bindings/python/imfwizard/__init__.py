@@ -85,7 +85,7 @@ def loudness(audio_path):
 
 
 def compliance(imp_dir, standard="smpte"):
-    """Check platform compliance (smpte, netflix, dolby, amazon)."""
+    """Check platform compliance (smpte, netflix, disney, hbo, dolby, dci-2k, dci-4k)."""
     result = _run(["compliance", "-i", str(imp_dir), "-s", standard], check=False)
     return {"compliant": result.returncode == 0, "output": result.stdout}
 

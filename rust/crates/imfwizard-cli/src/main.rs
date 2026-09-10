@@ -186,8 +186,8 @@ struct SoundfieldArguments {
 /// `PictureArguments` is.
 #[derive(clap::Args)]
 struct CompressionArguments {
-    /// Delivery preset (netflix, disney, apple, hbo, amazon, dci-2k, dci-4k,
-    /// broadcast, archival); sets the J2K target bitrate. See `profiles`.
+    /// Delivery preset (netflix, disney, hbo, dci-2k, dci-4k, broadcast,
+    /// archival); sets the J2K target bitrate. See `profiles`.
     #[arg(long)]
     profile: Option<String>,
 
@@ -497,28 +497,12 @@ const COMPLIANCE_STANDARDS: &[(&str, ComplianceTarget)] = &[
         ComplianceTarget::Delivery(postkit::profiles::Platform::Netflix),
     ),
     (
-        "amazon",
-        ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime),
-    ),
-    (
-        "prime",
-        ComplianceTarget::Delivery(postkit::profiles::Platform::AmazonPrime),
-    ),
-    (
         "disney",
         ComplianceTarget::Delivery(postkit::profiles::Platform::Disney),
     ),
     (
         "disney+",
         ComplianceTarget::Delivery(postkit::profiles::Platform::Disney),
-    ),
-    (
-        "apple",
-        ComplianceTarget::Delivery(postkit::profiles::Platform::Apple),
-    ),
-    (
-        "appletv",
-        ComplianceTarget::Delivery(postkit::profiles::Platform::Apple),
     ),
     (
         "hbo",
@@ -1566,7 +1550,7 @@ enum Commands {
         json: bool,
     },
 
-    /// ACES colour pipeline conversion (IDT → RRT → ODT via ctlrender)
+    /// Convert ACES AP0 frames to Rec.709 with ffmpeg, no rendering transform
     Aces {
         /// Input image/video
         #[arg(short, long)]
@@ -1575,22 +1559,6 @@ enum Commands {
         /// Output image/video
         #[arg(short, long)]
         output: String,
-
-        /// Target space (acescg, aces, rec709, p3, xyz) — used for simple conversion
-        #[arg(short, long, default_value = "acescg")]
-        target: String,
-
-        /// Input Device Transform CTL name (enables full IDT→RRT→ODT pipeline)
-        #[arg(long)]
-        idt: Option<String>,
-
-        /// Output Device Transform CTL name
-        #[arg(long)]
-        odt: Option<String>,
-
-        /// CTL transforms directory (defaults to system ACES install)
-        #[arg(long)]
-        ctl_dir: Option<String>,
     },
 
     /// Check regulatory compliance
@@ -2213,14 +2181,15 @@ fn run() {
                         tracing::info!("Picture: {}", picture.plan.describe());
                         tracing::info!("Compressor: Grok");
 
-                        let preset_bitrate_mbps = preset.as_ref().map(|p| p.bitrate_mbps);
-                        if let (Some(mbps), Some(p)) = (bitrate, &preset)
-                            && mbps != p.bitrate_mbps
+                        let preset_bitrate_mbps =
+                            preset.as_ref().and_then(|p| p.bitrate_ceiling_mbps());
+                        if let (Some(mbps), Some(p), Some(preset_mbps)) =
+                            (bitrate, &preset, preset_bitrate_mbps)
+                            && mbps != preset_mbps
                         {
                             tracing::info!(
-                                "--bitrate {mbps} Mbps overrides preset {} ({} Mbps)",
+                                "--bitrate {mbps} Mbps overrides preset {} ({preset_mbps} Mbps)",
                                 p.name,
-                                p.bitrate_mbps
                             );
                         }
                         let target_codestream_bytes =
@@ -2884,9 +2853,13 @@ fn run() {
 
         Commands::Profiles => {
             for p in imfwizard_core::profiles::all_profiles() {
+                let bitrate = match p.bitrate_ceiling_mbps() {
+                    Some(mbps) => format!("{mbps} Mbps"),
+                    None => "no bitrate ceiling stated".to_string(),
+                };
                 println!(
-                    "{:?}: {}x{} @ {} Mbps, {} fps",
-                    p.platform, p.width, p.height, p.bitrate_mbps, p.frame_rate,
+                    "{:?}: {}x{} @ {bitrate}, {} fps",
+                    p.platform, p.width, p.height, p.frame_rate,
                 );
             }
         }
@@ -4097,46 +4070,15 @@ fn run() {
             }
         }
 
-        Commands::Aces {
-            input,
-            output,
-            target,
-            idt,
-            odt,
-            ctl_dir,
-        } => {
-            if idt.is_some() || odt.is_some() {
-                // Full CTL pipeline: IDT → RRT → ODT
-                let opts = imfwizard_core::aces::AcesPipelineOptions {
-                    input: std::path::Path::new(&input),
-                    output: std::path::Path::new(&output),
-                    idt: idt.as_deref(),
-                    odt: odt.as_deref(),
-                    ctl_dir: ctl_dir.as_deref().map(std::path::Path::new),
-                };
-                match imfwizard_core::aces::run_aces_pipeline(&opts) {
-                    Ok(()) => println!("ACES pipeline complete: {output}"),
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                // Simple colour space conversion via postkit
-                let target_space = parse_colour_space(&target);
-                let opts = postkit::colour::ColourConvertOptions {
-                    input: PathBuf::from(&input),
-                    output: PathBuf::from(&output),
-                    source_space: postkit::colour::ColourSpace::Aces,
-                    target_space,
-                    lut_path: None,
-                };
-                match postkit::colour::convert_colour(&opts) {
-                    Ok(()) => println!("ACES converted to {target}: {output}"),
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        std::process::exit(1);
-                    }
+        Commands::Aces { input, output } => {
+            match imfwizard_core::aces::convert_ap0_to_rec709(
+                std::path::Path::new(&input),
+                std::path::Path::new(&output),
+            ) {
+                Ok(()) => println!("ACES AP0 converted to Rec.709: {output}"),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
                 }
             }
         }
@@ -4218,6 +4160,14 @@ fn run() {
             if let Some(profile) = &profile
                 && imp_path.is_dir()
             {
+                if profile.light_levels_required
+                    && postkit::dolby_compliance::cpl_light_levels(imp_path).is_none()
+                {
+                    errors.push(format!(
+                        "the CPL carries no MaxCLL and MaxFALL, which the {} specification asks for in MMC metadata or the CPL",
+                        profile.name
+                    ));
+                }
                 let mxf_files: Vec<_> = std::fs::read_dir(imp_path)
                     .into_iter()
                     .flatten()

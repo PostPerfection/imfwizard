@@ -27,5 +27,5 @@ Description: Interoperable Master Format (IMF) package creator
  .
  Features include JPEG 2000 encoding, HDR/Dolby Vision support,
  multi-language audio with MCA labels, subtitle packaging,
- platform-specific delivery presets (Netflix, Disney+, Amazon, Apple),
+ platform-specific delivery presets (Netflix, Disney+, HBO Max),
  and integrated quality control.

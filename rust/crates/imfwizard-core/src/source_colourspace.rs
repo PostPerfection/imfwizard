@@ -53,8 +53,8 @@ pub fn to_source_colour(space: ColourSpace) -> Result<SourceColour, String> {
         ),
         ColourSpace::Aces | ColourSpace::AcesCg => Err(format!(
             "{space:?} is scene-referred: reaching the Rec.709 RGB an App 2E picture \
-             declares needs a rendering transform, which is not a matrix. Convert the \
-             source first with `imfwizard aces --idt <IDT> --odt <ODT>`"
+             declares needs a rendering transform, which is not a matrix. Render the \
+             source to Rec.709 first, or name that render with --source-lut"
         )),
     }
 }
@@ -197,7 +197,7 @@ mod tests {
             let error = to_source_colour(space).unwrap_err();
             assert!(error.contains(&format!("{space:?}")), "{error}");
             assert!(error.contains("rendering transform"), "{error}");
-            assert!(error.contains("imfwizard aces"), "{error}");
+            assert!(error.contains("--source-lut"), "{error}");
         }
     }
 

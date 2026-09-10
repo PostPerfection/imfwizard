@@ -245,8 +245,8 @@ fn profiles_serves_every_delivery_preset_with_its_values() {
         .expect("the Netflix preset");
     assert_eq!(netflix["width"], 3840);
     assert_eq!(netflix["height"], 2160);
-    assert_eq!(netflix["bitrate_mbps"], 400.0);
-    assert_eq!(netflix["colour_space"], "Rec.2020");
+    assert_eq!(netflix["bitrate_mbps"], 800.0);
+    assert_eq!(netflix["colour_space"], "BT.709 RGB full range");
 
     let cinema = served
         .iter()

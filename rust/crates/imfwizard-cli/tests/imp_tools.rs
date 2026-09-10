@@ -412,7 +412,7 @@ fn compliance_checks_the_platform_the_standard_names() {
     let imp = imp.to_string_lossy().into_owned();
 
     // a 1920x1080 package misses the 4K raster both streaming profiles require
-    for (standard, name) in [("netflix", "Netflix IMF"), ("amazon", "Amazon Prime IMF")] {
+    for (standard, name) in [("netflix", "Netflix IMF"), ("disney", "Disney+ IMF")] {
         cmd()
             .args(["compliance", "-i", &imp, "-s", standard])
             .assert()
@@ -426,10 +426,8 @@ fn compliance_checks_the_platform_the_standard_names() {
             .stdout(predicate::str::contains(format!(
                 "FAIL: not compliant with {name}"
             )))
-            // the streaming presets cite no public spec, and the run says so
-            .stdout(predicate::str::contains(
-                "Source: no public delivery specification",
-            ));
+            .stdout(predicate::str::contains("Source: "))
+            .stdout(predicate::str::contains("https://"));
     }
 
     // ST 2067 fixes no raster, so smpte is the structural check on its own
@@ -448,9 +446,6 @@ fn compliance_checks_the_platform_the_standard_names() {
         .stderr(predicate::str::contains("netflix"));
 }
 
-/// Disney+ and Apple TV+ are checked against their own preset, not folded into
-/// the Netflix one: the stereo package here misses each platform's immersive
-/// layout, and the count each names is that platform's own.
 #[test]
 fn the_streaming_platforms_are_checked_against_their_own_preset() {
     let directory = TempDir::new().unwrap();
@@ -466,8 +461,7 @@ fn the_streaming_platforms_are_checked_against_their_own_preset() {
     for (standard, platform) in [
         ("disney", postkit::profiles::Platform::Disney),
         ("disney+", postkit::profiles::Platform::Disney),
-        ("apple", postkit::profiles::Platform::Apple),
-        ("appletv", postkit::profiles::Platform::Apple),
+        ("netflix", postkit::profiles::Platform::Netflix),
     ] {
         let profile = imfwizard_core::profiles::profile_for(platform);
         let channels = imfwizard_core::profiles::required_audio_channels(&profile).unwrap();
@@ -479,6 +473,10 @@ fn the_streaming_platforms_are_checked_against_their_own_preset() {
             .stdout(predicate::str::contains(format!(
                 "Checking compliance against: {}",
                 profile.name
+            )))
+            .stdout(predicate::str::contains(format!(
+                "Source: {}",
+                profile.specification
             )))
             .stdout(predicate::str::contains(format!(
                 "width 1920 != required {}",
@@ -493,16 +491,66 @@ fn the_streaming_platforms_are_checked_against_their_own_preset() {
                 profile.name
             )));
     }
+}
 
-    // Netflix asks for 5.1, so the same package is refused over a different count
-    let netflix = imfwizard_core::profiles::profile_for(postkit::profiles::Platform::Netflix);
+#[test]
+fn hbo_refuses_a_package_carrying_no_light_levels() {
+    let directory = TempDir::new().unwrap();
+    let imp = build_imp(
+        directory.path(),
+        "light_levels",
+        "Light Levels",
+        SHORT_FRAMES,
+        FRAMES_PER_SECOND,
+    );
+    let profile = imfwizard_core::profiles::profile_for(postkit::profiles::Platform::Hbo);
+
     cmd()
-        .args(["compliance", "-i", &imp, "-s", "netflix"])
+        .args(["compliance", "-i", &imp.to_string_lossy(), "-s", "hbo"])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("2 audio channels != the 6 of 5.1"))
-        .stdout(predicate::str::contains("the 12 of 7.1.4").not())
-        .stdout(predicate::str::contains(netflix.name));
+        .stdout(predicate::str::contains(format!(
+            "Checking compliance against: {}",
+            profile.name
+        )))
+        .stdout(predicate::str::contains(format!(
+            "{}-bit, {} audio",
+            profile.bit_depth, profile.audio_channels
+        )))
+        .stdout(predicate::str::contains(format!(
+            "the CPL carries no MaxCLL and MaxFALL, which the {} specification asks for",
+            profile.name
+        )))
+        .stdout(predicate::str::contains("audio channels != ").not())
+        .stdout(predicate::str::contains(format!(
+            "FAIL: not compliant with {}",
+            profile.name
+        )));
+}
+
+#[test]
+fn a_platform_with_no_public_specification_is_no_standard() {
+    let directory = TempDir::new().unwrap();
+    // the standard is refused before anything reads the input
+    let missing_imp = directory
+        .path()
+        .join("nothing")
+        .to_string_lossy()
+        .to_string();
+
+    for standard in ["amazon", "prime", "apple", "appletv"] {
+        cmd()
+            .args(["compliance", "-i", &missing_imp, "-s", standard])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(format!(
+                "Unknown standard: {standard}"
+            )))
+            .stderr(predicate::str::contains(
+                "smpte, netflix, disney, disney+, hbo, broadcast, archival, \
+                 dci-2k, cinema-2k, dci-4k, cinema-4k, dolby",
+            ));
+    }
 }
 
 /// The channel check is the preset's rule, so a package that carries the

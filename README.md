@@ -55,7 +55,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
 - **QC report** generation (text / JSON / HTML), with optional black and frozen picture detection via `report --scan-picture`
-- **Platform compliance checking** (ffprobe-based) against Netflix, Dolby, Amazon, SMPTE profiles
+- **Platform compliance checking** (ffprobe-based) against smpte, netflix, disney, hbo, dolby, dci-2k, dci-4k, archival and broadcast
 
 ### Color & Audio Processing
 - **Source colour space**, `create --source-colourspace rec709` says what the picture carries. An App 2E picture ships the Rec.709 RGB its essence descriptor declares, so rec709 (the default) is compressed untouched, and p3d65, rec2020 and logc are converted to Rec.709 RGB frame by frame during the encode. xyz is refused because a DCI codestream is a DCP picture rather than an IMF one, p3 because P3 with the DCI white needs a white point adaptation nothing here does (name p3d65 for a D65 master), and aces and acescg because reaching Rec.709 from them needs a rendering transform rather than a matrix. A converting value together with `--hdr` is refused too, since the conversion lands on Rec.709 SDR and the `--hdr` descriptor declares PQ
@@ -63,7 +63,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
 - **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
-- **ACES conversion**, `aces` runs ctlrender's IDT, RRT and ODT when ctlrender is installed, a path no test covers. Without ctlrender, ffmpeg converts AP0 to Rec.709 with no rendering transform
+- **ACES conversion**, `aces` converts ACES AP0 frames to Rec.709 with an ffmpeg colour matrix. No rendering transform runs, so this is a colorimetric conversion, not a display render
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
 - **Dolby Atmos ADM BWF import**, parse ADM metadata and wrap the PCM essence to MXF (not a Dolby IAB bitstream)
@@ -84,7 +84,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
 ### Workflow & Automation
-- **Delivery presets**, profiles (Netflix, Amazon, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
+- **Delivery presets**, profiles (Netflix, Disney+, HBO Max, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
 - **Watch folder** (`watch <dir> --output <dir> [--webhook-url <url>] [--interval <seconds>] [-- <create flags>]`), build an IMP from every video file or frame folder that lands in the watched directory, once it stops changing. The file stem is the title, a same-named `.wav` and `.ttml` beside it become the sound and subtitle, the job log is written beside the package, the source moves into `done/` or `failed/` and a webhook gets `imp.created` or `imp.failed`
 - **EDL conform**, `conform --input <timeline> --media-dir <dir> --output <imp>` builds an IMP whose CPL follows a CMX3600 or FCP7 timeline, one picture and sound resource per event, trimmed to the event's source range
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
@@ -201,7 +201,6 @@ cargo build --release
 | `mpv` | GUI preview player for sources that are not JPEG 2000 | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
-| `ctlrender` | ACES CTL transforms (IDT/RRT/ODT) | [GitHub](https://github.com/ampas/CTL) |
 | `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
 | ffmpeg with `libvmaf` | VMAF in `compare --vmaf` | ffmpeg built `--enable-libvmaf` (check `ffmpeg -filters \| grep libvmaf`) |
 | JRE + Photon jars | `validate --photon` (Netflix Photon) | `apt install default-jre`; then `scripts/fetch_photon.sh` |
@@ -711,10 +710,10 @@ imfwizard audio-desc -i mix_51.wav --narration ad_narration.wav -o combined.wav 
 imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/
 ```
 
-### ACES color pipeline
+### ACES conversion
 
 ```bash
-imfwizard aces -i /log_frames/ -o /aces_frames/ --idt ARRI_LogC4 --odt P3D65_PQ_1000nits
+imfwizard aces -i /ap0_frames/ -o /rec709_frames/
 ```
 
 ### A/V sync check
@@ -727,7 +726,7 @@ imfwizard av-sync -i /path/to/video.mxf
 ### Platform compliance
 
 ```bash
-# Check Netflix compliance (standards: smpte, netflix, dolby, amazon)
+# Check Netflix compliance (standards: smpte, netflix, disney, hbo, dolby, dci-2k, dci-4k, archival, broadcast)
 imfwizard compliance -i /path/to/imp/ -s netflix
 ```
 
