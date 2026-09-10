@@ -425,7 +425,11 @@ fn compliance_checks_the_platform_the_standard_names() {
             )))
             .stdout(predicate::str::contains(format!(
                 "FAIL: not compliant with {name}"
-            )));
+            )))
+            // the streaming presets cite no public spec, and the run says so
+            .stdout(predicate::str::contains(
+                "Source: no public delivery specification",
+            ));
     }
 
     // ST 2067 fixes no raster, so smpte is the structural check on its own

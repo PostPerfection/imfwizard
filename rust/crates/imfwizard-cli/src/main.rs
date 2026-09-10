@@ -4136,6 +4136,7 @@ fn run() {
                         profile.bit_depth,
                         profile.audio_channels
                     );
+                    println!("  Source: {}", profile.specification);
                     profile.name.clone()
                 }
                 None if matches!(target, ComplianceTarget::DolbyVision) => {
