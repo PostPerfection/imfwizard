@@ -13,6 +13,7 @@ import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js"
 import { escapeHtml } from "../../extern/guikit/src/html.js";
 import { PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, BUTTON_SHORTCUTS, VIEW_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
+import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
 import { initRecentProjects, getRecentProjects, addRecentProject, removeRecentProject, renderRecentProjects } from "./recent-projects.js";
@@ -514,8 +515,12 @@ function removeCpl(idx) {
   renderSegments();
 }
 
-document.getElementById("add-cpl")?.addEventListener("click", () => {
-  const name = prompt("Composition name:", `CPL ${nextCplId}`);
+document.getElementById("add-cpl")?.addEventListener("click", async () => {
+  const name = await askForText({
+    title: "New composition",
+    label: "Composition name",
+    value: `CPL ${nextCplId}`,
+  });
   if (!name) return;
   project.compositions.push({
     id: nextCplId++,
@@ -1396,7 +1401,11 @@ document.getElementById("prop-title")?.addEventListener("input", (e) => {
 
 // === Recent Projects ===
 async function retitleRecentProject(dir) {
-  const title = prompt("New content title:", dir.split(/[/\\]/).pop());
+  const title = await askForText({
+    title: "Retitle IMP",
+    label: "New content title",
+    value: dir.split(/[/\\]/).pop(),
+  });
   if (!title?.trim()) return;
   const ok = await tauriConfirm(
     `Retitle to ${title}? The CPL gets a new composition id, so any KDM, supplemental IMP or delivery made from the old one no longer matches. A signed package loses its signature.`,
