@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { showEmbeddedPanel } from "../../extern/guikit/src/preview.js";
 
 // Timeline state
 let timelineData = null; // { segments: [], totalFrames, editRate }
@@ -101,6 +100,7 @@ function renderEmpty() {
   if (sound) sound.innerHTML = '';
   if (subtitle) subtitle.innerHTML = '';
   timelineData = null;
+  currentSegmentIdx = -1;
 }
 
 function render() {
@@ -230,36 +230,13 @@ function handleTrackSeek(e) {
   seekToPercent(pct);
 }
 
+// the player holds the whole composition, so a seek is in composition seconds
 async function seekToPercent(pct) {
   if (!timelineData) return;
   const targetFrame = Math.floor(pct * timelineData.totalFrames);
 
-  let targetSeg = null;
-  for (const seg of timelineData.segments) {
-    if (targetFrame >= seg.startFrame && targetFrame < seg.startFrame + seg.duration_frames) {
-      targetSeg = seg;
-      break;
-    }
-  }
-  if (!targetSeg) targetSeg = timelineData.segments[timelineData.segments.length - 1];
-
-  const segIdx = targetSeg.segment_number - 1;
-  const frameInSeg = targetFrame - targetSeg.startFrame + targetSeg.entry_point;
-  const secondsInSeg = frameInSeg / (targetSeg.fps || 24);
-
-  if (segIdx !== currentSegmentIdx && targetSeg.video_file) {
-    currentSegmentIdx = segIdx;
-    try {
-      showEmbeddedPanel();
-      await invoke('preview_load', { filePath: targetSeg.video_file });
-    } catch (e) {
-      console.error('[timeline] Failed to load segment:', e);
-      return;
-    }
-  }
-
   try {
-    await invoke('preview_seek_absolute', { seconds: secondsInSeg });
+    await invoke('preview_seek_absolute', { seconds: targetFrame / (timelineData.editRate || 24) });
   } catch (e) {
     console.error('[timeline] Failed to seek:', e);
   }
@@ -268,8 +245,16 @@ async function seekToPercent(pct) {
   updatePlayheadPosition();
 }
 
+function segmentAtFrame(frame) {
+  const index = timelineData.segments.findIndex(
+    seg => frame >= seg.startFrame && frame < seg.startFrame + seg.duration_frames,
+  );
+  return index === -1 ? timelineData.segments.length - 1 : index;
+}
+
 function updatePlayheadPosition() {
   if (!timelineData || timelineData.totalFrames === 0) return;
+  currentSegmentIdx = segmentAtFrame(playheadFrame);
   const pct = (playheadFrame / timelineData.totalFrames) * 100;
   const rulerPlayhead = document.getElementById('ruler-playhead');
   if (rulerPlayhead) rulerPlayhead.style.left = `${pct}%`;
@@ -287,24 +272,11 @@ export function startTimelinePolling() {
     try {
       const resp = await invoke('preview_get_metadata');
       const meta = JSON.parse(resp);
-      if (meta.position != null && meta.duration != null) {
-        const seg = timelineData.segments[currentSegmentIdx] || timelineData.segments[0];
-        if (seg) {
-          const fps = seg.fps || 24;
-          const frameInSeg = Math.floor(meta.position * fps) - seg.entry_point;
-          playheadFrame = seg.startFrame + Math.max(0, frameInSeg);
-
-          // Auto-advance to next segment
-          if (meta.position >= meta.duration - 0.1 && currentSegmentIdx < timelineData.segments.length - 1) {
-            const nextSeg = timelineData.segments[currentSegmentIdx + 1];
-            if (nextSeg && nextSeg.video_file) {
-              currentSegmentIdx++;
-              invoke('preview_load', { filePath: nextSeg.video_file }).catch(() => {});
-            }
-          }
-
-          updatePlayheadPosition();
-        }
+      if (meta.position != null) {
+        // the position is where playback sits in the composition, not in a segment
+        const fps = timelineData.editRate || 24;
+        playheadFrame = Math.min(Math.floor(meta.position * fps), timelineData.totalFrames);
+        updatePlayheadPosition();
       }
     } catch {
       // mpv not running

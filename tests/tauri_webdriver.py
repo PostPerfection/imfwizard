@@ -25,7 +25,12 @@ TYPE_DELAY_MILLISECONDS = 20
 INPUT_SETTLE_SECONDS = 0.3
 
 FILE_DIALOG_TIMEOUT_SECONDS = 60
+# the picker opens on its recent list, where confirming a typed path does nothing
+FILE_DIALOG_HOME_CHORD = "alt+Home"
 FILE_DIALOG_LOCATION_CHORD = "ctrl+l"
+# the picker completes a typed folder name with a trailing slash, and confirming
+# that walks into the folder instead of choosing it
+DROP_COMPLETION_KEY = "Delete"
 CONFIRM_KEY = "Return"
 
 # viewport centre after scrolling the element into view
@@ -238,8 +243,10 @@ class Window:
             FILE_DIALOG_TIMEOUT_SECONDS,
         )
         xdotool("windowfocus", "--sync", dialog)
+        self.press(FILE_DIALOG_HOME_CHORD)
         self.press(FILE_DIALOG_LOCATION_CHORD)
         self.type_text(str(path))
+        self.press(DROP_COMPLETION_KEY)
         self.press(CONFIRM_KEY)
         wait_until(
             "the file dialog stayed open",
