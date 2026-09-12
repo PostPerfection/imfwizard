@@ -17,4 +17,8 @@ fi
 
 mkdir -p "${BIN_DIR}"
 cp "${RUST_DIR}/target/release/imfwizard" "${BIN_DIR}/imfwizard-${TARGET_TRIPLE}"
+# the deb and rpm put the sidecar in /usr/bin and libgrokj2k in /usr/lib/imfwizard
+if [[ "$(uname)" == Linux ]]; then
+    patchelf --set-rpath '$ORIGIN/../lib/imfwizard' "${BIN_DIR}/imfwizard-${TARGET_TRIPLE}"
+fi
 echo "Installed: ${BIN_DIR}/imfwizard-${TARGET_TRIPLE}"
