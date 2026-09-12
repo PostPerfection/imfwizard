@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- **Preview sound stays in sync with the picture**: the sound of a IMP fell further behind the picture the longer it played, because the picture ran on a wall clock while every starved sound callback wrote silence that never advanced the sound's position. The player now paces the picture from the sound device's clock and a starved sound queue skips forward instead of lagging.
 - **The Preview button comes back when playback reaches the end**: it stayed disabled once the panel showed the selected package, so at the end of the composition the picture sat on its last frame and Preview did nothing. The panel reports the end and the button re-enables, and a click plays the package again from the start. The transport play button restarts it too.
 - **Recent projects keep their order while the window is open**: opening or rebuilding a listed IMP no longer moves its row to the top, a project new to this session goes in at the top, and the stored order still puts the most recently used first on the next launch.
 - **The timeline follows the composition instead of loading segments behind it**: at the end of each segment, and on a ruler click that landed in another segment, it called `preview_load` with that segment's track file, which replaced the whole composition the player held with one silent segment and shortened the duration the scrubber reported. The player opens an IMP as a single composition, so the timeline now only seeks, and it takes the playhead and the active segment from the composition position.
