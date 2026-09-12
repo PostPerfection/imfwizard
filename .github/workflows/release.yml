@@ -107,7 +107,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1.1.2
         with:
-          grok-ref: v20.4.7
+          grok-ref: v20.4.8
 
       - name: Build release
         working-directory: rust
@@ -214,7 +214,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1.1.2
         with:
-          grok-ref: v20.4.7
+          grok-ref: v20.4.8
 
       - name: Build .deb package
         working-directory: rust
@@ -314,7 +314,7 @@ jobs:
       - name: Setup grok
         uses: PostPerfection/setup-grok@v1.1.2
         with:
-          grok-ref: v20.4.7
+          grok-ref: v20.4.8
 
       - name: Setup libmpv
         uses: PostPerfection/setup-libmpv@v1
