@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- **`run-gpu-gui.py` matches dcpwizard's**: it looked for `lib64/libgrokj2k_plugin.so` on Linux only. It now picks the plugin name, library directory and loader variable from the OS, requires `grok_kernels.metallib` beside the dylib on macOS, copies the CLI sidecar itself on Windows, and starts the local development registration server when the saved preferences point at it.
+
 ### Fixed
 - **The Preview button greys out once the panel shows its target**: it stayed enabled after a click, so a second click reloaded the same IMP. The button is enabled only while the selected row, the first picture, the opened package or the output path differs from what the preview holds, and comes back when the panel is closed or the playlist moves on.
 
