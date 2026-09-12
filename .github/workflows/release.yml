@@ -400,16 +400,27 @@ jobs:
             done
           }
 
+          ls -la "$bundle"/rpm "$bundle"/deb "$bundle"/appimage
+          rpm=$(find "$bundle/rpm" -name '*.rpm' ! -name '*.sig' -print -quit)
+          rpm -qpl "$rpm"
           rpm_root=$(mktemp -d)
-          rpm2cpio "$(find "$bundle/rpm" -name '*.rpm' -print -quit)" | (cd "$rpm_root" && cpio -idm)
-          test -f "$rpm_root/usr/lib/imfwizard/libgrokj2k.so.1"
+          rpm2cpio "$rpm" | (cd "$rpm_root" && cpio -idm --quiet)
+          if [ ! -f "$rpm_root/usr/lib/imfwizard/libgrokj2k.so.1" ]; then
+            echo "the rpm does not carry usr/lib/imfwizard/libgrokj2k.so.1"
+            find "$rpm_root" -type f | sort
+            exit 1
+          fi
           check_binaries "$rpm_root/usr/bin/imfwizard" "$rpm_root/usr/bin/imfwizard-gui"
           env -u LD_LIBRARY_PATH "$rpm_root/usr/bin/imfwizard" --version
 
           appimage=$(realpath "$(find "$bundle/appimage" -name '*.AppImage' -print -quit)")
           appimage_root=$(mktemp -d)
           (cd "$appimage_root" && "$appimage" --appimage-extract >/dev/null)
-          test -f "$appimage_root/squashfs-root/usr/lib/libgrokj2k.so.1"
+          if [ ! -f "$appimage_root/squashfs-root/usr/lib/libgrokj2k.so.1" ]; then
+            echo "the AppImage does not carry usr/lib/libgrokj2k.so.1"
+            ls "$appimage_root/squashfs-root/usr/lib"
+            exit 1
+          fi
           env -u LD_LIBRARY_PATH "$appimage_root/squashfs-root/usr/bin/imfwizard" --version
 
           deb=$(realpath "$(find "$bundle/deb" -name '*.deb' -print -quit)")
@@ -424,8 +435,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app=$(find gui/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
-          test -f "$app/Contents/Frameworks/libgrokj2k.1.dylib"
+          # the bundler deletes the .app once the dmg exists, the tar.gz is what ships
+          ls -la gui/src-tauri/target/release/bundle/macos
+          app_root=$(mktemp -d)
+          tar -xzf "$(find gui/src-tauri/target/release/bundle/macos -name '*.app.tar.gz' -print -quit)" -C "$app_root"
+          app=$(find "$app_root" -maxdepth 1 -name '*.app' -print -quit)
+          if [ ! -f "$app/Contents/Frameworks/libgrokj2k.1.dylib" ]; then
+            echo "the app does not carry Contents/Frameworks/libgrokj2k.1.dylib"
+            find "$app" -type f | sort
+            exit 1
+          fi
           for binary in "$app/Contents/MacOS/imfwizard" "$app/Contents/MacOS/imfwizard-gui"; do
             otool -L "$binary"
             if otool -L "$binary" | grep -q "/Users/runner"; then
