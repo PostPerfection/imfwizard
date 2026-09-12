@@ -93,6 +93,10 @@ function paths() {
   return getRecentProjects().map((entry) => entry.path);
 }
 
+function rowPaths(list) {
+  return list.querySelectorAll('.recent-item').map((row) => row.dataset.path);
+}
+
 test('the newest project is first', () => {
   setup();
 
@@ -112,6 +116,22 @@ test('building the same project again moves it up instead of listing it twice', 
 
   assert.deepEqual(paths(), ['/imps/A', '/imps/C', '/imps/B']);
   assert.equal(getRecentProjects()[0].title, 'A again');
+});
+
+test('opening a project again keeps its row where it was', () => {
+  const { list } = setup();
+
+  addRecentProject('/imps/A', 'A');
+  addRecentProject('/imps/B', 'B');
+  addRecentProject('/imps/C', 'C');
+  addRecentProject('/imps/A', 'A again');
+
+  assert.deepEqual(rowPaths(list), ['/imps/C', '/imps/B', '/imps/A']);
+  assert.equal(paths()[0], '/imps/A');
+
+  addRecentProject('/imps/D', 'D');
+
+  assert.deepEqual(rowPaths(list), ['/imps/D', '/imps/C', '/imps/B', '/imps/A']);
 });
 
 test('the list stops at twenty and drops the oldest', () => {

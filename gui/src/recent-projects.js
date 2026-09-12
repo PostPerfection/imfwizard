@@ -5,9 +5,12 @@ const RECENT_COLLAPSED_KEY = "imfwizard-recent-projects-collapsed";
 const MAX_RECENT = 20;
 
 let configuration = null;
+// rows keep the order they were first shown in, only the stored order tracks recency
+let shownOrder = [];
 
 export function initRecentProjects(options) {
   configuration = options;
+  shownOrder = [];
   options.header?.addEventListener("click", () => {
     localStorage.setItem(RECENT_COLLAPSED_KEY, String(!recentProjectsCollapsed()));
     applyRecentProjectsCollapsed();
@@ -48,6 +51,15 @@ export function removeRecentProject(path) {
   renderRecentProjects();
 }
 
+function rowsInShownOrder(recent) {
+  const rank = new Map(shownOrder.map((path, index) => [path, index]));
+  const fresh = recent.filter(entry => !rank.has(entry.path));
+  const known = recent.filter(entry => rank.has(entry.path)).sort((a, b) => rank.get(a.path) - rank.get(b.path));
+  const rows = [...fresh, ...known];
+  shownOrder = rows.map(entry => entry.path);
+  return rows;
+}
+
 export function renderRecentProjects() {
   const { section, list, onOpen, onQueue, onRetitle, onDelete, afterRender, setStatus } = configuration;
   if (!section || !list) return;
@@ -55,7 +67,7 @@ export function renderRecentProjects() {
   const recent = getRecentProjects();
   if (recent.length === 0) { section.hidden = true; return; }
   section.hidden = false;
-  list.innerHTML = recent.map(r => {
+  list.innerHTML = rowsInShownOrder(recent).map(r => {
     const path = escapeHtml(r.path);
     const title = escapeHtml(r.title || r.path.split(/[/\\]/).pop());
     return `
