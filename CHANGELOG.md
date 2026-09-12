@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.3.0] - 2026-09-12
 
 ### Changed
 - **`run-gpu-gui.py` matches dcpwizard's**: it looked for `lib64/libgrokj2k_plugin.so` on Linux only. It now picks the plugin name, library directory and loader variable from the OS, requires `grok_kernels.metallib` beside the dylib on macOS, copies the CLI sidecar itself on Windows, and starts the local development registration server when the saved preferences point at it.
