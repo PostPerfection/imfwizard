@@ -136,11 +136,20 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 
 | Platform | CLI | Desktop GUI |
 |----------|-----|-------------|
-| **Linux** (x86_64) | `imfwizard-linux-x86_64.tar.gz` | `.deb`, `.AppImage` |
+| **Linux** (x86_64) | `imfwizard-linux-x86_64.tar.gz` | `.deb`, `.rpm`, `.AppImage` |
 | **macOS** (Apple Silicon) | `imfwizard-macos-aarch64.tar.gz` | `.dmg` |
 | **Windows** (x86_64) | `imfwizard-windows-x86_64.zip` | `.msi` |
 
 The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. Every archive ships that library: `grokj2k.dll` beside the exe in the Windows zip, `libgrokj2k` in `lib/` beside the binary in the Linux and macOS tarballs, where the binary's rpath finds it. Extract and run, no loader path to set.
+
+The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. They need libmpv for the preview player, which the package manager pulls in:
+
+```bash
+sudo apt install ./imfwizard_*_amd64.deb     # Debian, Ubuntu
+sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora, with RPM Fusion enabled for mpv-libs
+```
+
+The `.AppImage` carries libmpv as well and needs nothing installed. For the `.dmg`, install libmpv with `brew install mpv`.
 
 ### Install from source
 

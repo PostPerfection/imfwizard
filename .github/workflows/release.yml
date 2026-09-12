@@ -284,7 +284,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm xvfb xdotool
+          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm cpio xvfb xdotool
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -331,10 +331,15 @@ jobs:
         working-directory: rust
         env:
           OPENSSL_STATIC: "1"
+        shell: bash
         run: |
           cargo build --release -p imfwizard-cli
           TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
           cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
+          # the deb and rpm put the sidecar in /usr/bin, same rpath as the gui
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            patchelf --set-rpath '$ORIGIN/../lib/imfwizard' ../gui/src-tauri/imfwizard-${TRIPLE}
+          fi
 
       - name: Build CLI sidecar (Windows)
         if: runner.os == 'Windows'
@@ -349,6 +354,26 @@ jobs:
         if: runner.os == 'Windows'
         run: Copy-Item "$env:GITHUB_WORKSPACE/grok-install/bin/grokj2k.dll" "gui/src-tauri/"
 
+      # the deb and rpm ship it through bundle.linux.*.files, the .app through bundle.macOS.frameworks
+      - name: Stage grok library (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$GITHUB_WORKSPACE/grok-install/lib64" "$GITHUB_WORKSPACE/grok-install/lib"; do
+            if [ -d "$candidate" ]; then GROK_LIB="$candidate"; break; fi
+          done
+          if [ -z "${GROK_LIB:-}" ]; then
+            echo "no grok library directory under grok-install"
+            exit 1
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            library=libgrokj2k.so.1
+          else
+            library=libgrokj2k.1.dylib
+          fi
+          cp -L "$GROK_LIB/$library" "gui/src-tauri/$library"
+
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:
@@ -356,6 +381,61 @@ jobs:
         with:
           projectPath: gui
           args: --ci --bundles ${{ matrix.bundles }}
+
+      # every check runs with the loader path setup-grok exported unset
+      - name: The packages run without a grok install (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=gui/src-tauri/target/release/bundle
+
+          check_binaries() {
+            for binary in "$@"; do
+              env -u LD_LIBRARY_PATH ldd "$binary"
+              if env -u LD_LIBRARY_PATH ldd "$binary" | grep -q "not found"; then
+                echo "$binary has an unresolved library"
+                exit 1
+              fi
+            done
+          }
+
+          rpm_root=$(mktemp -d)
+          rpm2cpio "$(find "$bundle/rpm" -name '*.rpm' -print -quit)" | (cd "$rpm_root" && cpio -idm)
+          test -f "$rpm_root/usr/lib/imfwizard/libgrokj2k.so.1"
+          check_binaries "$rpm_root/usr/bin/imfwizard" "$rpm_root/usr/bin/imfwizard-gui"
+          env -u LD_LIBRARY_PATH "$rpm_root/usr/bin/imfwizard" --version
+
+          appimage=$(realpath "$(find "$bundle/appimage" -name '*.AppImage' -print -quit)")
+          appimage_root=$(mktemp -d)
+          (cd "$appimage_root" && "$appimage" --appimage-extract >/dev/null)
+          test -f "$appimage_root/squashfs-root/usr/lib/libgrokj2k.so.1"
+          env -u LD_LIBRARY_PATH "$appimage_root/squashfs-root/usr/bin/imfwizard" --version
+
+          deb=$(realpath "$(find "$bundle/deb" -name '*.deb' -print -quit)")
+          dpkg-deb -f "$deb" Depends | grep -F libmpv2
+          sudo apt-get install -y "$deb"
+          check_binaries /usr/bin/imfwizard /usr/bin/imfwizard-gui
+          env -u LD_LIBRARY_PATH imfwizard --version
+
+      # the bundler rewrites no load command, a missed relink shows up as a runner path
+      - name: The app runs without a grok install (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find gui/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
+          test -f "$app/Contents/Frameworks/libgrokj2k.1.dylib"
+          for binary in "$app/Contents/MacOS/imfwizard" "$app/Contents/MacOS/imfwizard-gui"; do
+            otool -L "$binary"
+            if otool -L "$binary" | grep -q "/Users/runner"; then
+              echo "$binary loads a library from the build tree"
+              exit 1
+            fi
+            # the bundler rewrites the main binary after the relink hook signed it
+            codesign --verify "$binary"
+          done
+          env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH "$app/Contents/MacOS/imfwizard" --version
 
       - name: Setup uv
         if: runner.os == 'Linux'
@@ -365,8 +445,8 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          # this deb is already installed, by the no-grok-install checks above
           installer=$(realpath "$(find gui/src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)")
-          sudo apt-get install -y "$installer"
           package=$(dpkg-deb -f "$installer" Package)
           binary=$(dpkg -L "$package" | awk '/^\/usr\/bin\// {print; exit}')
           test -x "$binary"

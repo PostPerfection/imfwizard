@@ -1,5 +1,21 @@
 {
   "app": {
     "windows": []
+  },
+  "bundle": {
+    "linux": {
+      "deb": {
+        "depends": ["libmpv2"],
+        "files": {
+          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
+        }
+      },
+      "rpm": {
+        "depends": ["mpv-libs"],
+        "files": {
+          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
+        }
+      }
+    }
   }
 }

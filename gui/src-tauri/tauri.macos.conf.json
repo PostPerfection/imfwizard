@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBundleCommand": "bash ../scripts/relink-macos-grok.sh"
+  },
+  "bundle": {
+    "macOS": {
+      "frameworks": ["libgrokj2k.1.dylib"]
+    }
+  }
+}

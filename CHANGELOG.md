@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The desktop packages run on a machine with no grok install**: the `.deb`, the `.rpm` and the macOS `.app` carried neither `libgrokj2k` nor a dependency naming it, so `imfwizard` and `imfwizard-gui` died with `libgrokj2k.so.1: cannot open shared object file` on a clean Fedora or Ubuntu, and on macOS their load commands still named the runner's `grok-install/lib`. The deb and rpm ship the library at `/usr/lib/imfwizard/libgrokj2k.so.1` through `bundle.linux.deb.files` and `bundle.linux.rpm.files`, and both binaries find it there: the GUI through a `$ORIGIN/../lib/imfwizard` rpath its `build.rs` emits on linux, the CLI sidecar through the same rpath, set by patchelf in the release workflow. The `.app` carries it in `Contents/Frameworks` through `bundle.macOS.frameworks`, which the bundler copies without rewriting a single load command, so `scripts/relink-macos-grok.sh` runs as `beforeBundleCommand` and points both binaries at `@executable_path/../Frameworks/libgrokj2k.1.dylib`, re-signing each one ad hoc since every `install_name_tool` edit breaks the signature arm64 requires. libmpv is declared rather than bundled, `libmpv2` in the deb and `mpv-libs` in the rpm, on top of the webkit2gtk and gtk3 dependencies the bundler adds itself. The AppImage is unchanged: linuxdeploy copies both libraries into `usr/lib` and resets the RUNPATH to `$ORIGIN/../lib` as it did before. The `gui` job now installs the deb, extracts the rpm and the AppImage, and runs the packaged binary and `ldd` over both with `LD_LIBRARY_PATH` unset, and on macOS refuses an `otool -L` line naming a build tree path, so a library a package does not carry fails the job rather than the download.
+
 ## [1.3.0] - 2026-09-12
 
 ### Changed
