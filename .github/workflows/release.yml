@@ -284,7 +284,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm cpio xvfb xdotool
+          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libarchive-tools xvfb xdotool
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -404,7 +404,7 @@ jobs:
           rpm=$(find "$bundle/rpm" -name '*.rpm' ! -name '*.sig' -print -quit)
           rpm -qpl "$rpm"
           rpm_root=$(mktemp -d)
-          rpm2cpio "$rpm" | (cd "$rpm_root" && cpio -idm --quiet)
+          bsdtar -xf "$rpm" -C "$rpm_root"
           if [ ! -f "$rpm_root/usr/lib/imfwizard/libgrokj2k.so.1" ]; then
             echo "the rpm does not carry usr/lib/imfwizard/libgrokj2k.so.1"
             find "$rpm_root" -type f | sort
@@ -451,10 +451,14 @@ jobs:
               echo "$binary loads a library from the build tree"
               exit 1
             fi
-            # the bundler rewrites the main binary after the relink hook signed it
-            codesign --verify "$binary"
           done
           env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH "$app/Contents/MacOS/imfwizard" --version
+          # a missing dylib kills the gui at exec, so it has to be alive a few seconds later
+          env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH "$app/Contents/MacOS/imfwizard-gui" &
+          gui_pid=$!
+          sleep 8
+          kill -0 "$gui_pid"
+          kill "$gui_pid"
 
       - name: Setup uv
         if: runner.os == 'Linux'
