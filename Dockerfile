@@ -29,7 +29,7 @@ FROM ubuntu:24.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake curl ca-certificates pkg-config git libclang-dev \
-    libssl-dev libxml2-dev libxerces-c-dev \
+    libssl-dev libxml2-dev libxerces-c-dev libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
@@ -43,7 +43,7 @@ FROM ubuntu:24.04
 ARG FFMPEG_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3t64 libxml2 libxerces-c3.2t64 xmlsec1 fonts-dejavu-core ca-certificates curl xz-utils \
+    libssl3t64 libxml2 libxerces-c3.2t64 libasound2t64 xmlsec1 fonts-dejavu-core ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL --retry 5 --retry-all-errors -o /tmp/ffmpeg.tar.xz "$FFMPEG_URL" \
     && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
