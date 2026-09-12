@@ -247,7 +247,7 @@ jobs:
             bundles: deb,rpm,appimage
           - os: macos-15
             name: macos
-            bundles: dmg
+            bundles: app,dmg
           - os: windows-2022
             name: windows
             bundles: msi,nsis
@@ -435,11 +435,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # the bundler deletes the .app once the dmg exists, the tar.gz is what ships
           ls -la gui/src-tauri/target/release/bundle/macos
-          app_root=$(mktemp -d)
-          tar -xzf "$(find gui/src-tauri/target/release/bundle/macos -name '*.app.tar.gz' -print -quit)" -C "$app_root"
-          app=$(find "$app_root" -maxdepth 1 -name '*.app' -print -quit)
+          app=$(find gui/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$app" ]; then
+            echo "no .app under gui/src-tauri/target/release/bundle/macos"
+            exit 1
+          fi
           if [ ! -f "$app/Contents/Frameworks/libgrokj2k.1.dylib" ]; then
             echo "the app does not carry Contents/Frameworks/libgrokj2k.1.dylib"
             find "$app" -type f | sort
