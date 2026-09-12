@@ -70,6 +70,20 @@ only, so a profile 4 RPU is refused by the library and the README's profile 4
 to 8.1 conversion cannot happen at all. Closing FEL means a real profile 7 FEL
 source. Closing profile 4 means the conversion existing first.
 
+## Open: GPU encode on Windows and macOS has no recorded run (2026-09-10)
+
+The README says "CPU and GPU encoding on Linux, Windows, and macOS" and "GPU
+encoding toggle on Linux, Windows, and macOS". Only Linux has a recorded GPU
+encode run. Closing it means a recorded run on each of the other two, or
+narrowing both sentences to Linux.
+
+## Open: the GPU toggle success path is hand tested only (2026-09-10)
+
+`test_the_gpu_toggle_reports_the_missing_plugin_and_stays_off` covers the
+machine with no plugin: the status reads "GPU encoding unavailable" and the
+setting stays off. Turning it on needs Grok's plugin and a licence, so no test
+reaches the path where the device starts and the job log counts frames on it.
+
 ## Open: the macOS .dmg is unsigned and unnotarised (2026-09-09)
 
 `release.yml` builds the GUI on `macos-15` and bundles a `dmg`, and nothing

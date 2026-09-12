@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **The Preview button greys out once the panel shows its target**: it stayed enabled after a click, so a second click reloaded the same IMP. The button is enabled only while the selected row, the first picture, the opened package or the output path differs from what the preview holds, and comes back when the panel is closed or the playlist moves on.
+
 ### Added
 - **`watermark`, `dcdm` and the S3 and Aspera deliveries run in tests**: `watermark.rs` reads the marked frames back and finds the mark in the bottom left with the picture above it unchanged, `dcdm.rs` reads the X'Y'Z' TIFFs back at the D65 white codes 3883, 3960 and 4092 and through a halving LUT, and `deliver.rs` puts a stand-in `aws` and `ascp` on PATH and checks the argv each was handed and the tracker row. The desktop pipeline's Dolby Vision fill is tested too: `a_dolby_vision_source_fills_the_light_levels_the_panel_left_unset` drives an 8.1 source through `plan_compositions` and reads MaxCLL 993 and MaxFALL 362 back off the composition.
 

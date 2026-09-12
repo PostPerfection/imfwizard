@@ -4,7 +4,8 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { documentDir, join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
@@ -617,6 +618,9 @@ let openedPackage = null;
 // the row picked in the asset list or the recent list
 let selectedPreview = null;
 
+// what the preview panel holds
+let previewShownPath = null;
+
 function selectPreview(kind, path) {
   selectedPreview = { kind, path };
   applyPreviewSelection();
@@ -643,21 +647,20 @@ function applyPreviewSelection() {
   });
 }
 
+function previewTargetInput() {
+  return {
+    selectedPreview,
+    firstPicturePath: project.segments[0]?.picture?.path,
+    openedPackage,
+    outputPath: document.getElementById("prop-output")?.value,
+  };
+}
+
 document.getElementById("btn-preview")?.addEventListener("click", () => {
-  if (selectedPreview?.kind === "source") {
-    previewProjectFile(selectedPreview.path);
-    return;
-  }
-  if (selectedPreview?.kind === "package") {
-    previewBuiltPackage(selectedPreview.path);
-    return;
-  }
-  const seg = project.segments[0];
-  const output = document.getElementById("prop-output")?.value;
-  if (seg?.picture) { previewProjectFile(seg.picture.path); }
-  else if (openedPackage) { previewBuiltPackage(openedPackage); }
-  else if (output) { previewBuiltPackage(output); }
-  else { tauriMessage("Import a video asset first"); }
+  const target = previewTarget(previewTargetInput());
+  if (!target) return;
+  if (target.kind === PREVIEW_KIND_SOURCE) previewProjectFile(target.path);
+  else previewBuiltPackage(target.path);
 });
 
 // The preview shows what the build will do to the picture, so a file a
@@ -1514,8 +1517,7 @@ function updateToolbarState() {
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
   if (buildBtn) buildBtn.disabled = buildInFlight || !(hasVideo && hasTitle);
-  const hasOutput = !!document.getElementById("prop-output")?.value;
-  if (previewBtn) previewBtn.disabled = !selectedPreview && !hasVideo && !openedPackage && !hasOutput;
+  if (previewBtn) previewBtn.disabled = !previewButtonEnabled(previewTarget(previewTargetInput()), previewShownPath);
   if (supBtn) supBtn.disabled = !hasTitle;
 }
 
@@ -1610,6 +1612,7 @@ renderSegments();
 renderRecentProjects();
 updateStatusStats();
 initPreview();
+watchPreviewShown(path => { previewShownPath = path; updateToolbarState(); });
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({
