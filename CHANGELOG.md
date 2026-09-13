@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.3.1] - 2026-09-12
 
 ### Fixed
 - **Changing the preview decode scale no longer drops frames**: switching between full, half and quarter emptied the decoded frames like a seek, so the picture stalled until the first frames came back at the new scale. The decoded frames now stay and the new scale replaces them as its frames land.
