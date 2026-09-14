@@ -22,7 +22,10 @@ pub fn validate_imp(imp_dir: &Path) -> ValidationResult {
 
 // dcpdoctor reads PHOTON_DIR and its own cache, neither of which is where the wizard puts Photon
 pub fn validate_imp_with_photon(imp_dir: &Path, photon: Option<&Path>) -> ValidationResult {
+    // dcpdoctor's standard options scan every frame
     let options = dcpdoctor_core::VerifyOptions {
+        check_picture_details: false,
+        scan_every_frame: false,
         photon: crate::photon::photon_path(photon),
         ..dcpdoctor_core::VerifyOptions::standard()
     };

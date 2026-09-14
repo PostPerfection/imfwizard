@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2] - 2026-09-13
+
+### Changed
+- **Builds against grok v20.4.9**: the CLI archives, the desktop packages, the Docker image and CI carry grok v20.4.9.
+- **Faster CPU encodes at a bitrate**: the rate search carries its slope from the previous frame and may leave 2 percent of the byte budget unused, about 10 percent more frames a second at 4K.
+- **Validation uses dcpdoctor 1.3.2**: dcpdoctor now scans every frame by default. The plain validate keeps that off, and only the QC report reads the picture essence, as before.
+
 ## [1.3.1] - 2026-09-12
 
 ### Fixed

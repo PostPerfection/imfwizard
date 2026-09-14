@@ -5,12 +5,12 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "AGPL-3.0-or-later"
-version = "1.3.1"
+version = "1.3.2"
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
-dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", rev = "89261a65bdc0bfe986091f17e4492026934fa088" }
+dcpdoctor-core = { git = "https://github.com/PostPerfection/dcpdoctor.git", rev = "1491d0c18f4d23eb5cadf025a95b6889c75fb64f" }
 postkit = { path = "../extern/postkit", features = ["grok-ffi"] }
 quick-xml = "0.37"
 serde = { version = "1", features = ["derive"] }
