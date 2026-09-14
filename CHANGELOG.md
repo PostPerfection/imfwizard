@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.3] - 2026-09-14
+
+### Changed
+- **Builds against grok v20.4.10**: the CLI archives, the desktop packages, the Docker image and CI carry grok v20.4.10.
+- **Faster GPU encodes at a bitrate**: grok's accelerator batch carries the rate search slope from one frame to the next, as CPU encodes already did. A 60 second 2K clip went from 125 to 130 frames a second.
+
+### Fixed
+- **CPU encodes at a bitrate are byte reproducible again**: 1.3.2 let the rate search stop 2 percent short of the byte budget, which made the same source encode to different bytes run to run. The search is exact again and keeps the slope carried between frames, so the speed gain stays.
+- **The preview no longer drops frames when the system wakes it late**: the preview slept a whole frame between pictures, and a timed wait on macOS can return several frames late. While playing it now waits at most 4 ms at a time.
+
 ## [1.3.2] - 2026-09-13
 
 ### Changed
