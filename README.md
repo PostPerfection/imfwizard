@@ -156,7 +156,7 @@ The `.AppImage` carries libmpv as well and needs nothing installed. For the `.dm
 Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
 
 ```bash
-git clone --recurse-submodules --branch v20.4.10 https://github.com/GrokImageCompression/grok.git
+git clone --recurse-submodules --branch v20.4.11 https://github.com/GrokImageCompression/grok.git
 cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/bin/grok"
 cmake --build grok/build --parallel
 cmake --install grok/build
