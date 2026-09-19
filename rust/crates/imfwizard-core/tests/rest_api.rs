@@ -13,6 +13,8 @@ const API_KEY: &str = "farm-key-9f3a";
 const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
 const FRAMES: usize = 4;
+const BLOCKING_FRAMES: usize = 48;
+const BLOCKING_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const JOB_TIMEOUT: Duration = Duration::from_secs(120);
 
 // a server per test, so pausing one queue cannot reach another
@@ -112,6 +114,20 @@ fn codestream_directory(root: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(&frames).unwrap();
     let codestream = synthetic_j2k_codestream(WIDTH, HEIGHT, 12);
     for frame in 0..FRAMES {
+        std::fs::write(frames.join(format!("{frame:04}.j2c")), &codestream).unwrap();
+    }
+    frames
+}
+
+// the wrapper reads only the siz
+fn blocking_codestream_directory(root: &Path) -> std::path::PathBuf {
+    let frames = root.join("j2k");
+    std::fs::create_dir_all(&frames).unwrap();
+    let mut codestream = synthetic_j2k_codestream(WIDTH, HEIGHT, 12);
+    let end_of_codestream = codestream.split_off(codestream.len() - 2);
+    codestream.resize(BLOCKING_FRAME_BYTES, 0);
+    codestream.extend_from_slice(&end_of_codestream);
+    for frame in 0..BLOCKING_FRAMES {
         std::fs::write(frames.join(format!("{frame:04}.j2c")), &codestream).unwrap();
     }
     frames
@@ -433,7 +449,7 @@ fn pause_refuses_a_submission_and_resume_takes_it() {
 fn a_job_waiting_behind_another_can_be_cancelled() {
     let address = serve();
     let directory = TempDir::new().unwrap();
-    let frames = codestream_directory(directory.path());
+    let frames = blocking_codestream_directory(directory.path());
 
     // the worker takes one job at a time, so the second stays queued while the
     // first wraps and hashes its track file
