@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import socket
@@ -75,12 +76,21 @@ def request(method, url, body=None):
         url, data=data, method=method, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(call, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read())
+        try:
+            payload = send(call)
+        except http.client.RemoteDisconnected:
+            # tauri-driver reuses a connection WebKitWebDriver just closed, so
+            # the request never reached the browser
+            payload = send(call)
     except urllib.error.HTTPError as failure:
         detail = failure.read().decode(errors="replace")
         raise WebDriverError(f"{method} {url}: {detail[:600]}") from None
     return payload["value"]
+
+
+def send(call):
+    with urllib.request.urlopen(call, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read())
 
 
 def free_port():
