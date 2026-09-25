@@ -266,6 +266,8 @@ fn holds_imp(dir: &std::path::Path) -> bool {
 pub struct SubmitResult {
     pub job_id: Option<u64>,
     pub hints: Vec<String>,
+    pub title: String,
+    pub output_dir: String,
 }
 
 // each composition brings its own source, so its hdr is settled against that source
@@ -435,6 +437,8 @@ pub async fn submit_job(
         ..Default::default()
     };
     let hints = plan_compositions(&mut compositions, &shared_plan)?;
+    let submitted_title = title.clone();
+    let submitted_output_dir = output_dir.clone();
 
     // the pref lives in the panel, which says it has taken the hints by sending
     // hintsAccepted rather than by naming the pref here
@@ -442,6 +446,8 @@ pub async fn submit_job(
         return Ok(SubmitResult {
             job_id: None,
             hints,
+            title: submitted_title,
+            output_dir: submitted_output_dir,
         });
     }
 
@@ -491,6 +497,8 @@ pub async fn submit_job(
     Ok(SubmitResult {
         job_id: Some(id),
         hints,
+        title: submitted_title,
+        output_dir: submitted_output_dir,
     })
 }
 

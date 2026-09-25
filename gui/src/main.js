@@ -913,7 +913,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   // a second build would queue behind the first and encode all over again
   if (buildInFlight) return;
 
-  const title = document.getElementById("prop-title")?.value?.trim();
+  let title = document.getElementById("prop-title")?.value?.trim();
   if (!title) { tauriMessage("Enter a content title in Properties"); return; }
 
   // one composition per CPL tab; each becomes a separate CPL in the IMP
@@ -1014,6 +1014,8 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       }
       result = await submit(true);
     }
+    title = result.title;
+    output = result.outputDir;
     currentJobId = result.jobId;
     setStatus("Building IMP...");
   } catch (e) {
