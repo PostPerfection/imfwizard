@@ -549,12 +549,13 @@ def test_the_queue_the_recent_list_and_the_theme_come_back_after_a_restart(finis
 
 
 # the success path needs grok's plugin and a licence, hand tested
-def test_the_gpu_toggle_reports_the_missing_plugin_and_stays_off(window, tmp_path):
+def test_saving_the_gpu_setting_reports_the_missing_plugin_and_stays_off(window, tmp_path):
     session = window.session
     window.press("ctrl+7")
     wait_for_view(session, "view-settings")
 
     window.click("#set-gpu-enable")
+    window.click("#settings-form button[type='submit']")
     status = wait_until(
         "the status never mentioned the GPU",
         lambda: status_text(session).startswith(GPU_UNAVAILABLE_PREFIX)
