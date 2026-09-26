@@ -6,7 +6,7 @@
 
 Interoperable Master Format (IMF) package creator, CLI tool and desktop GUI. Written in Rust.
 
-Version 1.2 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
+Version 1.3 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
 
 ## Overview
 
@@ -142,14 +142,16 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 
 The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. Every archive ships that library: `grokj2k.dll` beside the exe in the Windows zip, `libgrokj2k` in `lib/` beside the binary in the Linux and macOS tarballs, where the binary's rpath finds it. Extract and run, no loader path to set.
 
-The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. They need libmpv for the preview player, which the package manager pulls in:
+The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. The package manager pulls in the rest: libmpv for the preview player, ffmpeg for video import, xmlsec1 and xmllint for verification, curl for certificate fetching.
 
 ```bash
 sudo apt install ./imfwizard_*_amd64.deb     # Debian, Ubuntu
-sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora, with RPM Fusion enabled for mpv-libs and ffmpeg
+sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora
 ```
 
-The `.AppImage` carries libmpv as well and needs nothing installed. For the `.dmg`, install libmpv with `brew install mpv`.
+On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. Nothing else has to be installed by hand. Dolby Vision and HDR10+ sources also need `dovi_tool` and `hdr10plus_tool` on the PATH, from their GitHub releases listed under runtime dependencies below.
+
+The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint from the PATH. For the `.dmg`, install libmpv with `brew install mpv`.
 
 ### Install from source
 
@@ -170,6 +172,19 @@ export LD_LIBRARY_PATH="$HOME/bin/grok/lib64:$HOME/bin/grok/lib:$LD_LIBRARY_PATH
 ```bash
 sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
 # For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
+git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
+cd imfwizard/rust
+cargo build --release
+# Binary at rust/target/release/imfwizard
+```
+
+#### Fedora
+
+```bash
+sudo dnf install gcc-c++ cmake pkgconf-pkg-config libxml2-devel openssl-devel xerces-c-devel alsa-lib-devel
+# For GUI: also install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel mpv-devel
+# ffmpeg comes from RPM Fusion
 
 git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
 cd imfwizard/rust
