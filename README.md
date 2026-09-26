@@ -270,6 +270,30 @@ imfwizard --gpu create --title "My Film" --video master.mov --output ./imp
 
 The desktop GPU setting applies to encode and preview decode. Its job log at `<output>/imfwizard.log` prints `Accelerator: requested, active` and `[ENCODE] Frames on the device: N of M` when the plugin ran. Use `--no-gpu` to override a saved GPU preference for one CLI run.
 
+**GPU encoding on Fedora.** The released rpm encodes on the CPU. An rpm with the CUDA plugin is built from a local Grok installation that carries it:
+
+```bash
+./scripts/build-fedora-rpm.sh /path/to/grok/install
+```
+
+The RPM is written under `gui/src-tauri/target/release/bundle/rpm`. The plugin is built for one CUDA compute capability, and the file name carries it in the release field, for example `IMF-Wizard-1.3.3-1.sm75.x86_64.rpm` for a 2080 Ti. Remove an installed test build with `sudo dnf remove imf-wizard`.
+
+That rpm needs two more things on the target machine: the RPM Fusion NVIDIA driver, and a Grok licence entered under Settings. The CUDA runtime is linked into the plugin, so the CUDA toolkit and the NVIDIA Container Toolkit are not needed:
+
+```bash
+sudo dnf install akmod-nvidia xorg-x11-drv-nvidia-cuda
+sudo akmods --force
+sudo reboot
+```
+
+**GPU encoding on macOS.** The released dmg encodes on the CPU. A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
+
+```bash
+./scripts/build-macos-dmg.sh /path/to/grok/install
+```
+
+The dmg is written under `gui/src-tauri/target/release/bundle/dmg`, and its name carries `metal`, for example `IMF-Wizard-1.3.3-metal_aarch64.dmg`. Enter a Grok licence under Settings to encode on the GPU.
+
 ## Usage
 
 ### Create an IMP from J2K + WAV

@@ -22,7 +22,9 @@
           "ffmpeg",
           "xmlsec1",
           "libxml2",
-          "curl"
+          "curl",
+          "libcurl.so.4()(64bit)",
+          "libtiff.so.6()(64bit)"
         ],
         "files": {
           "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"

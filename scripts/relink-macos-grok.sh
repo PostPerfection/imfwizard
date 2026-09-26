@@ -7,6 +7,7 @@ TAURI_DIR="${ROOT}/gui/src-tauri"
 TARGET_TRIPLE="$(rustc -vV | awk '/^host:/ {print $2}')"
 DYLIB_NAME="libgrokj2k.1.dylib"
 INSTALL_NAME="@executable_path/../Frameworks/${DYLIB_NAME}"
+PLUGIN_NAME="libgrokj2k_plugin.dylib"
 
 if [[ "${TAURI_ENV_DEBUG:-false}" == "true" ]]; then
     PROFILE_DIR="debug"
@@ -15,6 +16,7 @@ else
 fi
 
 STAGED_DYLIB="${TAURI_DIR}/${DYLIB_NAME}"
+STAGED_PLUGIN="${TAURI_DIR}/${PLUGIN_NAME}"
 FILES=(
     "${STAGED_DYLIB}"
     "${TAURI_DIR}/target/${PROFILE_DIR}/imfwizard-gui"
@@ -31,11 +33,20 @@ done
 # a binary linked against this dylib records whatever its id says
 install_name_tool -id "${INSTALL_NAME}" "${STAGED_DYLIB}"
 
+# only the local gpu dmg build stages the plugin
+if [[ -f "${STAGED_PLUGIN}" ]]; then
+    install_name_tool -id "@executable_path/${PLUGIN_NAME}" "${STAGED_PLUGIN}"
+    FILES+=("${STAGED_PLUGIN}")
+fi
+
 for file in "${FILES[@]}"; do
     for reference in $(otool -L "${file}" | awk 'NR > 1 && /libgrok/ {print $1}'); do
         case "$(basename "${reference}")" in
             "${DYLIB_NAME}")
                 install_name_tool -change "${reference}" "${INSTALL_NAME}" "${file}"
+                ;;
+            # otool -L lists a dylib's own id among its references
+            "${PLUGIN_NAME}")
                 ;;
             *)
                 echo "relink-macos-grok: ${file} loads ${reference}, which the bundle does not carry" >&2
