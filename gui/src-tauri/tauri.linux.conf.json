@@ -5,13 +5,25 @@
   "bundle": {
     "linux": {
       "deb": {
-        "depends": ["libmpv2"],
+        "depends": [
+          "libmpv2",
+          "ffmpeg",
+          "xmlsec1",
+          "libxml2-utils",
+          "curl"
+        ],
         "files": {
           "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
         }
       },
       "rpm": {
-        "depends": ["mpv-libs"],
+        "depends": [
+          "mpv-libs",
+          "ffmpeg",
+          "xmlsec1",
+          "libxml2",
+          "curl"
+        ],
         "files": {
           "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
         }

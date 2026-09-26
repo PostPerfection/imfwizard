@@ -146,7 +146,7 @@ The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. They need li
 
 ```bash
 sudo apt install ./imfwizard_*_amd64.deb     # Debian, Ubuntu
-sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora, with RPM Fusion enabled for mpv-libs
+sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora, with RPM Fusion enabled for mpv-libs and ffmpeg
 ```
 
 The `.AppImage` carries libmpv as well and needs nothing installed. For the `.dmg`, install libmpv with `brew install mpv`.

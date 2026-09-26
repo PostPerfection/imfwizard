@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- **The deb and rpm pull in the tools the app runs**: ffmpeg, xmlsec1, xmllint and curl are declared as package dependencies, so a package install no longer leaves imports and verification without them.
 - **Builds against grok v20.4.11**: the CLI archives, the desktop packages, the Docker image and CI carry grok v20.4.11.
 
 ### Added
