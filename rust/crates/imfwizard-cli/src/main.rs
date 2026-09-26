@@ -1724,6 +1724,8 @@ fn run_preferences_command(action: &PreferencesCommand) -> i32 {
 }
 
 fn main() {
+    postkit::grok_encoder::set_packaged_gpu_plugin_path("imfwizard");
+
     // Windows debug builds overflow the default 1MB stack due to large clap
     // derive enum (many subcommands with args). Spawn with 8MB stack.
     let thread = std::thread::Builder::new()

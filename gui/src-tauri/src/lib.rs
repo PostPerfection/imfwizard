@@ -35,6 +35,8 @@ fn component_versions(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    postkit::grok_encoder::set_packaged_gpu_plugin_path("imfwizard");
+
     #[cfg(unix)]
     guikit::startup::fork_terminal_guard();
 
