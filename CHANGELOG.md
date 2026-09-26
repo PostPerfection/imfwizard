@@ -5,6 +5,9 @@
 ### Changed
 - **Builds against grok v20.4.11**: the CLI archives, the desktop packages, the Docker image and CI carry grok v20.4.11.
 
+### Added
+- **The Settings page lists the component versions**: a Components box shows the versions of the app, PostKit, Grok, FFmpeg and mpv. Every job log starts with the same lines.
+
 ## [1.3.3] - 2026-09-14
 
 ### Changed

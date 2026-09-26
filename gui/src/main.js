@@ -17,6 +17,7 @@ import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
 import { initRecentProjects, getRecentProjects, addRecentProject, removeRecentProject, renderRecentProjects } from "./recent-projects.js";
+import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 
 // === Browse wrapper ===
 const LAST_BROWSE_DIR_KEY = "imfwizard-last-browse-dir";
@@ -175,6 +176,7 @@ async function initializePreferences() {
     preferences.gpuLicense,
     preferences.gpuRegistrationUrl,
   );
+  await loadComponentVersions(invoke);
 }
 
 function loadSettings() {

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tomllib
 import uuid
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -55,6 +56,7 @@ CAPTURE_PROMPT = "press new shortcut"
 SHORTCUT_TRIGGER_ID = "test-shortcut-trigger"
 
 GPU_UNAVAILABLE_PREFIX = "GPU encoding unavailable"
+UNAVAILABLE_VERSION = "unavailable"
 
 FIXTURE_SIZE = "1920x1080"
 FIXTURE_FPS = 24
@@ -96,6 +98,12 @@ window.addEventListener("unhandledrejection", (event) => {
   window.__testRejections.push(String(event.reason));
 });
 return true;
+"""
+
+COMPONENT_VERSIONS = """
+return [...document.querySelectorAll("#component-versions .component-version")].map(
+  (row) => [row.querySelector("span").textContent, row.querySelector("output").textContent],
+);
 """
 
 PROGRESS_STATE = """
@@ -572,6 +580,29 @@ def test_saving_the_gpu_setting_reports_the_missing_plugin_and_stays_off(window,
         STATUS_TIMEOUT_SECONDS,
     )
     assert json.loads(preferences_file.read_text())["gpu"] is False
+
+
+def test_the_settings_page_lists_the_component_versions(window):
+    session = window.session
+    window.press("ctrl+7")
+    wait_for_view(session, "view-settings")
+
+    rows = wait_until(
+        "the component versions were never listed",
+        lambda: session.execute(COMPONENT_VERSIONS),
+        STATUS_TIMEOUT_SECONDS,
+    )
+    names = [name for name, _ in rows]
+    versions = dict(rows)
+    assert names == ["IMF Wizard", "PostKit", "Grok", "FFmpeg", "mpv"]
+    assert versions["IMF Wizard"] == package_version(REPOSITORY_ROOT / "gui/src-tauri/Cargo.toml")
+    assert versions["PostKit"] == package_version(REPOSITORY_ROOT / "extern/postkit/Cargo.toml")
+    for name, version in rows:
+        assert version and version != UNAVAILABLE_VERSION, f"{name} has no version: {version!r}"
+
+
+def package_version(manifest):
+    return tomllib.loads(manifest.read_text())["package"]["version"]
 
 
 ID_ELEMENT = re.compile(r"<Id>urn:uuid:[0-9a-fA-F-]+</Id>")

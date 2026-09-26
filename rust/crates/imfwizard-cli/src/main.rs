@@ -1846,6 +1846,12 @@ fn run() {
             keep_intermediates,
             no_verify,
         } => {
+            for component in postkit::component_versions::installed_components(
+                "IMF Wizard",
+                env!("CARGO_PKG_VERSION"),
+            ) {
+                tracing::info!("{}: {}", component.name, component.version);
+            }
             let CompressionArguments {
                 profile,
                 bitrate,

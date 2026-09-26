@@ -867,6 +867,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     )?));
 
     log_to(&log_file, "=== IMF Wizard Pipeline ===");
+    for component in guikit::component_versions::installed_components(
+        "IMF Wizard",
+        env!("CARGO_PKG_VERSION"),
+        &app.state::<guikit::preview::PreviewPlayer>(),
+    ) {
+        log_to(
+            &log_file,
+            &format!("{}: {}", component.name, component.version),
+        );
+    }
     log_to(&log_file, &format!("Job ID: {}", job.id));
     log_to(&log_file, &format!("Title: {}", job.title));
     log_to(&log_file, &format!("Output: {}", output.display()));
