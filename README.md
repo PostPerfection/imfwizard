@@ -286,6 +286,14 @@ sudo akmods --force
 sudo reboot
 ```
 
+**GPU encoding on Ubuntu.** A deb with the CUDA plugin is built inside an Ubuntu 24.04 container with podman, from a Grok source checkout that has the plugin submodule, for one CUDA compute capability:
+
+```bash
+./scripts/build-ubuntu-deb.sh /path/to/grok/source 86
+```
+
+The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_1.3.3-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
+
 **GPU encoding on macOS.** The released dmg encodes on the CPU. A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
 
 ```bash
