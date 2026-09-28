@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IMF Wizard: IMF Packages for Streaming Deliveries</title>
-    <meta name="description" content="Build validated IMF App 2E packages for streaming delivery. Encode and preview JPEG 2000 on the CPU or GPU, crop, burn subtitles, export ProRes, and run QC. Free, open-source desktop app and command-line tool.">
+    <meta name="description" content="Build validated IMF App 2E packages for streaming delivery. Encode and preview JPEG 2000, crop, burn subtitles, export ProRes, and run QC. Free, open-source desktop app and command-line tool.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -381,7 +381,7 @@
 
 <section class="hero">
     <h1>Build IMF packages for<br><span>streaming deliveries</span></h1>
-    <p>Encode finished masters on the CPU or GPU and package them into validated IMF deliverables for Netflix, Disney+, and HBO Max.</p>
+    <p>Encode finished masters and package them into validated IMF deliverables for Netflix, Disney+, and HBO Max.</p>
     <div class="hero-buttons">
         <a href="#download" class="btn btn-primary btn-lg">Download for free</a>
         <a href="#features" class="btn btn-secondary btn-lg">See what it does</a>
@@ -439,8 +439,8 @@
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
-            <h3>CPU or GPU JPEG 2000</h3>
-            <p>Encode App 2E picture through Grok on all available CPU cores, or enable its accelerator plugin from the app or with <code>--gpu</code>. GPU encode and preview decode are available on Linux, Windows, and macOS. The job log records how many frames the device encoded.</p>
+            <h3>JPEG 2000 on every core</h3>
+            <p>Encode App 2E picture through Grok on all available CPU cores. The job log is written beside the package. Grok's GPU accelerator plugin is a separate commercial product and is not in the released builds.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
@@ -488,7 +488,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">▶️</div>
             <h3>Source and package preview</h3>
-            <p>Play the source or the finished IMP in the app. JPEG 2000 decodes in process through a CPU worker pool, or on the device when GPU mode is active. The App 2E tone map and gamut conversion use the same path. Other sources use libmpv.</p>
+            <p>Play the source or the finished IMP in the app. JPEG 2000 decodes in process through a CPU worker pool, along with the App 2E tone map and gamut conversion. Other sources use libmpv.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">📋</div>
@@ -569,7 +569,6 @@
             <tr><td>Up to 4K resolution</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Subtitle burn-in during encode</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
             <tr><td>Preview playback with QC overlays</td><td class="yes">&#10003;</td><td class="yes">&#10003;</td></tr>
-            <tr><td>GPU JPEG 2000 encode and preview decode</td><td class="yes">Linux, Windows, macOS</td><td class="yes">&#10003; (Windows)</td></tr>
             <tr><td colspan="3" style="color:var(--accent);font-weight:700;padding-top:20px;">IMF Wizard advantages</td></tr>
             <tr><td>HDR10+ metadata extraction (HEVC stream)</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
             <tr><td>EBU R128 loudness measurement</td><td class="yes">&#10003;</td><td class="no">&#10007;</td></tr>
@@ -595,8 +594,8 @@
 <span class="comment"># Raise every refusal and hint before committing to the encode</span><br>
 <span class="cmd">$</span> imfwizard create <span class="flag">--title</span> <span class="val">"My Feature"</span> <span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--check</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
 <br>
-<span class="comment"># Build a Netflix delivery from a finished master on the Grok accelerator</span><br>
-<span class="cmd">$</span> imfwizard <span class="flag">--gpu</span> create \<br>
+<span class="comment"># Build a Netflix delivery from a finished master</span><br>
+<span class="cmd">$</span> imfwizard create \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--title</span> <span class="val">"My Feature"</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--audio</span> <span class="val">mix.wav</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--profile</span> <span class="val">netflix</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>

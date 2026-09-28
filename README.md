@@ -27,7 +27,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Encoding & Transcoding
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
-- **CPU and GPU encoding on Linux, Windows, and macOS**, CPU encoding uses the available cores by default. `--gpu` or the desktop GPU setting enables Grok's accelerator plugin for JPEG 2000 encode and decode. An explicit `--gpu` fails if the plugin cannot start, while a saved desktop preference warns and continues on the CPU. `--no-gpu` forces the CPU
+- **CPU encoding** on all available cores. GPU encoding needs Grok's accelerator plugin, a commercial product sold separately, see [GPU builds](#gpu-builds)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
 - **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
@@ -105,8 +105,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Keyboard shortcuts**, Ctrl+N/O/B/P/I, Ctrl+Shift+S, Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
-- **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through Grok in process. A CPU worker pool handles software decode. GPU mode uses device decode plus the App 2E tone map and gamut conversion. Everything else plays through mpv
-- **GPU encoding toggle on Linux, Windows, and macOS**, enables Grok acceleration for the whole app and stores the license and registration URL when the plugin requires them. The job log records whether the device started and how many frames it encoded
+- **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through Grok in process. A CPU worker pool handles the decode, the App 2E tone map and the gamut conversion. Everything else plays through mpv
+- **GPU encoding toggle**, only useful with the commercial Grok accelerator plugin
 - **Subtitle burn-in**, GUI for hardcoding subs into video
 - **Picture and audio controls**, per-side crop with an Auto-crop button, fill/deinterlace/denoise, rotate, flip and raster in the Picture section, and a channel mapping matrix in the Audio section
 - **Pre-build hints dialog**, Build stops on the advisory findings with Build anyway / Go back, and a "Don't show hints again" checkbox. Settings > General has the same toggle to turn it back on. The findings are also written into the job log
@@ -254,6 +254,10 @@ pnpm tauri build
 
 The built app will be in `gui/src-tauri/target/release/bundle/`.
 
+### GPU builds
+
+GPU encoding and preview decode need Grok's accelerator plugin, a commercial product sold separately by Grok Image Compression. The released builds encode on the CPU. This section is for a machine that has the plugin.
+
 Grok looks for `libgrokj2k_plugin` in the directory `GRK_PLUGIN_PATH` names, then in the working directory, then beside the executable. It does not search `LD_LIBRARY_PATH` or `PATH` for the plugin. The codec library itself still needs the loader path:
 
 ```bash
@@ -270,7 +274,7 @@ imfwizard --gpu create --title "My Film" --video master.mov --output ./imp
 
 The desktop GPU setting applies to encode and preview decode. Its job log at `<output>/imfwizard.log` prints `Accelerator: requested, active` and `[ENCODE] Frames on the device: N of M` when the plugin ran. Use `--no-gpu` to override a saved GPU preference for one CLI run.
 
-**GPU encoding on Fedora.** The released rpm encodes on the CPU. An rpm with the CUDA plugin is built from a local Grok installation that carries it:
+**GPU encoding on Fedora.** An rpm with the CUDA plugin is built from a local Grok installation that carries it:
 
 ```bash
 ./scripts/build-fedora-rpm.sh /path/to/grok/install
@@ -294,7 +298,7 @@ sudo reboot
 
 The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_1.3.3-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
 
-**GPU encoding on macOS.** The released dmg encodes on the CPU. A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
+**GPU encoding on macOS.** A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
 
 ```bash
 ./scripts/build-macos-dmg.sh /path/to/grok/install
