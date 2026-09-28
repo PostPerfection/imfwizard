@@ -1,5 +1,11 @@
 use std::path::Path;
 
+use postkit::ffmpeg_input::{FfmpegInput, frame_output};
+
+use crate::preflight::DEFAULT_EDIT_RATE;
+
+const TIFF_EXTENSION: &str = "tif";
+
 // the ACES AP0 to AP1 and AP1 to Rec.709 matrices, each carrying the Bradford
 // adaptation to D65. colorchannelmixer refuses a coefficient outside ±2, which
 // the single AP0 to Rec.709 matrix needs, so the two run in series
@@ -33,9 +39,11 @@ pub fn convert_ap0_to_rec709(input: &Path, output: &Path) -> Result<(), String> 
         channel_mixer(&AP0_TO_AP1),
         channel_mixer(&AP1_TO_REC709)
     );
+    let input = FfmpegInput::resolve(input, DEFAULT_EDIT_RATE)?;
+    let output = frame_output(output, Some(TIFF_EXTENSION))?;
     let converted = std::process::Command::new("ffmpeg")
-        .args(["-y", "-v", "error", "-i"])
-        .arg(input)
+        .args(["-y", "-v", "error"])
+        .args(input.arguments())
         .args(["-vf", &filter, "-c:v", "tiff"])
         .arg(output)
         .output()

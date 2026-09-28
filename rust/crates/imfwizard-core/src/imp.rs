@@ -74,6 +74,8 @@ pub struct ImpOptions {
     /// What the sound track files say about themselves in their MCA soundfield
     /// group, beside the language each audio track carries.
     pub soundfield: SoundfieldLabels,
+    #[serde(default)]
+    pub atmos_frame_directory: Option<PathBuf>,
     #[serde(skip)]
     pub cancel: Arc<AtomicBool>,
 }
@@ -172,7 +174,8 @@ pub const PICTURE_PREFIX: &str = "VIDEO";
 pub fn track_file_prefix(essence: crate::EssenceType) -> &'static str {
     match essence {
         crate::EssenceType::J2k => PICTURE_PREFIX,
-        crate::EssenceType::Wav | crate::EssenceType::Atmos => "AUDIO",
+        crate::EssenceType::Wav => "AUDIO",
+        crate::EssenceType::Atmos => "IAB",
         crate::EssenceType::TimedText => "SUBTITLE",
     }
 }
@@ -253,14 +256,57 @@ pub(crate) fn soundfield_config(
     let channels = postkit::wav_io::channel_count(&track.path)?;
     Ok(postkit::mxf_wrap::McaConfig {
         labels: mca_labels(channels, track.role),
-        // ST 2067-2 wants a language on the soundfield group, and und says unknown
-        spoken_language: Some(track.language.clone().unwrap_or_else(|| "und".into())),
-        soundfield_group: Some(postkit::mxf_wrap::SoundfieldGroup {
-            title: comp.title.clone(),
-            title_version: labels.title_version.clone(),
-            audio_content_kind: labels.audio_content_kind.clone(),
-            audio_element_kind: labels.audio_element_kind.clone(),
-        }),
+        spoken_language: Some(spoken_language(track.language.as_deref())),
+        soundfield_group: Some(soundfield_group(comp, labels)),
+    })
+}
+
+// ST 2067-2 wants a language on the soundfield group, and und says unknown
+fn spoken_language(language: Option<&str>) -> String {
+    language.unwrap_or("und").to_string()
+}
+
+fn soundfield_group(
+    comp: &Composition,
+    labels: &SoundfieldLabels,
+) -> postkit::mxf_wrap::SoundfieldGroup {
+    postkit::mxf_wrap::SoundfieldGroup {
+        title: comp.title.clone(),
+        title_version: labels.title_version.clone(),
+        audio_content_kind: labels.audio_content_kind.clone(),
+        audio_element_kind: labels.audio_element_kind.clone(),
+    }
+}
+
+fn wrap_iab(
+    opts: &ImpOptions,
+    comp: &Composition,
+    frame_directory: &Path,
+    picture_frames: u64,
+) -> Result<crate::MxfTrackFile, String> {
+    let frames = crate::atmos::iab_frame_files(frame_directory)?;
+    crate::atmos::check_iab_frame_count(frames.len(), picture_frames)?;
+    let language = comp
+        .audio_files
+        .iter()
+        .find_map(|track| track.language.as_deref());
+    let asset_uuid = uuid::Uuid::new_v4();
+    crate::atmos::wrap_iab_frames(&crate::atmos::IabWrap {
+        frames,
+        output: track_file_path(
+            &opts.output_dir,
+            track_file_prefix(crate::EssenceType::Atmos),
+            &asset_uuid,
+        ),
+        asset_uuid,
+        fps_num: opts.fps_num,
+        fps_den: opts.fps_den,
+        mca: postkit::mxf_wrap::McaConfig {
+            // the IAB track carries one soundfield label and no channel labels
+            labels: String::new(),
+            spoken_language: Some(spoken_language(language)),
+            soundfield_group: Some(soundfield_group(comp, &opts.soundfield)),
+        },
     })
 }
 
@@ -294,6 +340,16 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 };
             }
         }
+    }
+
+    if opts.atmos_frame_directory.is_some() && opts.compositions.len() != 1 {
+        return ImpResult {
+            error: format!(
+                "an Atmos IA bitstream is one IAB track, so it needs a package of one composition, not {}",
+                opts.compositions.len()
+            ),
+            ..Default::default()
+        };
     }
 
     for comp in &opts.compositions {
@@ -424,6 +480,21 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
                 Err(e) => {
                     return ImpResult {
                         error: format!("Audio wrap failed: {e}"),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+
+        if let Some(frame_directory) = &opts.atmos_frame_directory {
+            if let Some(result) = cancelled(opts) {
+                return result;
+            }
+            match wrap_iab(opts, comp, frame_directory, picture_frames) {
+                Ok(tf) => comp_tracks.push(tf),
+                Err(e) => {
+                    return ImpResult {
+                        error: format!("IAB wrap failed: {e}"),
                         ..Default::default()
                     };
                 }

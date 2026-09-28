@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use imfwizard_core::prores::ContainerRaster;
+use postkit::ffmpeg_input::{FfmpegInput, frame_output};
 use postkit::restore::{RestoreSelection, TrackKind};
 use std::path::{Path, PathBuf};
 
@@ -181,6 +182,15 @@ struct SoundfieldArguments {
     /// MCAAudioElementKind on the soundfield group: FCMP is a final complete mix.
     #[arg(long = "audio-element-kind", default_value = "FCMP")]
     audio_element_kind: String,
+}
+
+// boxed to keep `Commands` small, like the other flattened groups
+#[derive(clap::Args)]
+struct AtmosArguments {
+    /// Directory of Dolby Atmos IA bitstream frame files, one per picture
+    /// frame in name order, wrapped as an ST 2067-201 IAB track
+    #[arg(long = "atmos")]
+    frame_directory: Option<PathBuf>,
 }
 
 /// How many bits a frame of `create`'s picture gets. Boxed for the same reason
@@ -750,6 +760,9 @@ enum Commands {
         #[arg(long = "audio-map")]
         audio_map: Option<String>,
 
+        #[command(flatten)]
+        atmos: Box<AtmosArguments>,
+
         /// Run the pre-build check and stop: every refusal and every hint,
         /// without encoding or writing anything under --output.
         #[arg(long)]
@@ -823,6 +836,21 @@ enum Commands {
         input: PathBuf,
 
         /// Output JSON file
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Inject HDR10+ dynamic metadata into an HEVC stream
+    Hdr10plusInject {
+        /// Input HEVC file
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// HDR10+ metadata JSON, as hdr10plus-extract writes it
+        #[arg(short, long)]
+        json: PathBuf,
+
+        /// Output HEVC file
         #[arg(short, long)]
         output: PathBuf,
     },
@@ -914,11 +942,12 @@ enum Commands {
         /// IMP directory to validate
         dir: String,
 
-        /// Also validate XML files against SMPTE ST 2067 XSD schemas
+        /// Also validate the CPL, PKL, AssetMap and OPL against their SMPTE XSD schemas
         #[arg(long)]
         xsd: bool,
 
-        /// Directory containing SMPTE XSD schema files
+        /// Directory of SMPTE XSD schema files to use in place of the ones
+        /// the binary carries (else IMF_SCHEMA_DIR)
         #[arg(long)]
         schema_dir: Option<String>,
 
@@ -1851,6 +1880,7 @@ fn run() {
             source_edits,
             picture: picture_arguments,
             audio_map,
+            atmos,
             check,
             keep_intermediates,
             no_verify,
@@ -2032,6 +2062,7 @@ fn run() {
                 source_colour: source_colour.clone(),
                 hdr: hdr.clone(),
                 still_frames,
+                atmos_frame_directory: atmos.frame_directory.clone(),
             };
             imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
 
@@ -2447,6 +2478,7 @@ fn run() {
                     audio_content_kind: soundfield.audio_content_kind,
                     audio_element_kind: soundfield.audio_element_kind,
                 },
+                atmos_frame_directory: atmos.frame_directory,
                 ..Default::default()
             };
             // the picture wrap's hash ran while the hints finished, so this waits less
@@ -2579,6 +2611,22 @@ fn run() {
                 }
             }
         }
+
+        Commands::Hdr10plusInject {
+            input,
+            json,
+            output,
+        } => match imfwizard_core::hdr::inject_hdr10plus(&input, &json, &output) {
+            Ok(()) => println!("HDR10+ metadata injected: {}", output.display()),
+            Err(e) => {
+                eprintln!(
+                    "Error: HDR10+ injection of {} into {} failed: {e}",
+                    json.display(),
+                    input.display()
+                );
+                std::process::exit(1);
+            }
+        },
 
         Commands::DvExtract { input, output } => {
             match imfwizard_core::dolby_vision::extract_rpu(&input, &output) {
@@ -3640,27 +3688,17 @@ fn run() {
             vmaf,
             json,
         } => {
-            let vmaf_score = if vmaf {
-                match imfwizard_core::frame_compare::compute_vmaf(
-                    std::path::Path::new(&a),
-                    std::path::Path::new(&b),
-                ) {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                None
-            };
+            let pictures = (pixel || vmaf).then(|| (comparison_input(&a), comparison_input(&b)));
+            let vmaf_score = pictures
+                .as_ref()
+                .filter(|_| vmaf)
+                .map(|(picture_a, picture_b)| {
+                    imfwizard_core::frame_compare::compute_vmaf_inputs(picture_a, picture_b)
+                        .unwrap_or_else(|e| fail(e))
+                });
 
-            if pixel {
-                // Pixel-level PSNR/SSIM comparison
-                match imfwizard_core::frame_compare::compare_frames(
-                    std::path::Path::new(&a),
-                    std::path::Path::new(&b),
-                ) {
+            if let Some((picture_a, picture_b)) = pictures.as_ref().filter(|_| pixel) {
+                match imfwizard_core::frame_compare::compare_frame_inputs(picture_a, picture_b) {
                     Ok(result) => {
                         if json {
                             let out = serde_json::json!({
@@ -3741,14 +3779,20 @@ fn run() {
         }
 
         Commands::Lut { input, output, lut } => {
-            let opts = postkit::colour::ColourConvertOptions {
-                input: PathBuf::from(&input),
-                output: PathBuf::from(&output),
-                source_space: postkit::colour::ColourSpace::Rec709,
-                target_space: postkit::colour::ColourSpace::Rec709,
-                lut_path: Some(PathBuf::from(&lut)),
-            };
-            match postkit::colour::convert_colour(&opts) {
+            let source = FfmpegInput::resolve(
+                Path::new(&input),
+                imfwizard_core::preflight::DEFAULT_EDIT_RATE,
+            )
+            .unwrap_or_else(|e| fail(e));
+            let frames_out = frame_output(Path::new(&output), source.image_extension())
+                .unwrap_or_else(|e| fail(e));
+            match postkit::colour::convert_colour_input(
+                &source,
+                &frames_out,
+                postkit::colour::ColourSpace::Rec709,
+                postkit::colour::ColourSpace::Rec709,
+                Some(Path::new(&lut)),
+            ) {
                 Ok(()) => println!("LUT applied: {output}"),
                 Err(e) => {
                     eprintln!("Error: {e}");
@@ -3766,7 +3810,10 @@ fn run() {
             ov,
         } => {
             let input_path = PathBuf::from(&input);
-            if input_path.is_dir() {
+            let frame_directory = input_path.is_dir()
+                && postkit::encode::detect_input_type(&input_path)
+                    == postkit::encode::InputType::ImageSequence;
+            if input_path.is_dir() && !frame_directory {
                 let raster = container.as_deref().map(|name| {
                     ContainerRaster::parse(name).unwrap_or_else(|| {
                         eprintln!(
@@ -3790,7 +3837,15 @@ fn run() {
                     }
                 }
             } else {
-                encode_prores_file(&input, &output, &profile, container.as_deref());
+                if container.is_some() {
+                    fail(format!(
+                        "--container fits an IMP's picture, and {input} is not an IMP directory"
+                    ));
+                }
+                let source =
+                    FfmpegInput::resolve(&input_path, imfwizard_core::preflight::DEFAULT_EDIT_RATE)
+                        .unwrap_or_else(|e| fail(e));
+                encode_prores_file(&source, &output, &profile);
             }
         }
 
@@ -3937,10 +3992,33 @@ fn run() {
             text,
             frames,
         } => {
-            let Some(picture) = postkit::probe::probe_video(std::path::Path::new(&input)) else {
-                eprintln!("Cannot read the picture size and frame rate of {input}");
-                std::process::exit(1);
+            let source = FfmpegInput::resolve(
+                Path::new(&input),
+                imfwizard_core::preflight::DEFAULT_EDIT_RATE,
+            )
+            .unwrap_or_else(|e| fail(e));
+            let (width, height, fps_num, fps_den) = match &source {
+                FfmpegInput::ImageSequence(sequence) => {
+                    let (width, height) = postkit::encode::source_raster(&sequence.directory)
+                        .unwrap_or_else(|e| fail(e));
+                    let rate = sequence.frame_rate;
+                    (width, height, rate.numerator, rate.denominator)
+                }
+                FfmpegInput::File(path) => {
+                    let Some(picture) = postkit::probe::probe_video(path) else {
+                        eprintln!("Cannot read the picture size and frame rate of {input}");
+                        std::process::exit(1);
+                    };
+                    (
+                        picture.width,
+                        picture.height,
+                        picture.fps_num,
+                        picture.fps_den,
+                    )
+                }
             };
+            let frames_out = frame_output(Path::new(&output), source.image_extension())
+                .unwrap_or_else(|e| fail(e));
             // concat refuses a join unless both sides carry the same raster,
             // pixel format and aspect, so the slate is cut to the picture
             let slate = format!(
@@ -3949,21 +4027,16 @@ fn run() {
                  trim=end_frame={frames},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[slate];\
                  [0:v]format=yuv420p,setsar=1[picture];\
                  [slate][picture]concat=n=2:v=1:a=0[out]",
-                width = picture.width,
-                height = picture.height,
-                fps_num = picture.fps_num,
-                fps_den = picture.fps_den,
-                font_size = (picture.height / SLATE_TEXT_HEIGHT_DIVISOR).max(1),
+                font_size = (height / SLATE_TEXT_HEIGHT_DIVISOR).max(1),
             );
             let status = std::process::Command::new("ffmpeg")
                 .arg("-y")
-                .arg("-i")
-                .arg(&input)
+                .args(source.arguments())
                 .arg("-filter_complex")
                 .arg(&slate)
                 .arg("-map")
                 .arg("[out]")
-                .arg(&output)
+                .arg(&frames_out)
                 .status();
             match status {
                 Ok(s) if s.success() => println!("Slate added ({frames} frames): {output}"),
@@ -4580,11 +4653,29 @@ const PRORES_PROFILES: [(&str, &str); 6] = [
     ("4444xq", "5"),
 ];
 
-fn encode_prores_file(input: &str, output: &str, profile: &str, container: Option<&str>) {
-    if container.is_some() {
-        eprintln!("Error: --container fits an IMP's picture, and {input} is not an IMP directory");
-        std::process::exit(1);
+// an IMP directory reads as the one picture track file its first CPL plays
+fn comparison_input(path: &str) -> FfmpegInput {
+    let path = Path::new(path);
+    let frame_directory =
+        postkit::encode::detect_input_type(path) == postkit::encode::InputType::ImageSequence;
+    if !path.is_dir() || frame_directory {
+        return FfmpegInput::resolve(path, imfwizard_core::preflight::DEFAULT_EDIT_RATE)
+            .unwrap_or_else(|e| fail(e));
     }
+    let composition =
+        imfwizard_core::prores::composition_pictures(path, None, None).unwrap_or_else(|e| fail(e));
+    match composition.pictures.as_slice() {
+        [picture] => FfmpegInput::File(picture.clone()),
+        pictures => fail(format!(
+            "CPL {} in {} plays {} picture track files, and compare reads a single one",
+            composition.cpl_id,
+            path.display(),
+            pictures.len()
+        )),
+    }
+}
+
+fn encode_prores_file(source: &FfmpegInput, output: &str, profile: &str) {
     let Some((_, prores_profile)) = PRORES_PROFILES
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(profile))
@@ -4598,8 +4689,7 @@ fn encode_prores_file(input: &str, output: &str, profile: &str, container: Optio
     };
     let status = std::process::Command::new("ffmpeg")
         .arg("-y")
-        .arg("-i")
-        .arg(input)
+        .args(source.arguments())
         .arg("-c:v")
         .arg("prores_ks")
         .arg("-profile:v")

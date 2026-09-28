@@ -273,6 +273,54 @@ fn a_lut_moves_the_pixels_where_it_says() {
 /// `frame-extract` writes the frame it was asked for, and two different frame
 /// numbers give two different pictures.
 #[test]
+fn a_lut_grades_every_frame_of_a_directory_into_numbered_frames() {
+    const SEQUENCE_FRAMES: usize = 3;
+    let dir = TempDir::new().unwrap();
+    let frames = dir.path().join("frames");
+    std::fs::create_dir(&frames).unwrap();
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        &format!("color=c=red:s={WIDTH}x{HEIGHT}:r={FPS}"),
+        "-frames:v",
+        &SEQUENCE_FRAMES.to_string(),
+        "-start_number",
+        "86400",
+        &frames.join("red_%06d.png").to_string_lossy(),
+    ]);
+    let lut = swap_red_and_blue_lut(dir.path());
+    let graded = dir.path().join("graded");
+
+    cmd()
+        .args(["lut", "-i", &frames.to_string_lossy()])
+        .args([
+            "-o",
+            &format!("{}{}", graded.display(), std::path::MAIN_SEPARATOR),
+        ])
+        .args(["-l", &lut.to_string_lossy()])
+        .assert()
+        .success();
+
+    let mut written: Vec<PathBuf> = std::fs::read_dir(&graded)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    written.sort();
+    assert_eq!(written.len(), SEQUENCE_FRAMES);
+    assert_eq!(
+        written.last().unwrap(),
+        &graded.join(format!("frame_{SEQUENCE_FRAMES:06}.png"))
+    );
+    let [r, g, b] = centre_pixel(written.last().unwrap());
+    assert!(
+        b > 200 && r < 55 && g < 55,
+        "the LUT swaps red for blue, and the last frame came out {r},{g},{b}"
+    );
+}
+
+#[test]
 fn frame_extract_writes_the_frame_it_names() {
     let dir = TempDir::new().unwrap();
     let clip = source_clip(dir.path());

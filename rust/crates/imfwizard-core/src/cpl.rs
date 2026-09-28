@@ -22,9 +22,23 @@ pub fn write_cpl(
 ) -> std::io::Result<()> {
     let mut resources = Vec::new();
     let mut descriptors = Vec::new();
+    let mut iab_sequences = String::new();
     let edit_rate = asdcplib::Rational::new(opts.fps_num as i32, opts.fps_den as i32);
+    let iab_prefix = format!(
+        "{}_",
+        crate::imp::track_file_prefix(crate::EssenceType::Atmos)
+    );
     for tf in track_files {
         let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+        if fname.starts_with(&iab_prefix) {
+            let descriptor = ImfEssenceDescriptor {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: iab_descriptor_body(&tf.path)?,
+            };
+            iab_sequences.push_str(&iab_sequence_xml(tf, &descriptor.id, opts));
+            descriptors.push(descriptor);
+            continue;
+        }
         let kind = if fname.starts_with("VIDEO_") {
             ImfTrackKind::Image
         } else if fname.starts_with("AUDIO_") {
@@ -48,7 +62,47 @@ pub fn write_cpl(
     }
 
     let cpl = imf_cpl(cpl_uuid, opts, comp, resources, descriptors);
-    std::fs::write(path, cpl.to_xml())
+    let xml = cpl.to_xml();
+    if iab_sequences.is_empty() {
+        return std::fs::write(path, xml);
+    }
+    if xml.matches(SEQUENCE_LIST_END).count() != 1 {
+        return Err(std::io::Error::other(
+            "postkit's CPL writer no longer writes the one SequenceList the IAB sequence joins",
+        ));
+    }
+    std::fs::write(
+        path,
+        xml.replace(
+            SEQUENCE_LIST_END,
+            &format!("{iab_sequences}{SEQUENCE_LIST_END}"),
+        ),
+    )
+}
+
+// postkit's CPL writer has no IAB sequence kind
+const SEQUENCE_LIST_END: &str = "      </SequenceList>\n";
+const IAB_SEQUENCE_NAMESPACE: &str = "http://www.smpte-ra.org/ns/2067-201/2019";
+
+fn iab_sequence_xml(track_file: &MxfTrackFile, source_encoding: &str, opts: &ImpOptions) -> String {
+    let resource = SequenceResource {
+        track_file: track_file.clone(),
+        entry_point: 0,
+        source_duration: track_file.duration,
+    };
+    let mut xml = format!("        <iab:IABSequence xmlns:iab=\"{IAB_SEQUENCE_NAMESPACE}\">\n");
+    xml.push_str(&format!(
+        "          <Id>urn:uuid:{}</Id>\n",
+        uuid::Uuid::new_v4()
+    ));
+    xml.push_str(&format!(
+        "          <TrackId>urn:uuid:{}</TrackId>\n",
+        uuid::Uuid::new_v4()
+    ));
+    xml.push_str("          <ResourceList>\n");
+    xml.push_str(&resource_xml(&resource, Some(source_encoding), opts));
+    xml.push_str("          </ResourceList>\n        </iab:IABSequence>\n");
+    xml
 }
 
 fn imf_cpl(
@@ -276,6 +330,19 @@ fn sound_descriptor_body(sound: &Path, edit_rate: asdcplib::Rational) -> std::io
         &descriptor,
         &labels,
     ))
+}
+
+fn iab_descriptor_body(iab: &Path) -> std::io::Result<String> {
+    let mut reader = asdcplib::as02::iab::MxfReader::new();
+    read(reader.open_read(&iab.to_string_lossy()), "IAB MXF", iab)?;
+    let descriptor = read(
+        reader.iab_essence_descriptor(),
+        "IAB essence descriptor",
+        iab,
+    )?;
+    let label = read(reader.soundfield_label(), "IAB soundfield label", iab)?;
+    let _ = reader.close();
+    Ok(postkit::regxml::iab_descriptor_regxml(&descriptor, &label))
 }
 
 /// The subtitle MXF's own timed-text descriptor, as the RegXML the CPL's

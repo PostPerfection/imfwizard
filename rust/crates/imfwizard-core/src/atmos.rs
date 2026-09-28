@@ -587,6 +587,89 @@ pub fn synthetic_adm_bwf(form: BwfForm, sample_frames: u32) -> Vec<u8> {
     out
 }
 
+pub fn iab_frame_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
+    if !directory.is_dir() {
+        return Err(format!(
+            "Atmos IA bitstream directory not found: {}",
+            directory.display()
+        ));
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(directory)
+        .map_err(|e| format!("cannot read {}: {e}", directory.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    files.sort();
+    if files.is_empty() {
+        return Err(format!(
+            "no IA bitstream frame files in {}",
+            directory.display()
+        ));
+    }
+    Ok(files)
+}
+
+// every sequence in a segment runs the picture's length
+pub fn check_iab_frame_count(iab_frames: usize, picture_frames: u64) -> Result<(), String> {
+    if iab_frames as u64 == picture_frames {
+        return Ok(());
+    }
+    Err(format!(
+        "the Atmos IA bitstream is {iab_frames} frames but the picture is {picture_frames}: \
+         pass a directory with one IA bitstream frame file per picture frame"
+    ))
+}
+
+pub struct IabWrap {
+    pub frames: Vec<PathBuf>,
+    pub output: PathBuf,
+    pub asset_uuid: uuid::Uuid,
+    pub fps_num: u32,
+    pub fps_den: u32,
+    pub mca: postkit::mxf_wrap::McaConfig,
+}
+
+pub fn wrap_iab_frames(wrap: &IabWrap) -> Result<crate::MxfTrackFile, String> {
+    let wrapped = postkit::mxf_wrap::mxf_wrap(&postkit::mxf_wrap::MxfWrapOptions {
+        input_files: wrap.frames.clone(),
+        output: wrap.output.clone(),
+        essence_type: postkit::mxf_wrap::EssenceType::Atmos,
+        standard: postkit::mxf_wrap::MxfStandard::As02,
+        fps_num: wrap.fps_num,
+        fps_den: wrap.fps_den,
+        partition_size: 0,
+        encryption: None,
+        mca_config: Some(wrap.mca.clone()),
+        resource_ids: vec![],
+        hdr: None,
+        asset_uuid: Some(*wrap.asset_uuid.as_bytes()),
+        timed_text_duration_frames: None,
+    });
+    if !wrapped.success {
+        return Err(wrapped.error);
+    }
+    crate::mxf_wrap::track_file_from_postkit(wrapped)
+}
+
+const IA_PREAMBLE_ELEMENT_TAG: u8 = 0x01;
+const IA_FRAME_ELEMENT_TAG: u8 = 0x02;
+
+// element values are filler: no real IA bitstream is available
+pub fn synthetic_ia_bitstream_frame(
+    seed: u8,
+    preamble_length: usize,
+    ia_frame_length: usize,
+) -> Vec<u8> {
+    let mut frame = vec![IA_PREAMBLE_ELEMENT_TAG];
+    frame.extend((preamble_length as u32).to_be_bytes());
+    frame.extend((0..preamble_length).map(|index| seed.wrapping_add(index as u8)));
+    frame.push(IA_FRAME_ELEMENT_TAG);
+    frame.extend((ia_frame_length as u32).to_be_bytes());
+    frame.extend((0..ia_frame_length).map(|index| seed.wrapping_mul(7).wrapping_add(index as u8)));
+    frame
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

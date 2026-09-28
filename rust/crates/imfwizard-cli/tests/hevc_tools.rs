@@ -331,9 +331,8 @@ fn hdr10plus_frame(
     })
 }
 
-// two scenes of two frames, injected with hdr10plus_tool because nothing writes
-// HDR10+ SEI in process
-fn hdr10plus_fixture(directory: &Path) -> PathBuf {
+// two scenes of two frames
+fn hdr10plus_metadata(directory: &Path) -> PathBuf {
     let metadata = json!({
         "JSONInfo": {"HDR10plusProfile": "B", "Version": "1.0"},
         "SceneInfo": [
@@ -350,7 +349,12 @@ fn hdr10plus_fixture(directory: &Path) -> PathBuf {
     });
     let json_path = directory.join("injected.json");
     std::fs::write(&json_path, serde_json::to_vec_pretty(&metadata).unwrap()).unwrap();
+    json_path
+}
 
+// injected by hdr10plus_tool directly rather than through hdr10plus-inject
+fn hdr10plus_fixture(directory: &Path) -> PathBuf {
+    let json_path = hdr10plus_metadata(directory);
     let base_layer = plain_hevc(directory, "base.hevc", HDR10PLUS_FRAMES);
     let injected = directory.join("hdr10plus.hevc");
     let made = std::process::Command::new("hdr10plus_tool")
@@ -422,6 +426,40 @@ fn hdr10plus_extract_returns_the_injected_metadata() {
             json!(TARGET_DISPLAY_LUMINANCE)
         );
     }
+}
+
+#[test]
+fn hdr10plus_inject_writes_the_metadata_that_extract_reads_back() {
+    let directory = TempDir::new().unwrap();
+    let metadata = hdr10plus_metadata(directory.path());
+    let base_layer = plain_hevc(directory.path(), "base.hevc", HDR10PLUS_FRAMES);
+    let injected = directory.path().join("hdr10plus.hevc");
+
+    cmd()
+        .arg("hdr10plus-inject")
+        .arg("-i")
+        .arg(&base_layer)
+        .arg("--json")
+        .arg(&metadata)
+        .arg("-o")
+        .arg(&injected)
+        .assert()
+        .success();
+
+    let extracted = directory.path().join("extracted.json");
+    cmd()
+        .arg("hdr10plus-extract")
+        .arg("-i")
+        .arg(&injected)
+        .arg("-o")
+        .arg(&extracted)
+        .assert()
+        .success();
+
+    let written: Value = serde_json::from_slice(&std::fs::read(&metadata).unwrap()).unwrap();
+    let read_back: Value = serde_json::from_slice(&std::fs::read(&extracted).unwrap()).unwrap();
+    assert_eq!(read_back["SceneInfo"], written["SceneInfo"]);
+    assert_eq!(read_back["SceneInfoSummary"], written["SceneInfoSummary"]);
 }
 
 fn ffprobe_json(arguments: &[&str], input: &Path) -> Value {
@@ -497,13 +535,18 @@ fn every_subcommand_names_a_missing_input() {
     let directory = TempDir::new().unwrap();
     let missing_hevc = directory.path().join("missing.hevc");
     let missing_rpu = directory.path().join("missing.bin");
+    let missing_json = directory.path().join("missing.json");
     let output = directory.path().join("output.hevc");
 
-    let invocations: [(&str, Vec<&Path>); 5] = [
+    let invocations: [(&str, Vec<&Path>); 6] = [
         ("dv-extract", vec![&missing_hevc, &output]),
         ("dv-inject", vec![&missing_hevc, &missing_rpu, &output]),
         ("dv-convert", vec![&missing_rpu, &output]),
         ("hdr10plus-extract", vec![&missing_hevc, &output]),
+        (
+            "hdr10plus-inject",
+            vec![&missing_hevc, &missing_json, &output],
+        ),
         ("hdr10-inject", vec![&missing_hevc, &output]),
     ];
 
@@ -512,6 +555,9 @@ fn every_subcommand_names_a_missing_input() {
         command.arg(subcommand).arg("-i").arg(paths[0]);
         if subcommand == "dv-inject" {
             command.arg("-r").arg(paths[1]);
+        }
+        if subcommand == "hdr10plus-inject" {
+            command.arg("--json").arg(paths[1]);
         }
         let named = paths[0].display().to_string();
         command

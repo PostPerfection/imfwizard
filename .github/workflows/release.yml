@@ -134,6 +134,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist/lib
           cp rust/target/release/${{ matrix.binary }} dist/
+          cp rust/crates/imfwizard-core/schemas/README.md dist/SCHEMA-NOTICES.md
           grok_lib=""
           for candidate in "$GITHUB_WORKSPACE/grok-install/lib64" "$GITHUB_WORKSPACE/grok-install/lib"; do
             if compgen -G "$candidate/libgrokj2k*" >/dev/null; then
@@ -158,6 +159,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "rust/target/release/${{ matrix.binary }}" "dist/"
+          Copy-Item "rust/crates/imfwizard-core/schemas/README.md" "dist/SCHEMA-NOTICES.md"
           ./scripts/bundle-windows-cli-dlls.ps1 -Binary "dist/${{ matrix.binary }}" `
             -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
           Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"

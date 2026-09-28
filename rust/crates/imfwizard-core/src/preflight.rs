@@ -37,6 +37,7 @@ pub struct CreatePlan {
     pub hdr: Option<crate::hdr_wcg::HdrWcg>,
     /// Frames to hold a still for; None when the picture is not a still.
     pub still_frames: Option<u64>,
+    pub atmos_frame_directory: Option<PathBuf>,
 }
 
 impl CreatePlan {
@@ -144,7 +145,8 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
     check_hdr_signalling(plan)?;
     check_sound_depth(plan)?;
     check_audio_map(plan)?;
-    check_source_edits(plan)
+    check_source_edits(plan)?;
+    check_atmos(plan)
 }
 
 fn check_timed_text(plan: &CreatePlan) -> Result<(), String> {
@@ -251,6 +253,27 @@ fn check_source_edits(plan: &CreatePlan) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// after check_source_edits, which refuses a trim longer than the picture
+fn check_atmos(plan: &CreatePlan) -> Result<(), String> {
+    let Some(frame_directory) = &plan.atmos_frame_directory else {
+        return Ok(());
+    };
+    let iab_frames = crate::atmos::iab_frame_files(frame_directory)?.len();
+    let facts = crate::source_edits::probe_source_facts(
+        plan.picture.as_deref(),
+        plan.still_frames,
+        &[],
+        plan.fps_num,
+        plan.fps_den,
+    )?;
+    let Some(picture) = facts.picture else {
+        return Ok(());
+    };
+    let packaged_frames =
+        picture.frames - plan.edits.trim_start_frames - plan.edits.trim_end_frames;
+    crate::atmos::check_iab_frame_count(iab_frames, packaged_frames)
 }
 
 #[cfg(test)]

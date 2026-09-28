@@ -512,12 +512,12 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎥</div>
             <h3>Dolby Vision and HDR10+</h3>
-            <p>Side tools on an HEVC stream, not on the IMP. <code>dv-extract</code> and <code>dv-inject</code> move a Dolby Vision RPU with dovi_tool, <code>dv-convert</code> retargets profile 5 to 8.1 or to a profile 7 MEL, <code>hdr10plus-extract</code> writes HDR10+ metadata to JSON, and <code>hdr10-inject</code> re-encodes through x265 with MaxCLL and MaxFALL.</p>
+            <p>Side tools on an HEVC stream, not on the IMP. <code>dv-extract</code> and <code>dv-inject</code> move a Dolby Vision RPU with dovi_tool, <code>dv-convert</code> retargets profile 5 to 8.1 or to a profile 7 MEL, <code>hdr10plus-inject</code> writes HDR10+ metadata from JSON into the stream with hdr10plus_tool, <code>hdr10plus-extract</code> writes it back out to JSON, and <code>hdr10-inject</code> re-encodes through x265 with MaxCLL and MaxFALL.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,186,116,0.15);">🎵</div>
             <h3>Dolby Atmos ADM import</h3>
-            <p>Import a Dolby Atmos ADM Broadcast Wave master: its channels are wrapped as multichannel AS-02 PCM and the ADM XML is written beside it. No IAB track is produced.</p>
+            <p>Import a Dolby Atmos ADM Broadcast Wave master: its channels are wrapped as multichannel AS-02 PCM and the ADM XML is written beside it, with no conversion to IAB. <code>create --atmos</code> wraps a directory of IA bitstream frame files, one per picture frame, as an ST 2067-201 IAB track in the IMP. The GUI does not offer it yet.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">📊</div>

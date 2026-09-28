@@ -51,9 +51,10 @@ fn collect_input_files(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>
 
 /// Wrap essence into an MXF track file.
 ///
-/// IMF track files use the AS-02 (ST 2067) writers. Every essence type delegates to
-/// postkit's asdcplib-backed wrappers; postkit's PCM wrapper now parses the real WAV
-/// header, so there is one WAV-parsing implementation.
+/// IMF track files use the AS-02 (ST 2067) writers. J2K, WAV and timed text delegate to
+/// postkit's asdcplib-backed wrappers, and postkit's PCM wrapper parses the WAV header,
+/// so there is one WAV-parsing implementation. Atmos is refused, `atmos::wrap_iab_frames`
+/// wraps it.
 pub fn wrap_mxf(opts: &MxfWrapOptions) -> MxfWrapResult {
     match opts.essence_type {
         crate::EssenceType::Wav => delegate(
@@ -79,12 +80,10 @@ pub fn wrap_mxf(opts: &MxfWrapOptions) -> MxfWrapResult {
             postkit::mxf_wrap::EssenceType::TimedText,
             postkit::mxf_wrap::MxfStandard::As02,
         ),
-        // asdcplib provides AS-02 writers only for J2K/PCM/TimedText, so Atmos/IAB uses AS-DCP.
-        crate::EssenceType::Atmos => delegate(
-            opts,
-            postkit::mxf_wrap::EssenceType::Atmos,
-            postkit::mxf_wrap::MxfStandard::AsDcp,
-        ),
+        crate::EssenceType::Atmos => MxfWrapResult {
+            error: "Atmos is wrapped by atmos::wrap_iab_frames, not wrap_mxf".to_string(),
+            ..Default::default()
+        },
     }
 }
 

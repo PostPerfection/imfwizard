@@ -16,6 +16,11 @@ const SYNC_ERROR_MILLISECONDS: f64 = 100.0;
 const SLATE_MAX_MEAN_LUMA: f64 = 5.0;
 const PICTURE_MIN_MEAN_LUMA: f64 = 50.0;
 // zimg encodes to Rec.709 with the BT.1886 display gamma
+const SEQUENCE_FRAMES: usize = 3;
+// a first frame number ffmpeg does not find unless it is told where the sequence starts
+const SEQUENCE_START_NUMBER: &str = "86400";
+const FRAME_SIZE: &str = "64x64";
+
 const REC709_DISPLAY_GAMMA: f64 = 2.4;
 const SIXTEEN_BIT_FULL_SCALE: f64 = 65535.0;
 // the published ACES AP0 to Rec.709 matrix with the Bradford adaptation to D65
@@ -180,6 +185,50 @@ fn first_pixel(path: &Path) -> [f64; 3] {
     })
 }
 
+// numbered from SEQUENCE_START_NUMBER, the way a scanned reel is
+fn frame_directory(
+    directory: &Path,
+    name: &str,
+    source: &str,
+    pixel_format: &str,
+    extension: &str,
+) -> PathBuf {
+    let frames = directory.join(name);
+    std::fs::create_dir(&frames).unwrap();
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        &format!("{source}:s={FRAME_SIZE}"),
+        "-frames:v",
+        &SEQUENCE_FRAMES.to_string(),
+        "-pix_fmt",
+        pixel_format,
+        "-start_number",
+        SEQUENCE_START_NUMBER,
+        &frames
+            .join(format!("{name}_%06d.{extension}"))
+            .to_string_lossy(),
+    ]);
+    frames
+}
+
+fn files_with_extension(directory: &Path, extension: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(directory)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|found| found == extension))
+        .collect();
+    files.sort();
+    files
+}
+
+// a trailing separator names a directory that does not exist yet
+fn directory_argument(directory: &Path) -> String {
+    format!("{}{}", directory.display(), std::path::MAIN_SEPARATOR)
+}
+
 fn stdout_of(assert: assert_cmd::assert::Assert) -> String {
     String::from_utf8(assert.get_output().stdout.clone()).expect("the command wrote utf-8")
 }
@@ -222,6 +271,41 @@ fn compare_pixel_scores_every_frame_of_a_recompressed_clip() {
     assert!(
         average_ssim > 0.5 && average_ssim < 1.0,
         "a recompressed clip scored {average_ssim} ssim"
+    );
+}
+
+#[test]
+fn compare_pixel_scores_two_frame_directories() {
+    const IDENTICAL_SSIM: f64 = 0.99;
+    let directory = TempDir::new().unwrap();
+    let reference = frame_directory(
+        directory.path(),
+        "reference",
+        "testsrc=r=25",
+        "rgb24",
+        "png",
+    );
+    let copy = frame_directory(directory.path(), "copy", "testsrc=r=25", "rgb24", "png");
+
+    let json = stdout_of(
+        cmd()
+            .args(["compare", "-a", &reference.to_string_lossy()])
+            .args(["-b", &copy.to_string_lossy()])
+            .args(["--pixel", "--json"])
+            .assert()
+            .success(),
+    );
+    let result: Value = serde_json::from_str(&json).expect("the compare json");
+    let scores = &result["psnr_ssim"];
+
+    assert_eq!(
+        scores["frames_compared"].as_u64(),
+        Some(SEQUENCE_FRAMES as u64)
+    );
+    let average_ssim = scores["avg_ssim"].as_f64().expect("avg_ssim");
+    assert!(
+        average_ssim > IDENTICAL_SSIM,
+        "two copies of one sequence scored {average_ssim} ssim"
     );
 }
 
@@ -329,6 +413,29 @@ fn slate_prepends_black_frames_carrying_the_text() {
         video_stream_entry(&first_slate, "width"),
         video_stream_entry(&reference, "width")
     );
+}
+
+#[test]
+fn slate_prepends_black_frames_to_a_frame_directory() {
+    let directory = TempDir::new().unwrap();
+    let frames = frame_directory(directory.path(), "picture", "testsrc=r=25", "rgb24", "png");
+    let slated = directory.path().join("slated");
+
+    cmd()
+        .args(["slate", "-i", &frames.to_string_lossy()])
+        .args(["-o", &directory_argument(&slated)])
+        .args(["--text", "TEST SLATE"])
+        .args(["--frames", &SLATE_FRAMES.to_string()])
+        .assert()
+        .success();
+
+    let written = files_with_extension(&slated, "png");
+    assert_eq!(written.len(), SLATE_FRAMES as usize + SEQUENCE_FRAMES);
+    let first_slate = slated.join("frame_000001.png");
+    let first_picture = slated.join(format!("frame_{:06}.png", SLATE_FRAMES + 1));
+    assert!(mean_luma(&first_slate) < SLATE_MAX_MEAN_LUMA);
+    assert!(mean_luma(&first_picture) > PICTURE_MIN_MEAN_LUMA);
+    assert_eq!(video_stream_entry(&first_slate, "width"), "64");
 }
 
 // the milliseconds a labelled av-sync line reports
@@ -466,6 +573,38 @@ fn aces_converts_ap0_to_rec709_with_the_ap0_matrix_and_no_rendering_transform() 
             converted[channel]
         );
     }
+}
+
+#[test]
+fn aces_converts_every_frame_of_a_directory_into_numbered_tiffs() {
+    const TOLERANCE: f64 = 0.002;
+    let directory = TempDir::new().unwrap();
+    let frames = frame_directory(
+        directory.path(),
+        "ap0",
+        "color=c=0x2E2E2E",
+        "gbrp16le",
+        "tif",
+    );
+    let converted = directory.path().join("rec709");
+
+    cmd()
+        .args(["aces", "-i", &frames.to_string_lossy()])
+        .args(["-o", &directory_argument(&converted)])
+        .assert()
+        .success();
+
+    let written = files_with_extension(&converted, "tif");
+    assert_eq!(written.len(), SEQUENCE_FRAMES);
+    let source = first_pixel(&frames.join(format!("ap0_{SEQUENCE_START_NUMBER:0>6}.tif")));
+    let expected = source[0].powf(1.0 / REC709_DISPLAY_GAMMA);
+    let last = first_pixel(written.last().unwrap());
+    assert!(
+        (last[0] - expected).abs() < TOLERANCE,
+        "linear {} came out at {}, not {expected}",
+        source[0],
+        last[0]
+    );
 }
 
 #[test]

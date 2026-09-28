@@ -46,13 +46,22 @@ impl ContainerRaster {
     }
 }
 
-pub fn export_imp_to_prores(
+pub struct CompositionPictures {
+    pub cpl_id: String,
+    pub segments: Vec<SegmentEntry>,
+    pub pictures: Vec<PathBuf>,
+}
+
+fn track_file(name: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(name);
+    (!name.is_empty() && path.exists()).then_some(path)
+}
+
+pub fn composition_pictures(
     imp_dir: &Path,
-    output: &Path,
     cpl_id: Option<&str>,
-    container: Option<ContainerRaster>,
     ov_dir: Option<&Path>,
-) -> Result<(), String> {
+) -> Result<CompositionPictures, String> {
     let cpls = list_cpls(imp_dir);
     if cpls.is_empty() {
         return Err(format!("{} holds no CPL", imp_dir.display()));
@@ -70,10 +79,6 @@ pub fn export_imp_to_prores(
         return Err(format!("CPL {} holds no segment", cpl.id));
     }
 
-    let track_file = |name: &String| {
-        let path = PathBuf::from(name);
-        (!name.is_empty() && path.exists()).then_some(path)
-    };
     let hint = if ov_dir.is_some() {
         ""
     } else {
@@ -85,6 +90,25 @@ pub fn export_imp_to_prores(
             .ok_or_else(|| format!("CPL {} names no picture track file{hint}", cpl.id))?;
         pictures.push(picture);
     }
+    Ok(CompositionPictures {
+        cpl_id: cpl.id.clone(),
+        segments,
+        pictures,
+    })
+}
+
+pub fn export_imp_to_prores(
+    imp_dir: &Path,
+    output: &Path,
+    cpl_id: Option<&str>,
+    container: Option<ContainerRaster>,
+    ov_dir: Option<&Path>,
+) -> Result<(), String> {
+    let CompositionPictures {
+        cpl_id,
+        segments,
+        pictures,
+    } = composition_pictures(imp_dir, cpl_id, ov_dir)?;
     let sounds: Vec<Option<PathBuf>> = segments
         .iter()
         .map(|segment| track_file(&segment.audio_file))
@@ -95,7 +119,7 @@ pub fn export_imp_to_prores(
     if has_sound && edit_rate.is_none() {
         return Err(format!(
             "CPL {} names no edit rate, so its sound cannot be cut to its segments",
-            cpl.id
+            cpl_id
         ));
     }
 

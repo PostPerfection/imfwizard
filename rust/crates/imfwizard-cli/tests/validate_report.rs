@@ -94,14 +94,18 @@ fn copy_of_the_good_imp(work_dir: &Path) -> PathBuf {
     copy
 }
 
-fn edit_cpl(imp_dir: &Path, from: &str, to: &str) {
-    let cpl = only_file_starting_with(imp_dir, "CPL_");
-    let xml = std::fs::read_to_string(&cpl).unwrap();
+fn edit_document(imp_dir: &Path, prefix: &str, from: &str, to: &str) {
+    let document = only_file_starting_with(imp_dir, prefix);
+    let xml = std::fs::read_to_string(&document).unwrap();
     assert!(
         xml.contains(from),
-        "the written CPL no longer holds {from:?}"
+        "the written {prefix} file no longer holds {from:?}"
     );
-    std::fs::write(&cpl, xml.replacen(from, to, 1)).unwrap();
+    std::fs::write(&document, xml.replacen(from, to, 1)).unwrap();
+}
+
+fn edit_cpl(imp_dir: &Path, from: &str, to: &str) {
+    edit_document(imp_dir, "CPL_", from, to);
 }
 
 fn write_report(imp_dir: &Path, output: &Path, format: &str) -> String {
@@ -441,8 +445,57 @@ fn the_picture_scan_reports_on_the_track_it_decoded() {
     );
 }
 
-/// `validate --xsd` runs the CPL through xmllint against the ST 2067-3 schema
-/// and names the PKL and AssetMap it skipped for want of their schemas.
+fn file_name_starting_with(imp_dir: &Path, prefix: &str) -> String {
+    only_file_starting_with(imp_dir, prefix)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Without `--schema-dir` the XSD pass checks the CPL, PKL and AssetMap
+/// against the schemas the binary carries.
+#[test]
+fn xsd_validation_passes_a_created_imp_against_the_carried_schemas() {
+    let imp = good_imp();
+    let validated = cmd()
+        .env_remove("IMF_SCHEMA_DIR")
+        .args(["validate", &imp.to_string_lossy(), "--xsd"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&validated.get_output().stdout).to_string();
+    for prefix in ["CPL_", "PKL_", "ASSETMAP"] {
+        let name = file_name_starting_with(imp, prefix);
+        assert!(
+            stdout.contains(&format!("XSD {name}: PASS")),
+            "no XSD pass for {name}:\n{stdout}"
+        );
+    }
+    assert!(!stdout.contains("SKIPPED"), "{stdout}");
+}
+
+/// A PKL the carried ST 2067-2 schema forbids fails the pass, and the message
+/// names the element the schema tripped on.
+#[test]
+fn xsd_validation_names_the_pkl_element_the_carried_schema_rejects() {
+    let work = TempDir::new().unwrap();
+    let imp = copy_of_the_good_imp(work.path());
+    let pkl = file_name_starting_with(&imp, "PKL_");
+    edit_document(&imp, "PKL_", "<Size>", "<SizeTypo>");
+    edit_document(&imp, "PKL_", "</Size>", "</SizeTypo>");
+
+    cmd()
+        .env_remove("IMF_SCHEMA_DIR")
+        .args(["validate", &imp.to_string_lossy(), "--xsd"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(format!("XSD {pkl}: FAIL")))
+        .stderr(predicate::str::contains("SizeTypo"));
+}
+
+/// `validate --xsd --schema-dir` runs the CPL through xmllint against the
+/// ST 2067-3 schema in that directory and names the PKL and AssetMap it
+/// skipped for want of their schemas there.
 #[test]
 fn xsd_validation_passes_a_created_cpl() {
     let imp = good_imp();

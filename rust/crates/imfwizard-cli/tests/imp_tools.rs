@@ -261,6 +261,35 @@ fn compare_names_the_metadata_two_imps_disagree_on() {
 }
 
 #[test]
+fn compare_pixel_scores_the_picture_track_files_of_two_imps() {
+    const IDENTICAL_SSIM: f64 = 0.99;
+    let directory = TempDir::new().unwrap();
+    let first = build_imp(directory.path(), "first", "First cut", SHORT_FRAMES, 24);
+    let second = build_imp(directory.path(), "second", "Second cut", SHORT_FRAMES, 24);
+
+    let json = stdout_of(
+        cmd()
+            .args(["compare", "-a", &first.to_string_lossy()])
+            .args(["-b", &second.to_string_lossy()])
+            .args(["--pixel", "--json"])
+            .assert()
+            .success(),
+    );
+
+    let result: Value = serde_json::from_str(&json).expect("the compare json");
+    let scores = &result["psnr_ssim"];
+    assert_eq!(
+        scores["frames_compared"].as_u64(),
+        Some(u64::from(SHORT_FRAMES))
+    );
+    let average_ssim = scores["avg_ssim"].as_f64().expect("avg_ssim");
+    assert!(
+        average_ssim > IDENTICAL_SSIM,
+        "two IMPs of the same picture scored {average_ssim} ssim"
+    );
+}
+
+#[test]
 fn annotate_writes_the_note_into_a_cpl_the_package_still_matches() {
     let directory = TempDir::new().unwrap();
     let imp = build_imp(

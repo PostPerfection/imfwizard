@@ -6,7 +6,7 @@ license.workspace = true
 description = "IMF (Interoperable Master Format) creation and packaging library"
 
 [dependencies]
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "03834857a3995be25c884be6e8486a98c7032447" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "c8c24cc2d3ed4d22460b744e55b0b840ed98cbfa" }
 base64 = "0.22"
 dcpdoctor-core.workspace = true
 hound = "3.5.1"
@@ -18,11 +18,9 @@ serde.workspace = true
 serde_json.workspace = true
 sha1 = "0.10"
 sha2 = "0.10"
+tempfile = "3"
 thiserror.workspace = true
 time = { version = "0.3", features = ["formatting"] }
 tracing.workspace = true
 uuid.workspace = true
 x509-parser = "0.16"
-
-[dev-dependencies]
-tempfile = "3"

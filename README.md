@@ -29,7 +29,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
 - **CPU encoding** on all available cores. GPU encoding needs Grok's accelerator plugin, a commercial product sold separately, see [GPU builds](#gpu-builds)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
-- **ProRes encoding** (`prores`), encode a video file to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
+- **ProRes encoding** (`prores`), encode a video file or a directory of numbered frames (at 24 fps) to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT or ASS into video frames via ffmpeg, outside a package
@@ -40,18 +40,19 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### HDR & Advanced
 - **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65|hlg-bt2020` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. The CPL entry is the track file's whole descriptor, read back out of the MXF after the wrap and written as RegXML, so Photon's field for field comparison of the two passes. A picture with no `--hdr` declares Rec.709, App 2E COLOR.3. `hlg-bt2020` is App 2E COLOR.8, the BT.2020 primaries with the HLG OETF. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
 - **Dolby Vision** RPU metadata injection (via dovi_tool)
-- **HDR10 static metadata** injection through `hdr10-inject`, re-encodes with libx265 to write the mastering display and content light level SEI. `hdr10plus-extract` reads HDR10+ metadata (via hdr10plus_tool)
-- **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
+- **HDR10+ dynamic metadata injection** (`hdr10plus-inject`) writes an HDR10+ JSON into an HEVC elementary stream, and `hdr10plus-extract` reads it back out (both via hdr10plus_tool)
+- **HDR10 static metadata** injection through `hdr10-inject`, re-encodes with libx265 to write the mastering display and content light level SEI
+- **Dolby Atmos / immersive audio packaging**, `create --atmos <dir>` wraps a directory of IA bitstream frame files, one per picture frame, as an ST 2067-201 IAB track file and plays it from the CPL as an IABSequence. The GUI does not offer it yet. The `atmos` import carries ADM channels as PCM MXF and converts nothing to IAB
 
 ### Quality Control
 - **Pre-build check**, `create --check` runs every refusal `create` can make and prints the advisory hints, then stops without encoding or writing anything under `--output`. Every refusal that could once fire after the encode (an illegal raster on a J2K directory, a trim or delay longer than the source, timed text a trim cannot move, a bad audio map) now fires here first
 - **Pre-build hints**, advisory findings that build but are usually wrong for the audience: audio true peak above -3 dBTP, sound with no language set, a first subtitle before 4 seconds, a cue under 15 frames, cues less than 2 frames apart, more than 3 lines in a cue, and lines over 52 or 79 characters. The CLI prints them before the encode, the GUI shows them in a dialog you can build through
 - **Loudness analysis**, EBU R128 integrated/true-peak measurement, and `loudness --adjust-to <LUFS> -o <out.wav>` writes the level-adjusted WAV
-- **XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
+- **XSD schema validation**, `validate --xsd` checks the CPL, PKL, AssetMap and OPL with xmllint against the ST 2067-3, ST 2067-2, ST 429-9 and ST 2067-100 schemas the binary carries, copied from the SMPTE registry
 - **Structural validation** via dcpdoctor-core (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification
 - **Verified on the way out**, `create` runs that same validation over the package it just wrote and exits non-zero on any error, leaving the package in place to look at. `create --no-verify` skips it and says so. A desktop build runs it as its last stage and writes the findings into the job log, unless Settings turns it off
 - **Netflix Photon validation** (optional, needs a JRE and the Photon jars): `validate` runs it whenever `--photon-jar` or `PHOTON_JAR` names them, and `validate --photon` prints its own Photon pass or fail line
-- **PSNR / SSIM** frame comparison between two video files (`compare --pixel`)
+- **PSNR / SSIM** frame comparison between two image sequences, two video or MXF files, or the picture track files of two IMPs (`compare --pixel`)
 - **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
 - **QC report** generation (text / JSON / HTML), with optional black and frozen picture detection via `report --scan-picture`
@@ -62,7 +63,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Source LUT**, `create --source-lut <file.cube>` applies a 3D LUT during the decode, and its output must be Rec.709 RGB. It conflicts with `--source-colourspace`, and it needs a decode to run in, so a held still is refused
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
-- **3D LUT application** (`lut`), apply a .cube LUT to a video file via ffmpeg lut3d
+- **3D LUT application** (`lut`), apply a .cube LUT to an image sequence or a video file via ffmpeg lut3d
 - **ACES conversion**, `aces` converts ACES AP0 frames to Rec.709 with an ffmpeg colour matrix. No rendering transform runs, so this is a colorimetric conversion, not a display render
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
@@ -91,7 +92,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Partial restore** (`restore --input <imp> --output <dir> [--video-only|--audio-only]`), unwraps every track file the IMP's CPLs name, in process: a picture track becomes one numbered `.j2c` codestream per frame and a sound track becomes one WAV at the channel count, rate and depth the track file declares, each under a directory named after the track file
 
 ### Comparison & Analysis
-- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate) or pixel PSNR/SSIM/VMAF between two video or MXF files with `--pixel`/`--vmaf`
+- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate), or with `--pixel`/`--vmaf` pixel PSNR/SSIM/VMAF between the picture track files of the two IMPs' first CPLs, or between two video or MXF files or frame directories
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
@@ -402,6 +403,27 @@ imfwizard create \
   --output /path/to/output/
 ```
 
+### Package a Dolby Atmos IAB track (ST 2067-201)
+
+```bash
+# --atmos names a directory of IA bitstream frame files, one per picture frame,
+# read in name order. They are wrapped unencrypted as an AS-02 IAB track file,
+# which the CPL plays as an IABSequence beside the picture and the sound.
+# --check refuses a missing or empty directory, and a frame count that differs
+# from the picture's. The track's IAB soundfield label takes --audio-lang (und
+# without it), the title and the --audio-* soundfield group values.
+imfwizard create \
+  --title "My Film" \
+  --video /path/to/j2k_frames/ \
+  --audio /path/to/audio.wav --audio-lang en-US \
+  --atmos /path/to/ia_bitstream_frames/ \
+  --output /path/to/output/
+```
+
+The IAB track file declares a 48 kHz audio sample rate whatever the frames carry.
+The GUI does not offer `--atmos` yet, and nothing here converts an ADM master to
+IAB: `atmos` below carries ADM as PCM.
+
 ### Package HDR/WCG picture (ST 2067-21)
 
 ```bash
@@ -592,8 +614,10 @@ validating the supplemental on its own reports the OV track files as missing.
 # create runs this itself over every package it writes
 imfwizard validate /path/to/imp/
 
-# Also validate XML against the SMPTE ST 2067 schemas in --schema-dir.
-# Only the ST 2067-3 CPL schema is vendored, in extern/postkit/tests/fixtures/xsd/imf/org/smpte_ra/schemas/st2067_3_2016
+# Also validate the CPL, PKL, AssetMap and any OPL against the SMPTE schemas the binary carries.
+# rust/crates/imfwizard-core/schemas/README.md lists their sources and licences
+imfwizard validate /path/to/imp/ --xsd
+# Or against the schemas in a directory (else IMF_SCHEMA_DIR). A document with no schema there prints SKIPPED
 imfwizard validate /path/to/imp/ --xsd --schema-dir /path/to/st2067-xsds
 
 # Also run Netflix Photon (needs a JRE plus Photon and its dependencies).
@@ -623,6 +647,9 @@ imfwizard prores \
   -i /path/to/master.mov \
   -o /path/to/master_prores.mov \
   -p hq
+
+# A directory of numbered frames encodes at 24 fps
+imfwizard prores -i /path/to/frames/ -o /path/to/master_prores.mov
 
 # An IMP directory exports its first CPL's picture and main sound as ProRes 4444
 # at the CPL's edit rate. --cpl <uuid> picks another composition. --ov <dir>
@@ -748,7 +775,10 @@ and the track file each event became.
 ### Frame comparison
 
 ```bash
-# Compare two IMPs or video files (add --pixel for per-frame PSNR/SSIM on video MXF)
+# Per-frame PSNR/SSIM of the picture track file each IMP's first CPL plays
+imfwizard compare -a imp_v1/ -b imp_v2/ --pixel --json
+
+# The same on two video or MXF files
 imfwizard compare -a /path/to/imp_v1/VIDEO_<uuid>.mxf -b /path/to/imp_v2/VIDEO_<uuid>.mxf --pixel --json
 
 # VMAF score (needs an ffmpeg built with libvmaf); combine with --pixel and --json
@@ -760,6 +790,9 @@ imfwizard compare -a reference.mxf -b encoded.mxf --vmaf --json
 ```bash
 imfwizard atmos -i atmos_master.bwf -o output_dir/
 ```
+
+This wraps the ADM master's channels as PCM and writes the ADM XML beside it. An
+IAB track comes from `create --atmos` instead.
 
 ### MCA label generation
 
@@ -786,13 +819,21 @@ imfwizard audio-desc -i mix_51.wav --narration ad_narration.wav -o combined.wav 
 ### Apply 3D LUT
 
 ```bash
+# A directory of numbered frames in, frame_000001 onward out in the same image format
+imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/
+
+# The same with ffmpeg image patterns
 imfwizard lut --lut grading.cube -i /frames/frame_%06d.tif -o /graded_frames/frame_%06d.tif
 ```
 
 ### ACES conversion
 
 ```bash
-# AP0 to Rec.709 primaries and transfer, no ACES rendering transform, TIFF out
+# AP0 to Rec.709 primaries and transfer, no ACES rendering transform, TIFF out.
+# A directory of numbered frames in, frame_000001.tif onward out
+imfwizard aces -i /ap0_frames/ -o /rec709_frames/
+
+# The same with ffmpeg image patterns
 imfwizard aces -i /ap0_frames/frame_%06d.tif -o /rec709_frames/frame_%06d.tif
 ```
 
@@ -826,7 +867,11 @@ imfwizard partial-version -i /orig_imp/ -o /partial/ --cpl <cpl-uuid>
 ### Slate
 
 ```bash
-# Prepend black frames with white centred text, --frames defaults to 24
+# Prepend black frames with white centred text, --frames defaults to 24.
+# A directory of numbered frames in, frame_000001 onward out in the same image format
+imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 48
+
+# A video in, frames out through an image pattern
 imfwizard slate -i /path/to/clip.mov -o /slated/slated_%04d.png --text "MY FILM, Final Master" --frames 48
 ```
 

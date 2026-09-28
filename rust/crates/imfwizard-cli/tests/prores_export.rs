@@ -245,6 +245,41 @@ fn a_file_input_still_encodes_at_the_default_profile() {
     assert_eq!(probe(&movie, "v:0", "width"), "1920");
 }
 
+#[test]
+fn a_frame_directory_encodes_every_frame_at_the_default_rate() {
+    const SEQUENCE_FRAMES: u32 = 3;
+    const DEFAULT_RATE: &str = "24/1";
+    let dir = TempDir::new().unwrap();
+    let frames = dir.path().join("frames");
+    std::fs::create_dir(&frames).unwrap();
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=64x64"])
+        .args(["-frames:v", &SEQUENCE_FRAMES.to_string()])
+        .args(["-start_number", "1001"])
+        .arg(frames.join("shot_%04d.png"))
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let movie = dir.path().join("frames.mov");
+
+    cmd()
+        .args(["prores", "-i", &frames.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ProRes encoded"));
+
+    assert_eq!(probe(&movie, "v:0", "codec_name"), "prores");
+    assert_eq!(probe(&movie, "v:0", "profile"), "HQ");
+    assert_eq!(probe(&movie, "v:0", "width"), "64");
+    assert_eq!(probe(&movie, "v:0", "r_frame_rate"), DEFAULT_RATE);
+    assert_eq!(counted_frames(&movie), SEQUENCE_FRAMES);
+}
+
 fn only_cpl(imp: &Path) -> PathBuf {
     let mut found: Vec<PathBuf> = std::fs::read_dir(imp)
         .expect("the IMP directory")

@@ -76,7 +76,7 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
 
     HintFacts {
         audio,
-        has_audio: !plan.audio_files.is_empty(),
+        has_audio: !plan.audio_files.is_empty() || plan.atmos_frame_directory.is_some(),
         audio_language: plan.audio_language.clone(),
         subtitles,
         fps,
