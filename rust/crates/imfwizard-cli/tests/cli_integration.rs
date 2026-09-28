@@ -740,6 +740,73 @@ fn a_23_976_source_encodes_one_codestream_per_source_frame() {
     );
 }
 
+const PAL_RATE: &str = "25";
+const PAL_CLIP_FRAMES: u32 = 4;
+
+fn package_file(imp: &Path, prefix: &str) -> PathBuf {
+    std::fs::read_dir(imp)
+        .unwrap()
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(prefix))
+        })
+        .unwrap_or_else(|| panic!("the package has no {prefix} file"))
+}
+
+/// A video plays at its own rate, so with no rate named the package has to
+/// declare that one rather than 24.
+#[test]
+fn a_25_fps_source_with_no_rate_named_packages_at_25() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("pal.mov");
+    synthesize_solid_clip(&clip, "red", PAL_CLIP_FRAMES, PAL_RATE);
+    let imp = create_imp(dir.path(), "pal", &clip, &[]);
+
+    let cpl = std::fs::read_to_string(package_file(&imp, "CPL_")).unwrap();
+    assert!(cpl.contains("<EditRate>25 1</EditRate>"), "{cpl}");
+    let mut reader = asdcplib::as02::jp2k::MxfReader::new();
+    reader
+        .open_read(&package_file(&imp, "VIDEO_").to_string_lossy())
+        .expect("the picture MXF opens");
+    let descriptor = reader.picture_descriptor().expect("a picture descriptor");
+    assert_eq!(descriptor.edit_rate, asdcplib::Rational::new(25, 1));
+    assert_eq!(descriptor.container_duration, PAL_CLIP_FRAMES);
+}
+
+/// A named rate the video does not play at would declare the picture at the
+/// wrong speed, so it is refused before any frame is encoded.
+#[test]
+fn a_named_rate_the_video_does_not_play_at_is_refused_before_the_encode() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("pal.mov");
+    synthesize_solid_clip(&clip, "red", PAL_CLIP_FRAMES, PAL_RATE);
+    let output = dir.path().join("imp");
+
+    for check in [&["--check"][..], &[]] {
+        cmd()
+            .args([
+                "create",
+                "-o",
+                &output.to_string_lossy(),
+                "-t",
+                "Mismatched",
+                "--video",
+                &clip.to_string_lossy(),
+                "--fps-num",
+                "24",
+            ])
+            .args(check)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "plays at 25/1 fps, but the edit rate asked for is 24/1",
+            ));
+        assert!(!output.exists(), "nothing may be written or encoded");
+    }
+}
+
 /// `create` classifies its picture the way the GUI does, so a directory of
 /// stills encodes through postkit instead of reaching the MXF wrapper as
 /// codestreams it cannot read.
@@ -1615,6 +1682,40 @@ fn the_pre_build_check_prints_the_first_cue_hint() {
     assert!(!output.exists(), "the check must write nothing");
 }
 
+#[test]
+fn the_pre_build_check_prints_the_first_cue_hint_for_an_srt_subtitle_track() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let srt = dir.path().join("track.srt");
+    std::fs::write(
+        &srt,
+        "1\n00:00:02,000 --> 00:00:04,000\nA cue that starts early\n\n",
+    )
+    .unwrap();
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Early",
+            "--video",
+            &clip.to_string_lossy(),
+            "--subtitle",
+            &srt.to_string_lossy(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("The first subtitle in track.srt"))
+        .stderr(predicate::str::contains("at least 4 seconds"));
+
+    assert!(!output.exists(), "the check must write nothing");
+}
+
 /// Nothing to say is the common case, and it has to say nothing rather than
 /// inventing a hint.
 #[test]
@@ -1641,6 +1742,185 @@ fn the_pre_build_check_is_quiet_on_a_clean_job() {
         .stdout(predicate::str::contains("hint:").not());
 
     assert!(!output.exists(), "the check must write nothing");
+}
+
+/// A language tag the package would refuse after the encode has to be refused
+/// by `--check`, before any frame is compressed.
+#[test]
+fn the_pre_build_check_refuses_a_malformed_audio_language() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Language",
+            "--video",
+            &clip.to_string_lossy(),
+            "--audio-lang",
+            "de_DE",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid RFC 5646 language tag: de_DE",
+        ));
+
+    assert!(!output.exists(), "the check must write nothing");
+}
+
+const SUBTITLED_CLIP_FRAMES: u32 = 12;
+const SUBTITLED_CLIP_RATE: &str = "24";
+
+fn wrapped_timed_text(imp: &Path) -> String {
+    let track_file = package_file(imp, "SUBTITLE_");
+    let mut reader = asdcplib::as02::timed_text::MxfReader::new();
+    reader
+        .open_read(&track_file.to_string_lossy())
+        .expect("the timed text MXF opens");
+    let mut document = vec![0u8; std::fs::metadata(&track_file).unwrap().len() as usize];
+    let read = reader
+        .read_timed_text_resource(&mut document, None, None)
+        .expect("the timed text document");
+    document.truncate(read);
+    String::from_utf8(document).unwrap()
+}
+
+fn subtitled_imp(dir: &Path, subtitle: &Path, extra: &[&str]) -> PathBuf {
+    let clip = dir.join("clip.mov");
+    synthesize_solid_clip(&clip, "red", SUBTITLED_CLIP_FRAMES, SUBTITLED_CLIP_RATE);
+    let subtitle = subtitle.to_string_lossy();
+    let mut arguments = vec!["--subtitle", &subtitle];
+    arguments.extend_from_slice(extra);
+    create_imp(dir, "subtitled", &clip, &arguments)
+}
+
+/// An SRT is converted to IMSC on the way in, since the track file carries TTML.
+#[test]
+fn an_srt_subtitle_is_packaged_as_imsc() {
+    let dir = TempDir::new().unwrap();
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,100 --> 00:00:00,400\nhello\n\n").unwrap();
+    let imp = subtitled_imp(dir.path(), &srt, &["--subtitle-lang", "de-DE"]);
+
+    let document = wrapped_timed_text(&imp);
+    assert!(
+        document.contains(r#"<tt xmlns="http://www.w3.org/ns/ttml""#),
+        "{document}"
+    );
+    assert!(document.contains(r#"xml:lang="de-DE""#), "{document}");
+    assert!(
+        document.contains(r#"<p begin="00:00:00.100" end="00:00:00.400">hello</p>"#),
+        "{document}"
+    );
+    let scratch: Vec<_> = std::fs::read_dir(&imp)
+        .unwrap()
+        .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
+        .filter(|name| name.starts_with(imfwizard_core::source_edits::CONVERTED_SUBTITLE_PREFIX))
+        .collect();
+    assert!(
+        scratch.is_empty(),
+        "the converted document shipped: {scratch:?}"
+    );
+}
+
+/// Authored TTML is the deliverable itself, so it is wrapped byte for byte.
+#[test]
+fn a_ttml_subtitle_is_wrapped_unchanged() {
+    let dir = TempDir::new().unwrap();
+    let ttml = dir.path().join("cues.ttml");
+    let authored = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    ttp:profile="http://www.w3.org/ns/ttml/profile/imsc1/text" xml:lang="en">
+  <body><div>
+    <p begin="00:00:00.100" end="00:00:00.400">authored</p>
+  </div></body>
+</tt>
+"#;
+    std::fs::write(&ttml, authored).unwrap();
+    let imp = subtitled_imp(dir.path(), &ttml, &[]);
+
+    assert_eq!(wrapped_timed_text(&imp), authored);
+}
+
+/// A subtitle format with no reader has to be refused by the pre-build check,
+/// not wrapped as given.
+#[test]
+fn the_pre_build_check_refuses_a_subtitle_format_it_cannot_read() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let vtt = dir.path().join("cues.vtt");
+    std::fs::write(&vtt, "WEBVTT\n\n00:01.000 --> 00:02.000\nhello\n").unwrap();
+    let output = dir.path().join("imp");
+
+    cmd()
+        .args([
+            "create",
+            "--check",
+            "-o",
+            &output.to_string_lossy(),
+            "-t",
+            "Unreadable",
+            "--video",
+            &clip.to_string_lossy(),
+            "--subtitle",
+            &vtt.to_string_lossy(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "cues.vtt is not a subtitle format imfwizard reads",
+        ));
+
+    assert!(!output.exists(), "the check must write nothing");
+}
+
+/// The conversion runs before the trim, so a trimmed SRT job packages IMSC whose
+/// cues moved with the picture.
+#[test]
+fn a_trimmed_srt_job_packages_the_trimmed_imsc() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let srt = dir.path().join("cues.srt");
+    std::fs::write(&srt, "1\n00:00:00,500 --> 00:00:00,900\nhello\n\n").unwrap();
+
+    let imp = create_imp(
+        dir.path(),
+        "trimmed",
+        &clip,
+        &[
+            "--subtitle",
+            &srt.to_string_lossy(),
+            "--audio-lang",
+            "fr",
+            "--trim-start",
+            "6f",
+            "--keep-intermediates",
+        ],
+    );
+
+    let document = wrapped_timed_text(&imp);
+    assert!(document.contains(r#"xml:lang="fr""#), "{document}");
+    assert!(
+        document.contains(r#"<p begin="00:00:00.250" end="00:00:00.650">hello</p>"#),
+        "{document}"
+    );
+    assert!(
+        imp.join(format!(
+            "{}0.ttml",
+            imfwizard_core::source_edits::CONVERTED_SUBTITLE_PREFIX
+        ))
+        .is_file(),
+        "--keep-intermediates has to keep the converted document"
+    );
 }
 
 // ─── to-dcp ───────────────────────────────────────────────────────────────

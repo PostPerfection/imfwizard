@@ -12,6 +12,15 @@
           "libxml2-utils",
           "curl"
         ],
+        "provides": [
+          "imfwizard"
+        ],
+        "conflicts": [
+          "imfwizard"
+        ],
+        "replaces": [
+          "imfwizard"
+        ],
         "files": {
           "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
         }

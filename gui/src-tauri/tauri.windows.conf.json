@@ -1,5 +1,5 @@
 {
   "bundle": {
-    "resources": ["grokj2k.dll"]
+    "resources": ["*.dll"]
   }
 }

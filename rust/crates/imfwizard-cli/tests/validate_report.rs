@@ -233,7 +233,7 @@ fn the_imf_pass_runs_photon_from_the_wizards_own_location() {
 
 /// The vendored ST 2067-3 2016 CPL schema, which is the namespace `create`
 /// writes. The other IMP documents have no schema beside it, so the XSD pass
-/// reports on the CPL alone.
+/// checks the CPL alone.
 const IMF_CPL_XSD_DIR: &str =
     "../../../extern/postkit/tests/fixtures/xsd/imf/org/smpte_ra/schemas/st2067_3_2016";
 
@@ -441,15 +441,21 @@ fn the_picture_scan_reports_on_the_track_it_decoded() {
     );
 }
 
-/// `validate --xsd` runs the CPL through xmllint against the ST 2067-3 schema.
+/// `validate --xsd` runs the CPL through xmllint against the ST 2067-3 schema
+/// and names the PKL and AssetMap it skipped for want of their schemas.
 #[test]
 fn xsd_validation_passes_a_created_cpl() {
     let imp = good_imp();
-    let cpl = only_file_starting_with(imp, "CPL_")
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let file_name = |prefix: &str| {
+        only_file_starting_with(imp, prefix)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    };
+    let cpl = file_name("CPL_");
+    let pkl = file_name("PKL_");
+    let assetmap = file_name("ASSETMAP");
 
     cmd()
         .args([
@@ -461,7 +467,13 @@ fn xsd_validation_passes_a_created_cpl() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(format!("XSD {cpl}: PASS")));
+        .stdout(predicate::str::contains(format!("XSD {cpl}: PASS")))
+        .stdout(predicate::str::contains(format!(
+            "XSD {pkl}: SKIPPED, no st2067-2-2020-PKL.xsd"
+        )))
+        .stdout(predicate::str::contains(format!(
+            "XSD {assetmap}: SKIPPED, no st0429-9-2007-AM.xsd"
+        )));
 }
 
 /// A CPL the schema forbids fails the pass, and the message names the element

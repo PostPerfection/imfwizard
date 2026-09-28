@@ -5,9 +5,9 @@
 //! Each check still lives in the module that owns it, and this runs them in one
 //! order over one description of the job.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use postkit::encode::{InputType, SourceColour, detect_input_type};
+use postkit::encode::{FrameRate, InputType, SourceColour, detect_input_type};
 use postkit::subtitle_raster::BurnStyleOverrides;
 
 use crate::source_edits::SourceEdits;
@@ -22,6 +22,7 @@ pub struct CreatePlan {
     pub audio_files: Vec<PathBuf>,
     pub audio_language: Option<String>,
     pub timed_text_files: Vec<PathBuf>,
+    pub timed_text_language: Option<String>,
     pub fps_num: u32,
     pub fps_den: u32,
     pub edits: SourceEdits,
@@ -64,9 +65,55 @@ pub fn unclassified_picture_refusal(picture: &std::path::Path) -> String {
     )
 }
 
+pub const DEFAULT_EDIT_RATE: FrameRate = FrameRate {
+    numerator: 24,
+    denominator: 1,
+};
+
+// a video file plays at the rate it carries, every other picture takes the one asked for
+pub fn resolve_edit_rate(
+    picture: Option<&Path>,
+    requested: Option<FrameRate>,
+) -> Result<FrameRate, String> {
+    let probed = picture
+        .filter(|picture| detect_input_type(picture) == InputType::Video)
+        .and_then(|picture| Some((picture, crate::probe::probe_video(picture)?)))
+        // ffprobe answers 0/0 for a stream whose rate it cannot read
+        .filter(|(_, info)| info.fps_num > 0 && info.fps_den > 0)
+        .map(|(picture, info)| (picture, FrameRate::new(info.fps_num, info.fps_den)));
+    match (probed, requested) {
+        (Some((_, probed)), None) => Ok(probed),
+        (Some((picture, probed)), Some(requested)) if !same_rate(probed, requested) => {
+            let (probed, requested) = (spelled_rate(probed), spelled_rate(requested));
+            Err(format!(
+                "{} plays at {probed} fps, but the edit rate asked for is {requested}: \
+                 package it at {probed} or conform the source to {requested} first",
+                picture.display()
+            ))
+        }
+        (_, Some(requested)) => Ok(requested),
+        (None, None) => Ok(DEFAULT_EDIT_RATE),
+    }
+}
+
+fn same_rate(left: FrameRate, right: FrameRate) -> bool {
+    u64::from(left.numerator) * u64::from(right.denominator)
+        == u64::from(right.numerator) * u64::from(left.denominator)
+}
+
+fn spelled_rate(rate: FrameRate) -> String {
+    format!("{}/{}", rate.numerator, rate.denominator)
+}
+
 /// Run every plan-time refusal, cheapest and most specific first so a job with
 /// two faults names the one a reader can act on.
 pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
+    for language in [&plan.audio_language, &plan.timed_text_language]
+        .into_iter()
+        .flatten()
+    {
+        crate::imp::validate_language(language)?;
+    }
     plan.picture_options.check()?;
     if plan.hdr.is_some() {
         crate::source_colourspace::reject_converting_source_under_hdr(&plan.source_colour)?;
@@ -87,12 +134,27 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
         crate::source_colourspace::reject_on_precompressed_picture(picture, &plan.source_colour)?;
         crate::source_picture::reject_on_precompressed_picture(picture, &plan.picture_options)?;
     }
+    check_timed_text(plan)?;
     check_burn(plan)?;
     check_app2e_picture(plan)?;
+    resolve_edit_rate(
+        plan.picture.as_deref(),
+        Some(FrameRate::new(plan.fps_num, plan.fps_den)),
+    )?;
     check_hdr_signalling(plan)?;
     check_sound_depth(plan)?;
     check_audio_map(plan)?;
     check_source_edits(plan)
+}
+
+fn check_timed_text(plan: &CreatePlan) -> Result<(), String> {
+    for path in &plan.timed_text_files {
+        if !path.is_file() {
+            return Err(format!("subtitle file not found: {}", path.display()));
+        }
+        crate::subtitle_convert::readable_source_format(path)?;
+    }
+    Ok(())
 }
 
 // a master too deep for an App 2E wrap is refused here rather than after the
@@ -183,7 +245,10 @@ fn check_source_edits(plan: &CreatePlan) -> Result<(), String> {
         return Ok(());
     }
     for path in &plan.timed_text_files {
-        crate::source_edits::check_timed_text_trimmable(path, facts.fps)?;
+        // what a conversion writes is always trimmable
+        if crate::subtitle_convert::readable_source_format(path)?.is_ttml() {
+            crate::source_edits::check_timed_text_trimmable(path, facts.fps)?;
+        }
     }
     Ok(())
 }
@@ -289,6 +354,53 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(check_before_encode(&sdr), Ok(()));
+    }
+
+    fn pal_clip(dir: &Path) -> PathBuf {
+        let clip = dir.join("pal.mov");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+            .arg("color=c=gray:s=1920x1080:r=25")
+            .args(["-frames:v", "2", "-pix_fmt", "yuv420p"])
+            .arg(&clip)
+            .output()
+            .expect("ffmpeg");
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        clip
+    }
+
+    #[test]
+    fn a_video_is_declared_at_its_own_rate_unless_another_is_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let clip = pal_clip(dir.path());
+        let pal = FrameRate::new(25, 1);
+
+        assert_eq!(resolve_edit_rate(Some(&clip), None), Ok(pal));
+        assert_eq!(
+            resolve_edit_rate(Some(&clip), Some(FrameRate::new(50, 2))),
+            Ok(FrameRate::new(50, 2))
+        );
+        assert_eq!(resolve_edit_rate(None, None), Ok(DEFAULT_EDIT_RATE));
+
+        let declared_at_24 = CreatePlan {
+            picture: Some(clip.clone()),
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        let error = check_before_encode(&declared_at_24).unwrap_err();
+        assert!(error.contains("plays at 25/1 fps"), "{error}");
+        assert!(error.contains("asked for is 24/1"), "{error}");
+
+        let declared_at_25 = CreatePlan {
+            fps_num: 25,
+            ..declared_at_24
+        };
+        assert_eq!(check_before_encode(&declared_at_25), Ok(()));
     }
 
     #[test]

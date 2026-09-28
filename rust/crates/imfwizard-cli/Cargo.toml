@@ -35,10 +35,15 @@ name = "imfwizard"
 maintainer = "Post Perfection <dev@postperfection.com>"
 section = "video"
 priority = "optional"
-depends = "$auto"
+# $auto finds no package for the bundled libgrokj2k and drops every dependency
+depends = "libc6 (>= 2.39), libssl3t64 (>= 3.0.0), libstdc++6 (>= 13.1), zlib1g (>= 1:1.1.4)"
 recommends = "ffmpeg, mpv"
+# the desktop package installs the same /usr/bin and /usr/lib files
+conflicts = "imf-wizard"
+replaces = "imf-wizard"
 assets = [
     ["target/release/imfwizard", "usr/bin/", "755"],
+    ["target/release/libgrokj2k.so.1", "usr/lib/imfwizard/", "644"],
     ["../../../README.md", "usr/share/doc/imfwizard/README.md", "644"],
     ["../../../CHANGELOG.md", "usr/share/doc/imfwizard/CHANGELOG.md", "644"],
 ]

@@ -21,7 +21,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Subtitle conversion** to IMSC/TTML from SRT, SCC (CEA-608 pop-on captions), ASS/SSA, FCPXML, and MKS (Matroska); ASS/FCPXML/MKS keep styling and placement (italic/bold/underline/colour, alignment, position) in the TTML output
 - **App 2E picture essence**, the codestreams declare an IMF JPEG 2000 profile (RSIZ 0x0400 to 0x09ff, the profile the raster picks with the levels its rate and bitrate ask for) and carry 12-bit RGB 4:4:4. The picture MXF signals ColorPrimaries and TransferCharacteristic on its RGBA essence descriptor, Rec.709 without `--hdr` and the preset's PQ or HLG transfer with it
 - **AS-02 MXF wrapping** (SMPTE 2067-5), CPL/PKL/AssetMap generation
-- **SHA-1 hashing** for PKL/ASSETMAP asset integrity
+- **SHA-1 hashing** of every PKL asset, written as base64
 - **Optional XML-DSIG signing** of CPL/PKL/ASSETMAP (`sign` / `verify-sig`, needs a cert + key)
 - **IMF to DCP**, convert a single-composition IMP (one picture, optional one sound) to a DCP. Picture already in a DCI 2K/4K cinema profile is rewrapped as it stands. Picture in an IMF profile, which is what `create` writes, is decoded, converted from Rec.709 RGB to DCI X'Y'Z' and re-encoded under the cinema profile at `--bitrate` Mb/s, up to the DCI maximum of 250. The command prints which of the two it did. P3-D65, BT.2020 and PQ picture is refused naming the gamut conversion or tone map it would need, and so is an edit rate outside the DCI set (24, 25, 30, 48, 50, 60, 96, 100, 120)
 
@@ -29,10 +29,10 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
 - **CPU encoding** on all available cores. GPU encoding needs Grok's accelerator plugin, a commercial product sold separately, see [GPU builds](#gpu-builds)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
-- **ProRes encoding** (`prores`), encode a video/image sequence to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
+- **ProRes encoding** (`prores`), encode a video file to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
-- **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT/TTML into video frames via ffmpeg, outside a package
+- **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT or ASS into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
 - **Source picture processing**, `create --crop-left/--crop-right/--crop-top/--crop-bottom` cut source pixels off each side, `--auto-crop` (`--auto-crop-threshold`) measures the black borders and cuts them, `--fill-crop` crops to the target aspect instead of padding to it, `--deinterlace`, `--denoise`, `--rotate 90|180|270`, `--flip horizontal|vertical|both`, and `--raster <WxH>` fits the result into one of the App 2E rasters. Anything other than the untouched source is fitted into a raster, so the App 2E check runs on what the encoder writes rather than on the source
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
@@ -40,7 +40,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### HDR & Advanced
 - **HDR/WCG essence metadata (ST 2067-21)** — `create --hdr pq-bt2020|pq-p3d65|hlg-bt2020` writes the transfer/colour ULs onto the picture MXF RGBA descriptor and the CPL EssenceDescriptor. The CPL entry is the track file's whole descriptor, read back out of the MXF after the wrap and written as RegXML, so Photon's field for field comparison of the two passes. A picture with no `--hdr` declares Rec.709, App 2E COLOR.3. `hlg-bt2020` is App 2E COLOR.8, the BT.2020 primaries with the HLG OETF. Optional `--mastering-display` adds the ST 2086 block, and `--max-cll` / `--max-fall` add the content light levels as CPL ExtensionProperties
 - **Dolby Vision** RPU metadata injection (via dovi_tool)
-- **HDR10+ dynamic metadata** injection, re-encodes with libx265 to write SEI (via hdr10plus_tool)
+- **HDR10 static metadata** injection through `hdr10-inject`, re-encodes with libx265 to write the mastering display and content light level SEI. `hdr10plus-extract` reads HDR10+ metadata (via hdr10plus_tool)
 - **Dolby Atmos / immersive audio packaging** (ADM channels carried as PCM MXF; not re-encoded to a Dolby IAB bitstream)
 
 ### Quality Control
@@ -50,8 +50,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **XSD schema validation**, validate CPL/PKL/AssetMap XML against SMPTE ST 2067 XSD schemas (via xmllint)
 - **Structural validation** via dcpdoctor-core (ASSETMAP/PKL/hash checks) plus CPL/PKL signature verification
 - **Verified on the way out**, `create` runs that same validation over the package it just wrote and exits non-zero on any error, leaving the package in place to look at. `create --no-verify` skips it and says so. A desktop build runs it as its last stage and writes the findings into the job log, unless Settings turns it off
-- **Netflix Photon validation** (optional), gated behind `validate --photon` (needs a JRE + Photon jar)
-- **PSNR / SSIM** frame comparison between two image sequences
+- **Netflix Photon validation** (optional, needs a JRE and the Photon jars): `validate` runs it whenever `--photon-jar` or `PHOTON_JAR` names them, and `validate --photon` prints its own Photon pass or fail line
+- **PSNR / SSIM** frame comparison between two video files (`compare --pixel`)
 - **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
 - **QC report** generation (text / JSON / HTML), with optional black and frozen picture detection via `report --scan-picture`
@@ -62,7 +62,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Source LUT**, `create --source-lut <file.cube>` applies a 3D LUT during the decode, and its output must be Rec.709 RGB. It conflicts with `--source-colourspace`, and it needs a decode to run in, so a held still is refused
 - **Audio delay**, `create --audio-delay <ms>` shifts the sound against the picture without changing the running time, padding one end and truncating the other
 - **Audio channel mapping**, `create --audio-map "1:L,2:R,1:C@-6"` routes and mixes the source channels into named lanes (L, R, C, LFE, Ls, Rs, Lrs, Rrs, or 1-based numbers) with a per-route gain in dB. The source is the `--audio` WAV, or the track demuxed from `--video` when there is no `--audio`. Several inputs summed into one lane are mixed. A plain routing is bit-exact. The map runs before the delay, the trim and the MCA labels, so the labelled layout describes the packaged file
-- **3D LUT application**, apply .cube LUTs to image sequences via ffmpeg lut3d
+- **3D LUT application** (`lut`), apply a .cube LUT to a video file via ffmpeg lut3d
 - **ACES conversion**, `aces` converts ACES AP0 frames to Rec.709 with an ffmpeg colour matrix. No rendering transform runs, so this is a colorimetric conversion, not a display render
 - **Audio description mixing**, combine AD narration with main mix using ducking
 - **MCA label generation**, SMPTE ST 377-4 Multi-Channel Audio labeling (5.1, 7.1, stereo presets)
@@ -79,7 +79,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Slate generation**, prepend a black text slate as an image sequence
 
 ### Integration & Extensibility
-- **REST API server** (`serve`), HTTP interface for /create, /validate, /encode, /transcode, /jobs, /tools, /pause, /resume (in-memory queue with a background worker; jobs live for the server process only)
+- **REST API server** (`serve`), HTTP interface under `/api/v1`: `create`, `validate`, `encode`, `transcode`, `jobs`, `profiles`, `tools`, `pause`, `resume` (in-memory queue with a background worker; jobs live for the server process only)
 - **EDL/FCP XML import**, `conform` parses CMX 3600 EDL and Final Cut Pro 7 XML timelines
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
@@ -91,7 +91,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Partial restore** (`restore --input <imp> --output <dir> [--video-only|--audio-only]`), unwraps every track file the IMP's CPLs name, in process: a picture track becomes one numbered `.j2c` codestream per frame and a sound track becomes one WAV at the channel count, rate and depth the track file declares, each under a directory named after the track file
 
 ### Comparison & Analysis
-- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate) or pixel PSNR/SSIM/VMAF with `--pixel`/`--vmaf`
+- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate) or pixel PSNR/SSIM/VMAF between two video or MXF files with `--pixel`/`--vmaf`
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
@@ -142,14 +142,14 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 
 The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. Every archive ships that library: `grokj2k.dll` beside the exe in the Windows zip, `libgrokj2k` in `lib/` beside the binary in the Linux and macOS tarballs, where the binary's rpath finds it. Extract and run, no loader path to set.
 
-The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. The package manager pulls in the rest: libmpv for the preview player, ffmpeg for video import, xmlsec1 and xmllint for verification, curl for certificate fetching.
+The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. The package manager pulls in the rest: libmpv for the preview player, ffmpeg for video import, xmlsec1 and xmllint for verification, curl for webhook notifications.
 
 ```bash
-sudo apt install ./imfwizard_*_amd64.deb     # Debian, Ubuntu
-sudo dnf install ./imfwizard-*.x86_64.rpm    # Fedora
+sudo apt install ./IMF.Wizard_*_amd64.deb     # Debian, Ubuntu
+sudo dnf install ./IMF.Wizard-*.x86_64.rpm    # Fedora
 ```
 
-On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. Nothing else has to be installed by hand. Dolby Vision and HDR10+ sources also need `dovi_tool` and `hdr10plus_tool` on the PATH, from their GitHub releases listed under runtime dependencies below.
+On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. Nothing else has to be installed by hand. `dv-extract` and `dv-inject` need `dovi_tool` on the PATH, and `hdr10plus-extract` needs `hdr10plus_tool`, from their GitHub releases listed under runtime dependencies below.
 
 The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint from the PATH. For the `.dmg`, install libmpv with `brew install mpv`.
 
@@ -158,7 +158,7 @@ The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint fro
 Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
 
 ```bash
-git clone --recurse-submodules --branch v20.4.11 https://github.com/GrokImageCompression/grok.git
+git clone --recurse-submodules --branch v20.4.12 https://github.com/GrokImageCompression/grok.git
 cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/bin/grok"
 cmake --build grok/build --parallel
 cmake --install grok/build
@@ -170,8 +170,8 @@ export LD_LIBRARY_PATH="$HOME/bin/grok/lib64:$HOME/bin/grok/lib:$LD_LIBRARY_PATH
 #### Linux (Ubuntu/Debian)
 
 ```bash
-sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev
-# For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+sudo apt-get install -y build-essential cmake pkg-config libssl-dev libxerces-c-dev libasound2-dev libclang-dev
+# For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libmpv-dev patchelf
 
 git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
 cd imfwizard/rust
@@ -182,8 +182,8 @@ cargo build --release
 #### Fedora
 
 ```bash
-sudo dnf install gcc-c++ cmake pkgconf-pkg-config libxml2-devel openssl-devel xerces-c-devel alsa-lib-devel
-# For GUI: also install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel mpv-devel
+sudo dnf install gcc-c++ cmake pkgconf-pkg-config libxml2-devel openssl-devel xerces-c-devel alsa-lib-devel clang-devel
+# For GUI: also install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel mpv-devel patchelf
 # ffmpeg comes from RPM Fusion
 
 git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
@@ -198,7 +198,7 @@ cargo build --release
 brew install pkg-config libxml2 openssl@3 xerces-c
 
 export OPENSSL_DIR=$(brew --prefix openssl@3)
-export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig"
+export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 cd rust
 cargo build --release
@@ -222,7 +222,6 @@ cargo build --release
 | Dependency | Purpose | Install |
 |-----------|---------|---------|
 | `ffmpeg` / `ffprobe` | Video transcoding, loudness, quality metrics | `apt install ffmpeg` / `brew install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html) |
-| `mpv` | GUI preview player for sources that are not JPEG 2000 | `apt install mpv` / `brew install mpv` / [mpv.io](https://mpv.io/installation/) |
 | `dovi_tool` | Dolby Vision RPU injection | [GitHub](https://github.com/quietvoid/dovi_tool/releases) |
 | `hdr10plus_tool` | HDR10+ dynamic metadata | [GitHub](https://github.com/quietvoid/hdr10plus_tool/releases) |
 | `xmllint` | XSD schema validation of IMP XML | `apt install libxml2-utils` / `brew install libxml2` |
@@ -230,6 +229,8 @@ cargo build --release
 | JRE + Photon jars | `validate --photon` (Netflix Photon) | `apt install default-jre`; then `scripts/fetch_photon.sh` |
 | `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
 | AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+
+The desktop app needs libmpv: the .deb and .rpm pull it in, the AppImage carries it, on macOS run `brew install mpv`. It plays sources that are not JPEG 2000.
 
 Use `imfwizard doctor` to check which tools are installed and which are missing.
 
@@ -246,6 +247,9 @@ docker run -v /path/to/media:/data imfwizard create \
 The desktop app uses a single-window layout with sidebar navigation, inspired by professional NLEs.
 
 ```bash
+./scripts/setup-tauri-bin.sh
+# macOS: lib/libgrokj2k.1.dylib, Windows: bin/grokj2k.dll
+cp -L "$HOME/bin/grok/lib64/libgrokj2k.so.1" gui/src-tauri/
 cd gui
 pnpm install
 pnpm tauri dev
@@ -319,8 +323,10 @@ imfwizard create \
   --fps-num 24 --fps-den 1
 ```
 
-`--fps-num`/`--fps-den` take any rate, and the encode runs at the fraction they
-name rather than at the nearest whole rate. The GUI's Frame Rate menu offers
+`--fps-num`/`--fps-den` take any rate. A video file left without them is encoded
+and declared at the rate ffprobe reads from it, and a named rate it does not play
+at is refused before the encode. Image sequences, codestream directories and held
+stills take the flags, 24/1 without them. The GUI's Frame Rate menu offers
 23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 100, 119.88 and 120.
 
 ### Set the picture bitrate
@@ -353,6 +359,8 @@ imfwizard create \
 ### Create an IMP with subtitles
 
 ```bash
+# --subtitle takes TTML or IMSC as is, and converts SRT, SCC, ASS/SSA, FCPXML or
+# MKS to IMSC on the way in. --subtitle-lang sets the converted document's xml:lang.
 imfwizard create \
   --title "My Film" \
   --video /path/to/j2k_frames/ \
@@ -419,9 +427,9 @@ colour systems only, so either flag with `hlg-bt2020` is refused. A Dolby Vision
 8.1 source fills them from its RPU when neither flag is given, and profile 5 is refused
 by name.
 
-An `hlg-bt2020` CPL claims the 2020 edition of ST 2067-21 in its
-ApplicationIdentification, `http://www.smpte-ra.org/ns/2067-21/2020`, because COLOR.8 was
-not in the 2016 edition the PQ presets claim. The GUI takes the same three presets in the
+Every CPL claims the 2020 edition of ST 2067-21 in its ApplicationIdentification,
+`http://www.smpte-ra.org/ns/2067-21/2020`, because the 2016 edition has no COLOR.8 and no
+full range Rec.709 RGB. The GUI takes the same three presets in the
 Properties panel's HDR control.
 
 The picture's own signalling has to agree with the preset. A source tagged PQ
@@ -452,7 +460,8 @@ imfwizard create \
 # Sizes are percents: --burn-font-size and --burn-margin of the frame height,
 # --burn-outline-width of the text height. --burn-line-height is a multiple of
 # the text height. Colours are RRGGBB or RRGGBBAA. Left out, each keeps its
-# default: 4.5% white text with a black shadow, 1.25 line height, 8% margin.
+# default: white text 1/22 of the frame height, 4.55%, with a black shadow,
+# 1.25 line height, 8% margin.
 imfwizard create \
   --title "My Film" \
   --video /path/to/video.mov \
@@ -572,8 +581,8 @@ imfwizard supplement --ov /path/to/OV --title "v2" -o /path/to/SUPP \
   --add subs_de.ttml@subtitle --replace commentary.wav@audio:1
 ```
 
-Video input is a J2K codestream directory; audio is WAV; subtitle is TTML/IMSC
-(same essence inputs as `create`). Deliver the supplemental alongside its OV: a
+Video input is a J2K codestream directory; audio is WAV; subtitle is TTML/IMSC.
+Deliver the supplemental alongside its OV: a
 validator resolves the CPL's OV references against the OV's ASSETMAP, so
 validating the supplemental on its own reports the OV track files as missing.
 
@@ -583,8 +592,9 @@ validating the supplemental on its own reports the OV track files as missing.
 # create runs this itself over every package it writes
 imfwizard validate /path/to/imp/
 
-# Also validate XML against the SMPTE ST 2067 schemas
-imfwizard validate /path/to/imp/ --xsd
+# Also validate XML against the SMPTE ST 2067 schemas in --schema-dir.
+# Only the ST 2067-3 CPL schema is vendored, in extern/postkit/tests/fixtures/xsd/imf/org/smpte_ra/schemas/st2067_3_2016
+imfwizard validate /path/to/imp/ --xsd --schema-dir /path/to/st2067-xsds
 
 # Also run Netflix Photon (needs a JRE plus Photon and its dependencies).
 # Netflix ships no fat jar, so fetch the jars into one directory and point at it:
@@ -642,11 +652,14 @@ imfwizard burn-in \
 ### Bitrate analytics
 
 ```bash
-# Human-readable summary
+# Track counts and package size
 imfwizard analytics -d /path/to/imp/
 
 # JSON output for dashboards
 imfwizard analytics -d /path/to/imp/ --json
+
+# Per-second bitrate, min, max, mean, spread and a --histogram-buckets histogram (default 20)
+imfwizard analytics -d /path/to/imp/ --video /path/to/imp/VIDEO_<uuid>.mxf --json
 ```
 
 ### REST API server
@@ -729,14 +742,14 @@ Every event becomes one picture track file encoded from its own source range and
 one sound track file cut from the same media, and the CPL plays them in record
 order through a single main image track and a single main audio track. Every
 event's media has to carry the same raster, and either all of them carry sound
-or none does. `conform_manifest.json` beside the package records the plan and
-the track file each event became.
+or none does. `conform_manifest.json` in the output directory records the plan
+and the track file each event became.
 
 ### Frame comparison
 
 ```bash
 # Compare two IMPs or video files (add --pixel for per-frame PSNR/SSIM on video MXF)
-imfwizard compare -a /path/to/imp_v1/ -b /path/to/imp_v2/ --pixel --json
+imfwizard compare -a /path/to/imp_v1/VIDEO_<uuid>.mxf -b /path/to/imp_v2/VIDEO_<uuid>.mxf --pixel --json
 
 # VMAF score (needs an ffmpeg built with libvmaf); combine with --pixel and --json
 imfwizard compare -a reference.mxf -b encoded.mxf --vmaf --json
@@ -773,13 +786,14 @@ imfwizard audio-desc -i mix_51.wav --narration ad_narration.wav -o combined.wav 
 ### Apply 3D LUT
 
 ```bash
-imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/
+imfwizard lut --lut grading.cube -i /frames/frame_%06d.tif -o /graded_frames/frame_%06d.tif
 ```
 
 ### ACES conversion
 
 ```bash
-imfwizard aces -i /ap0_frames/ -o /rec709_frames/
+# AP0 to Rec.709 primaries and transfer, no ACES rendering transform, TIFF out
+imfwizard aces -i /ap0_frames/frame_%06d.tif -o /rec709_frames/frame_%06d.tif
 ```
 
 ### A/V sync check
@@ -812,8 +826,8 @@ imfwizard partial-version -i /orig_imp/ -o /partial/ --cpl <cpl-uuid>
 ### Slate
 
 ```bash
-# Prepend a black text slate as image frames
-imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 48
+# Prepend black frames with white centred text, --frames defaults to 24
+imfwizard slate -i /path/to/clip.mov -o /slated/slated_%04d.png --text "MY FILM, Final Master" --frames 48
 ```
 
 ### Video retiming
@@ -834,13 +848,13 @@ imfwizard/
 │   └── Cargo.toml
 ├── gui/                 # Tauri 2 desktop application
 │   ├── src/             # Frontend (Vite + vanilla JS)
-│   └── src-tauri/       # Rust backend (plugin shell)
+│   └── src-tauri/       # Rust backend: job queue, preview and package commands over imfwizard-core, postkit and guikit
 └── docs/                # GitHub Pages site
 ```
 
 IMF Wizard shares common functionality with [DCP Wizard](https://github.com/PostPerfection/dcpwizard)
-via the [postkit](https://github.com/PostPerfection/postkit) library (encoding, transcoding, hashing,
-job queue, preferences, REST API, watch folders, and more).
+via the [postkit](https://github.com/PostPerfection/postkit) library (encoding, hashing,
+job queue, preferences, REST API, and more).
 
 ## License
 

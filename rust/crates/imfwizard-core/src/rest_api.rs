@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use postkit::rest_api::{Request, RestServer, RouteResponse};
 
-use crate::job_queue::{Job, JobQueue, JobState, JobType};
+use crate::executor::ExecutorQueue;
+use crate::job_queue::{Job, JobState, JobType};
 use crate::tools;
 
 /// API server configuration.
@@ -95,7 +96,7 @@ fn build_server(config: &ApiConfig) -> RestServer {
         server.require_api_key(key, &HEALTH_PATHS);
     }
 
-    let queue = JobQueue::new();
+    let queue = ExecutorQueue::default();
     let paused = Arc::new(AtomicBool::new(false));
 
     // Background worker runs submitted jobs. The queue is in-memory, so jobs
@@ -231,7 +232,7 @@ fn build_server(config: &ApiConfig) -> RestServer {
     server
 }
 
-fn metrics(queue: &JobQueue) -> String {
+fn metrics(queue: &ExecutorQueue) -> String {
     let jobs = queue.list();
     let count = |state: JobState| jobs.iter().filter(|job| job.state == state).count();
     let queued = count(JobState::Queued);
@@ -251,7 +252,7 @@ fn metrics(queue: &JobQueue) -> String {
 fn submit_job(
     request: &Request,
     job_type: JobType,
-    queue: &JobQueue,
+    queue: &ExecutorQueue,
     paused: &AtomicBool,
 ) -> (u16, String) {
     if paused.load(Ordering::Relaxed) {

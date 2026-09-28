@@ -190,16 +190,14 @@ fn light_levels_from_summary(
     hdr: HdrWcg,
 ) -> Result<HdrWcg, String> {
     postkit::dolby_vision::refuse_undecodable_dolby_vision(summary)?;
-    // the flags are the operator's own measurement, so they win over the RPU
-    if hdr.max_cll.is_some() || hdr.max_fall.is_some() {
-        return Ok(hdr);
-    }
     let nits =
         |level: Option<f32>| level.map(|nits| nits.round().clamp(0.0, f32::from(u16::MAX)) as u16);
-    hdr.with_content_light_levels(
-        nits(summary.max_content_light_level_nits),
-        nits(summary.max_frame_average_light_level_nits),
-    )
+    // the flags are the operator's own measurement, so they win over the RPU
+    let max_cll = hdr.max_cll.or(nits(summary.max_content_light_level_nits));
+    let max_fall = hdr
+        .max_fall
+        .or(nits(summary.max_frame_average_light_level_nits));
+    hdr.with_content_light_levels(max_cll, max_fall)
 }
 
 pub fn resolve(picture: Option<&Path>, hdr: Option<HdrWcg>) -> Result<Option<HdrWcg>, String> {
@@ -327,7 +325,7 @@ mod tests {
             light_levels_from_summary(&dolby_vision_summary(8, Some(993.0), Some(362.0)), flagged)
                 .unwrap();
         assert_eq!(kept.max_cll, Some(500));
-        assert_eq!(kept.max_fall, None);
+        assert_eq!(kept.max_fall, Some(362));
     }
 
     #[test]

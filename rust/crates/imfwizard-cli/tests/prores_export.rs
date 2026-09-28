@@ -192,6 +192,25 @@ fn an_unknown_container_is_refused_with_the_names_that_work() {
 }
 
 #[test]
+fn an_unknown_profile_is_refused_with_the_names_that_work() {
+    let dir = TempDir::new().unwrap();
+    let clip = testsrc_clip(dir.path());
+    let movie = dir.path().join("file.mov");
+
+    cmd()
+        .args(["prores", "-i", &clip.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .args(["-p", "xq"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown ProRes profile 'xq'"))
+        .stderr(predicate::str::contains(
+            "proxy, lt, standard, hq, 4444, 4444xq",
+        ));
+    assert!(!movie.exists(), "an unknown profile still wrote {movie:?}");
+}
+
+#[test]
 fn without_a_container_the_picture_keeps_its_own_raster() {
     let dir = TempDir::new().unwrap();
     let imp = build_sound_imp(dir.path(), "imp_raster");

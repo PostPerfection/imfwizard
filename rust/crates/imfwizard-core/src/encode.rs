@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 pub use postkit::encode::{
     EncodeResult, FrameRate, ImageFormat, detect_image_format, find_source_frames,
 };
@@ -14,10 +17,8 @@ pub fn encode_image_sequence(
     output_dir: &std::path::Path,
     bitrate_mbps: f64,
     fps: FrameRate,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<postkit::pipeline::EncodeResult, String> {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-
     let (width, height) = postkit::encode::source_raster(input_dir)?;
     let rsiz = imf_rsiz_for_encode(width, height, fps.as_f64(), bitrate_mbps)?;
     postkit::pipeline::run_encode_with_options(
@@ -34,7 +35,7 @@ pub fn encode_image_sequence(
             rsiz,
             ..postkit::pipeline::EncodeRunOptions::default()
         },
-        &Arc::new(AtomicBool::new(false)),
+        cancel,
         &Arc::new(AtomicBool::new(false)),
         |progress| tracing::info!("{}", progress.message),
         |line| tracing::info!("{line}"),

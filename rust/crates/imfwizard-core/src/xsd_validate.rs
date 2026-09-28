@@ -8,13 +8,54 @@ pub struct XsdValidationResult {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SkippedDocument {
+    pub file: String,
+    pub schema_names: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct XsdReport {
+    pub checked: Vec<XsdValidationResult>,
+    pub skipped: Vec<SkippedDocument>,
+}
+
+struct ImfDocument {
+    root_element: &'static str,
+    name_fragment: &'static str,
+    schema_names: &'static [&'static str],
+}
+
+const IMF_DOCUMENTS: [ImfDocument; 4] = [
+    ImfDocument {
+        root_element: "CompositionPlaylist",
+        name_fragment: "cpl",
+        schema_names: &["st2067-3-2020-CPL.xsd", "st2067-3-CPL.xsd", "imf-cpl.xsd"],
+    },
+    ImfDocument {
+        root_element: "PackingList",
+        name_fragment: "pkl",
+        schema_names: &["st2067-2-2020-PKL.xsd", "st2067-2-PKL.xsd", "imf-pkl.xsd"],
+    },
+    ImfDocument {
+        root_element: "AssetMap",
+        name_fragment: "assetmap",
+        schema_names: &["st0429-9-2007-AM.xsd", "st429-9-AM.xsd", "imf-assetmap.xsd"],
+    },
+    ImfDocument {
+        root_element: "OutputProfileList",
+        name_fragment: "opl",
+        schema_names: &["st2067-9-OPL.xsd"],
+    },
+];
+
 /// Validate IMP XML files (CPL, PKL, AssetMap) against SMPTE ST 2067 XSD schemas.
 ///
 /// Requires xmllint to be installed with the schemas available.
 pub fn validate_imp_schemas(
     imp_dir: &Path,
     schema_dir: Option<&Path>,
-) -> Result<Vec<XsdValidationResult>, String> {
+) -> Result<XsdReport, String> {
     if !crate::tools::has_xmllint() {
         return Err(
             "xmllint is not installed. Install libxml2-utils for XSD schema validation."
@@ -29,7 +70,7 @@ pub fn validate_imp_schemas(
             "SMPTE ST 2067 XSD schemas not found. Use --schema-dir to specify location.".to_string()
         })?;
 
-    let mut results = Vec::new();
+    let mut report = XsdReport::default();
 
     // Find XML files in the IMP directory
     let entries =
@@ -51,54 +92,50 @@ pub fn validate_imp_schemas(
             Err(_) => continue,
         };
 
-        let schema_file = detect_schema(&content, &schema_base);
-        if let Some(schema) = schema_file {
-            let result = validate_with_xmllint(&path, &schema);
-            results.push(result);
+        let Some(document) = detect_document(&content) else {
+            continue;
+        };
+        match find_schema(&schema_base, document) {
+            Some(schema) => report.checked.push(validate_with_xmllint(&path, &schema)),
+            None => report.skipped.push(SkippedDocument {
+                file: file_name(&path),
+                schema_names: document.schema_names,
+            }),
         }
     }
 
-    Ok(results)
+    Ok(report)
 }
 
-/// Detect which XSD schema to use based on the XML root element namespace.
-fn detect_schema(content: &str, schema_dir: &Path) -> Option<String> {
-    if content.contains("CompositionPlaylist") || content.contains("2067-3") {
-        find_schema(schema_dir, "cpl")
-    } else if content.contains("PackingList") || content.contains("2067-2") {
-        find_schema(schema_dir, "pkl")
-    } else if content.contains("AssetMap") {
-        find_schema(schema_dir, "assetmap")
-    } else if content.contains("OutputProfileList") || content.contains("2067-9") {
-        find_schema(schema_dir, "opl")
-    } else {
-        None
+fn detect_document(content: &str) -> Option<&'static ImfDocument> {
+    let root = root_element_name(content)?;
+    IMF_DOCUMENTS
+        .iter()
+        .find(|document| document.root_element == root)
+}
+
+fn root_element_name(content: &str) -> Option<&str> {
+    let mut rest = content;
+    loop {
+        let start = rest.find('<')?;
+        rest = &rest[start + 1..];
+        if rest.starts_with('?') || rest.starts_with('!') {
+            continue;
+        }
+        let end = rest.find(|character: char| {
+            character.is_whitespace() || character == '>' || character == '/'
+        })?;
+        let qualified = &rest[..end];
+        return Some(
+            qualified
+                .rsplit_once(':')
+                .map_or(qualified, |(_, local)| local),
+        );
     }
 }
 
-/// Find an XSD schema file by type.
-fn find_schema(schema_dir: &Path, doc_type: &str) -> Option<String> {
-    let candidates: Vec<String> = match doc_type {
-        "cpl" => vec![
-            "st2067-3-2020-CPL.xsd".into(),
-            "st2067-3-CPL.xsd".into(),
-            "imf-cpl.xsd".into(),
-        ],
-        "pkl" => vec![
-            "st2067-2-2020-PKL.xsd".into(),
-            "st2067-2-PKL.xsd".into(),
-            "imf-pkl.xsd".into(),
-        ],
-        "assetmap" => vec![
-            "st0429-9-2007-AM.xsd".into(),
-            "st429-9-AM.xsd".into(),
-            "imf-assetmap.xsd".into(),
-        ],
-        "opl" => vec!["st2067-9-OPL.xsd".into()],
-        _ => return None,
-    };
-
-    for name in &candidates {
+fn find_schema(schema_dir: &Path, document: &ImfDocument) -> Option<String> {
+    for name in document.schema_names {
         let path = schema_dir.join(name);
         if path.is_file() {
             return Some(path.to_string_lossy().to_string());
@@ -110,7 +147,7 @@ fn find_schema(schema_dir: &Path, doc_type: &str) -> Option<String> {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
-                name.to_lowercase().contains(doc_type) && name.ends_with(".xsd")
+                name.to_lowercase().contains(document.name_fragment) && name.ends_with(".xsd")
             }) {
                 return Some(p.to_string_lossy().to_string());
             }
@@ -120,6 +157,13 @@ fn find_schema(schema_dir: &Path, doc_type: &str) -> Option<String> {
     None
 }
 
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
 /// Run xmllint --schema against a single file.
 fn validate_with_xmllint(xml_path: &Path, schema_path: &str) -> XsdValidationResult {
     let output = std::process::Command::new("xmllint")
@@ -127,11 +171,7 @@ fn validate_with_xmllint(xml_path: &Path, schema_path: &str) -> XsdValidationRes
         .arg(xml_path)
         .output();
 
-    let filename = xml_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+    let filename = file_name(xml_path);
 
     match output {
         Ok(out) => {

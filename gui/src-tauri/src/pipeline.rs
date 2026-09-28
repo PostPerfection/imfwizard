@@ -1260,6 +1260,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 j2k_dir: Some(picture_dir),
                 audio_files,
                 timed_text_files: ci.subtitles.iter().map(PathBuf::from).collect(),
+                timed_text_language: ci.audio_lang.clone(),
             },
             &enc_dir,
             job.fps_num,
@@ -1427,6 +1428,7 @@ mod tests {
     const CLIP_HEIGHT: u32 = 144;
     const CLIP_FRAMES: u32 = 2;
     const FPS: u32 = 24;
+    const DOLBY_VISION_FIXTURE_FPS: u32 = 25;
     // the clips are small, so the plan pads them into an App 2E raster
     const APP2E_RASTER: (u32, u32) = (1920, 1080);
     const PQ_TRANSFER_TAG: &str = "smpte2084";
@@ -1577,8 +1579,12 @@ mod tests {
             &signalled.to_string_lossy(),
         ]);
         let mut compositions = vec![composition(&signalled)];
+        let plan = imfwizard_core::preflight::CreatePlan {
+            fps_num: DOLBY_VISION_FIXTURE_FPS,
+            ..shared_plan(Some("pq-bt2020"))
+        };
 
-        super::plan_compositions(&mut compositions, &shared_plan(Some("pq-bt2020"))).unwrap();
+        super::plan_compositions(&mut compositions, &plan).unwrap();
 
         let filled = compositions[0].hdr.as_ref().expect("the settled hdr");
         assert_eq!(filled.max_cll, Some(993));

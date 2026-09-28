@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::process::Command;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const CANCELLED_ERROR: &str = "cancelled before the transcode finished";
 
 /// Transcode options (ffmpeg-based).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13,6 +20,8 @@ pub struct TranscodeOptions {
     pub bitrate: Option<String>,
     pub audio_codec: Option<String>,
     pub extra_args: Vec<String>,
+    #[serde(skip)]
+    pub cancel: Arc<AtomicBool>,
 }
 
 /// Transcode result.
@@ -48,21 +57,71 @@ pub fn transcode(opts: &TranscodeOptions) -> TranscodeResult {
     }
     cmd.arg(&opts.output);
 
-    match cmd.output() {
-        Ok(out) if out.status.success() => TranscodeResult {
-            success: true,
-            error: String::new(),
-            output: opts.output.clone(),
+    let (success, error) = match run_until_cancelled(cmd, &opts.output, &opts.cancel) {
+        Ok(()) => (true, String::new()),
+        Err(error) => (false, error),
+    };
+    TranscodeResult {
+        success,
+        error,
+        output: opts.output.clone(),
+    }
+}
+
+enum Ending {
+    Exited(ExitStatus),
+    Cancelled,
+}
+
+fn run_until_cancelled(mut cmd: Command, output: &Path, cancel: &AtomicBool) -> Result<(), String> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run ffmpeg: {e}"))?;
+    // a full stderr pipe would stall ffmpeg before it exits
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        String::from_utf8_lossy(&bytes).into_owned()
+    });
+    let ending = wait_or_kill(&mut child, cancel);
+    let stderr = stderr_reader
+        .join()
+        .expect("the stderr reader does not panic");
+    match ending? {
+        Ending::Exited(status) if status.success() => Ok(()),
+        Ending::Exited(_) => Err(stderr),
+        Ending::Cancelled => match std::fs::remove_file(output) {
+            Ok(()) => Err(CANCELLED_ERROR.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(CANCELLED_ERROR.to_string()),
+            Err(e) => Err(format!(
+                "{CANCELLED_ERROR}, and the partial {} could not be removed: {e}",
+                output.display()
+            )),
         },
-        Ok(out) => TranscodeResult {
-            success: false,
-            error: String::from_utf8_lossy(&out.stderr).into_owned(),
-            output: opts.output.clone(),
-        },
-        Err(e) => TranscodeResult {
-            success: false,
-            error: format!("Failed to run ffmpeg: {e}"),
-            output: opts.output.clone(),
-        },
+    }
+}
+
+fn wait_or_kill(child: &mut Child, cancel: &AtomicBool) -> Result<Ending, String> {
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("Failed to wait for ffmpeg: {e}"))?
+        {
+            return Ok(Ending::Exited(status));
+        }
+        if cancel.load(Ordering::Relaxed) {
+            child
+                .kill()
+                .map_err(|e| format!("Failed to stop ffmpeg: {e}"))?;
+            child
+                .wait()
+                .map_err(|e| format!("Failed to wait for ffmpeg: {e}"))?;
+            return Ok(Ending::Cancelled);
+        }
+        std::thread::sleep(CANCEL_POLL_INTERVAL);
     }
 }

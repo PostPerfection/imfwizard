@@ -17,13 +17,14 @@ const INTERMEDIATE_DIRECTORIES: [&str; 3] = [
 const INTERMEDIATE_FILES: [&str; 2] = [DEMUXED_AUDIO_NAME, crate::audio_map::MAPPED_AUDIO_NAME];
 
 // scratch named one per composition, per sound file or per subtitle file
-const INTERMEDIATE_PREFIXES: [&str; 6] = [
+const INTERMEDIATE_PREFIXES: [&str; 7] = [
     ENCODE_SCRATCH_PREFIX,
     crate::source_edits::DELAYED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_AUDIO_PREFIX,
     crate::source_edits::FITTED_AUDIO_PREFIX,
     crate::source_edits::WIDENED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_SUBTITLE_PREFIX,
+    crate::source_edits::CONVERTED_SUBTITLE_PREFIX,
 ];
 
 pub fn remove_intermediates(output_dir: &Path, keep: &[&Path]) {
@@ -86,6 +87,7 @@ mod tests {
             format!("{}1.wav", crate::source_edits::TRIMMED_AUDIO_PREFIX),
             format!("{}1.wav", crate::source_edits::WIDENED_AUDIO_PREFIX),
             format!("{}1.xml", crate::source_edits::TRIMMED_SUBTITLE_PREFIX),
+            format!("{}1.ttml", crate::source_edits::CONVERTED_SUBTITLE_PREFIX),
         ];
         for name in &indexed {
             std::fs::write(output.join(name), [0u8]).unwrap();

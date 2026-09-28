@@ -15,7 +15,10 @@ const HEIGHT: u32 = 1080;
 const FRAMES: usize = 4;
 const BLOCKING_FRAMES: usize = 48;
 const BLOCKING_FRAME_BYTES: usize = 4 * 1024 * 1024;
+const BLOCKING_TIFF_FRAMES: usize = 48;
+const BLOCKING_CLIP_FRAMES: usize = 360;
 const JOB_TIMEOUT: Duration = Duration::from_secs(120);
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 // a server per test, so pausing one queue cannot reach another
 fn serve() -> SocketAddr {
@@ -105,7 +108,20 @@ fn wait_for_job(address: SocketAddr, id: u64) -> serde_json::Value {
             "Queued" | "Running" => assert!(Instant::now() < deadline, "job {id} never finished"),
             _ => return job,
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn wait_until_running(address: SocketAddr, id: u64) {
+    let deadline = Instant::now() + JOB_TIMEOUT;
+    loop {
+        let job = request(address, "GET", &format!("/api/v1/jobs/{id}"), Some(API_KEY)).json();
+        match job["state"].as_str().unwrap_or_default() {
+            "Running" => return,
+            "Queued" => assert!(Instant::now() < deadline, "job {id} never started"),
+            _ => panic!("job {id} finished before it could be cancelled: {job}"),
+        }
+        std::thread::sleep(POLL_INTERVAL);
     }
 }
 
@@ -147,7 +163,7 @@ fn ffmpeg(arguments: &[&str]) {
 }
 
 // tiff frames, the one image format imfwizard reads without ffmpeg
-fn tiff_sequence(root: &Path) -> std::path::PathBuf {
+fn tiff_sequence(root: &Path, frame_count: usize) -> std::path::PathBuf {
     let frames = root.join("frames");
     std::fs::create_dir_all(&frames).unwrap();
     ffmpeg(&[
@@ -156,7 +172,7 @@ fn tiff_sequence(root: &Path) -> std::path::PathBuf {
         "-i",
         &format!("testsrc=s={WIDTH}x{HEIGHT}:r=24"),
         "-frames:v",
-        &FRAMES.to_string(),
+        &frame_count.to_string(),
         "-pix_fmt",
         "rgb24",
         &frames.join("frame_%06d.tif").to_string_lossy(),
@@ -178,6 +194,61 @@ fn testsrc_clip(root: &Path) -> std::path::PathBuf {
         &clip.to_string_lossy(),
     ]);
     clip
+}
+
+// noise keeps the default x264 encode of the transcode busy for seconds
+fn blocking_clip(root: &Path) -> std::path::PathBuf {
+    let clip = root.join("noisy.mp4");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=640x360:r=24,noise=alls=60:allf=t",
+        "-frames:v",
+        &BLOCKING_CLIP_FRAMES.to_string(),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        &clip.to_string_lossy(),
+    ]);
+    clip
+}
+
+fn codestreams(directory: &Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(directory)
+        .unwrap_or_else(|e| panic!("{e} listing {}", directory.display()))
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "j2c" || extension == "j2k")
+        })
+        .collect()
+}
+
+// the one worker runs jobs in order, so the cancelled job has returned once the next has
+fn cancel_and_wait_for_the_worker(address: SocketAddr, id: u64, root: &Path) -> serde_json::Value {
+    let cancelled = request(
+        address,
+        "DELETE",
+        &format!("/api/v1/jobs/{id}"),
+        Some(API_KEY),
+    );
+    assert_eq!(cancelled.status, 200, "{}", cancelled.body);
+    assert_eq!(cancelled.json()["cancelled"], true);
+
+    let after = submit(
+        address,
+        "/api/v1/validate",
+        &root.join("no_such_imp"),
+        Path::new(""),
+        "after",
+    );
+    wait_for_job(address, after);
+    request(address, "GET", &format!("/api/v1/jobs/{id}"), Some(API_KEY)).json()
 }
 
 fn video_stream_entry(path: &Path, entry: &str) -> String {
@@ -277,33 +348,47 @@ fn profiles_serves_every_delivery_preset_with_its_values() {
 fn an_encode_job_writes_a_codestream_for_every_frame() {
     let address = serve();
     let directory = TempDir::new().unwrap();
-    let frames = tiff_sequence(directory.path());
+    let frames = tiff_sequence(directory.path(), FRAMES);
     let output = directory.path().join("encoded");
 
     let id = submit(address, "/api/v1/encode", &frames, &output, "encode");
     let job = wait_for_job(address, id);
     assert_eq!(job["state"], "Completed", "{job}");
 
-    let codestreams: Vec<_> = std::fs::read_dir(output.join("j2k"))
-        .expect("the j2k output directory")
-        .flatten()
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "j2c" || extension == "j2k")
-        })
-        .collect();
+    let codestreams = codestreams(&output.join("j2k"));
     assert_eq!(codestreams.len(), FRAMES);
     for codestream in &codestreams {
-        let bytes = std::fs::read(codestream.path()).unwrap();
+        let bytes = std::fs::read(codestream).unwrap();
         assert_eq!(
             &bytes[..4],
             &[0xff, 0x4f, 0xff, 0x51],
-            "{:?} does not start with the JPEG 2000 SOC and SIZ markers",
-            codestream.path()
+            "{codestream:?} does not start with the JPEG 2000 SOC and SIZ markers"
         );
     }
+}
+
+#[test]
+fn a_running_encode_that_is_cancelled_stops_encoding() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let frames = tiff_sequence(directory.path(), BLOCKING_TIFF_FRAMES);
+    let output = directory.path().join("encoded");
+
+    let running = submit(address, "/api/v1/encode", &frames, &output, "encode");
+    wait_until_running(address, running);
+    let job = cancel_and_wait_for_the_worker(address, running, directory.path());
+    assert_eq!(job["state"], "Cancelled", "{job}");
+
+    let j2k = output.join("j2k");
+    let written = if j2k.is_dir() {
+        codestreams(&j2k).len()
+    } else {
+        0
+    };
+    assert!(
+        written < BLOCKING_TIFF_FRAMES,
+        "the cancelled encode wrote all {written} codestreams"
+    );
 }
 
 /// `/transcode` runs ffmpeg, so the job leaves a file the prober can read back.
@@ -322,6 +407,24 @@ fn a_transcode_job_writes_a_playable_file() {
     assert_eq!(video_stream_entry(&output, "width"), "320");
     assert_eq!(video_stream_entry(&output, "height"), "180");
     assert_eq!(counted_frames(&output), 12);
+}
+
+#[test]
+fn a_running_transcode_that_is_cancelled_leaves_no_output() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let clip = blocking_clip(directory.path());
+    let output = directory.path().join("transcoded.mkv");
+
+    let running = submit(address, "/api/v1/transcode", &clip, &output, "transcode");
+    wait_until_running(address, running);
+    let job = cancel_and_wait_for_the_worker(address, running, directory.path());
+    assert_eq!(job["state"], "Cancelled", "{job}");
+    assert!(
+        !output.exists(),
+        "the cancelled transcode left {}",
+        output.display()
+    );
 }
 
 /// A transcode ffmpeg cannot run fails the job in ffmpeg's own words.
@@ -515,6 +618,49 @@ fn a_job_waiting_behind_another_can_be_cancelled() {
     assert_eq!(
         request(address, "DELETE", "/api/v1/jobs/nine", Some(API_KEY)).status,
         400
+    );
+}
+
+#[test]
+fn a_running_job_that_is_cancelled_stays_cancelled() {
+    let address = serve();
+    let directory = TempDir::new().unwrap();
+    let frames = blocking_codestream_directory(directory.path());
+    let imp = directory.path().join("imp");
+
+    let running = submit(address, "/api/v1/create", &frames, &imp, "Cancelled");
+    wait_until_running(address, running);
+
+    let cancelled = request(
+        address,
+        "DELETE",
+        &format!("/api/v1/jobs/{running}"),
+        Some(API_KEY),
+    );
+    assert_eq!(cancelled.status, 200, "{}", cancelled.body);
+    assert_eq!(cancelled.json()["cancelled"], true);
+
+    // the one worker runs jobs in order, so the create has returned once this has
+    let after = submit(
+        address,
+        "/api/v1/validate",
+        &directory.path().join("no_such_imp"),
+        Path::new(""),
+        "after",
+    );
+    wait_for_job(address, after);
+
+    let job = request(
+        address,
+        "GET",
+        &format!("/api/v1/jobs/{running}"),
+        Some(API_KEY),
+    )
+    .json();
+    assert_eq!(job["state"], "Cancelled", "{job}");
+    assert!(
+        !imp.join("ASSETMAP.xml").exists(),
+        "the cancelled create finished its package"
     );
 }
 

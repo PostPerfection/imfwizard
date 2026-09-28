@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::source_edits::{
     AudioFit, FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX, fit_audio_to_picture,
@@ -72,6 +74,8 @@ pub struct ImpOptions {
     /// What the sound track files say about themselves in their MCA soundfield
     /// group, beside the language each audio track carries.
     pub soundfield: SoundfieldLabels,
+    #[serde(skip)]
+    pub cancel: Arc<AtomicBool>,
 }
 
 /// MCATitleVersion, MCAAudioContentKind and MCAAudioElementKind, the three
@@ -260,6 +264,15 @@ pub(crate) fn soundfield_config(
     })
 }
 
+const CANCELLED_ERROR: &str = "cancelled before the package was finished";
+
+fn cancelled(opts: &ImpOptions) -> Option<ImpResult> {
+    opts.cancel.load(Ordering::Relaxed).then(|| ImpResult {
+        error: CANCELLED_ERROR.into(),
+        ..Default::default()
+    })
+}
+
 /// Create an IMP (Interoperable Master Package).
 pub fn create_imp(opts: &ImpOptions) -> ImpResult {
     if opts.compositions.is_empty() {
@@ -312,6 +325,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
     let mut cpls: Vec<CplEntry> = Vec::new();
 
     for comp in &opts.compositions {
+        if let Some(result) = cancelled(opts) {
+            return result;
+        }
         let mut comp_tracks: Vec<crate::MxfTrackFile> = Vec::new();
 
         // picture (required, validated above)
@@ -346,6 +362,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             .unwrap_or(0);
 
         for (index, a) in comp.audio_files.iter().enumerate() {
+            if let Some(result) = cancelled(opts) {
+                return result;
+            }
             if !a.path.exists() {
                 continue;
             }
@@ -412,6 +431,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
         }
 
         for tt in &comp.timed_text_files {
+            if let Some(result) = cancelled(opts) {
+                return result;
+            }
             if !tt.exists() {
                 continue;
             }
@@ -434,6 +456,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             }
         }
 
+        if let Some(result) = cancelled(opts) {
+            return result;
+        }
         let cpl_uuid = uuid::Uuid::new_v4().to_string();
         let cpl_path = opts.output_dir.join(format!("CPL_{cpl_uuid}.xml"));
         if let Err(e) = crate::cpl::write_cpl(&cpl_path, &cpl_uuid, opts, comp, &comp_tracks) {
@@ -450,6 +475,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
     }
 
     // one PKL and one ASSETMAP over every CPL and track file
+    if let Some(result) = cancelled(opts) {
+        return result;
+    }
     let pkl_uuid = uuid::Uuid::new_v4().to_string();
     let pkl_path = opts.output_dir.join(format!("PKL_{pkl_uuid}.xml"));
     if let Err(e) = crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpls, &all_tracks) {
@@ -459,6 +487,9 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
         };
     }
 
+    if let Some(result) = cancelled(opts) {
+        return result;
+    }
     let am_path = opts.output_dir.join("ASSETMAP.xml");
     if let Err(e) = crate::assetmap::write_assetmap(&am_path, &pkl_uuid, &cpls, &all_tracks) {
         return ImpResult {

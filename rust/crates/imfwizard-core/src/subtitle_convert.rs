@@ -1,6 +1,8 @@
 use postkit::packaging::escape_xml;
 use postkit::subtitle_formats::{HAlign, Rgba, StyledCue, StyledRun, VAlign, to_srt_cues};
 use postkit::subtitle_retime::{SrtCue, parse_srt};
+
+use crate::source_edits::TimedTextCue;
 use serde::{Deserialize, Serialize};
 
 /// Subtitle format.
@@ -38,12 +40,54 @@ impl SubtitleFormat {
             "stl" => Some(Self::Stl),
             "scc" => Some(Self::Scc),
             "ttml" | "xml" => Some(Self::Ttml),
+            "imsc" => Some(Self::ImscTtml),
             "ass" | "ssa" => Some(Self::Ass),
             "fcpxml" => Some(Self::Fcpxml),
             "mks" | "mkv" => Some(Self::Mks),
             _ => None,
         }
     }
+
+    pub fn is_ttml(self) -> bool {
+        matches!(self, Self::Ttml | Self::ImscTtml)
+    }
+}
+
+const READABLE_SOURCE_FORMATS: &str =
+    "TTML or IMSC (xml, ttml, imsc), SRT, SCC, ASS/SSA, FCPXML or MKS";
+
+pub fn readable_source_format(input: &std::path::Path) -> Result<SubtitleFormat, String> {
+    let format = input
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(SubtitleFormat::from_extension);
+    match format {
+        // no reader for either: the SRT parser would mistime a WebVTT file
+        Some(SubtitleFormat::Vtt | SubtitleFormat::Stl) | None => Err(format!(
+            "{} is not a subtitle format imfwizard reads: it takes {READABLE_SOURCE_FORMATS}",
+            input.display()
+        )),
+        Some(format) => Ok(format),
+    }
+}
+
+// TTML and IMSC are packaged as given, and every other format is converted to IMSC at `converted`
+pub fn timed_text_as_ttml(
+    input: &std::path::Path,
+    converted: &std::path::Path,
+    language: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    if readable_source_format(input)?.is_ttml() {
+        return Ok(input.to_path_buf());
+    }
+    convert_subtitles(
+        input,
+        converted,
+        SubtitleFormat::ImscTtml,
+        &TextAppearance::default(),
+        language,
+    )?;
+    Ok(converted.to_path_buf())
 }
 
 /// The `xml:id` of the style every `<p>` the writers emit points at, so a cue
@@ -121,18 +165,12 @@ pub fn convert_subtitles(
     output: &std::path::Path,
     target_format: SubtitleFormat,
     appearance: &TextAppearance,
+    language: Option<&str>,
 ) -> Result<(), String> {
     appearance.check()?;
-    let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let source_format = SubtitleFormat::from_extension(ext)
-        .ok_or_else(|| format!("Unknown subtitle format: {ext}"))?;
+    let source_format = readable_source_format(input)?;
 
-    if source_format == SubtitleFormat::Ttml
-        && matches!(
-            target_format,
-            SubtitleFormat::Ttml | SubtitleFormat::ImscTtml
-        )
-    {
+    if source_format.is_ttml() && target_format.is_ttml() {
         if appearance.style_attributes().is_some() {
             return Err(
                 "authored TTML is copied unchanged, so a default size or colour asked for here \
@@ -144,60 +182,76 @@ pub fn convert_subtitles(
         return Ok(());
     }
 
-    let target_styled = matches!(
-        target_format,
-        SubtitleFormat::Ttml | SubtitleFormat::ImscTtml
-    );
+    match parse_source_cues(input, source_format)? {
+        SourceCues::Styled(cues) => {
+            write_styled_or_flat(&cues, output, target_format, appearance, language)
+        }
+        SourceCues::Plain(cues) => write_ttml(&cues, output, target_format, appearance, language),
+    }
+}
 
-    // styled source formats
+enum SourceCues {
+    Styled(Vec<StyledCue>),
+    Plain(Vec<SrtCue>),
+}
+
+fn parse_source_cues(
+    input: &std::path::Path,
+    source_format: SubtitleFormat,
+) -> Result<SourceCues, String> {
+    let read = || std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"));
     match source_format {
         SubtitleFormat::Ass => {
-            let content =
-                std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"))?;
-            let parsed = postkit::subtitle_formats::ass::parse_ass(&content)
+            let parsed = postkit::subtitle_formats::ass::parse_ass(&read()?)
                 .map_err(|e| format!("ASS parse: {e}"))?;
             for w in &parsed.warnings {
                 eprintln!("warning: unsupported ASS override tag {w}");
             }
-            return write_styled_or_flat(&parsed.cues, output, target_styled, appearance);
+            Ok(SourceCues::Styled(parsed.cues))
         }
-        SubtitleFormat::Fcpxml => {
-            let content =
-                std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"))?;
-            let cues = postkit::subtitle_formats::fcpxml::parse_fcpxml(&content)
-                .map_err(|e| format!("FCPXML parse: {e}"))?;
-            return write_styled_or_flat(&cues, output, target_styled, appearance);
-        }
-        SubtitleFormat::Mks => {
-            let cues = postkit::subtitle_formats::mks::parse_mks(input, None)
-                .map_err(|e| format!("MKS parse: {e}"))?;
-            return write_styled_or_flat(&cues, output, target_styled, appearance);
-        }
-        _ => {}
+        SubtitleFormat::Fcpxml => postkit::subtitle_formats::fcpxml::parse_fcpxml(&read()?)
+            .map(SourceCues::Styled)
+            .map_err(|e| format!("FCPXML parse: {e}")),
+        SubtitleFormat::Mks => postkit::subtitle_formats::mks::parse_mks(input, None)
+            .map(SourceCues::Styled)
+            .map_err(|e| format!("MKS parse: {e}")),
+        SubtitleFormat::Scc => crate::scc::parse_scc(&read()?).map(SourceCues::Plain),
+        _ => Ok(SourceCues::Plain(parse_srt(&read()?))),
     }
+}
 
-    // plain source formats
-    let content =
-        std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"))?;
-    let cues = match source_format {
-        SubtitleFormat::Scc => crate::scc::parse_scc(&content)?,
-        _ => parse_srt(&content),
+pub fn read_subtitle_cues(input: &std::path::Path, fps: f64) -> Result<Vec<TimedTextCue>, String> {
+    let source_format = readable_source_format(input)?;
+    if source_format.is_ttml() {
+        return crate::source_edits::read_timed_text_cues(input, fps);
+    }
+    let cues = match parse_source_cues(input, source_format)? {
+        SourceCues::Styled(cues) => to_srt_cues(&cues),
+        SourceCues::Plain(cues) => cues,
     };
-
-    // Write output as TTML (IMF standard)
-    write_ttml(&cues, output, appearance)
+    Ok(cues
+        .iter()
+        .map(|cue| TimedTextCue::from_text(cue.start_ms, cue.end_ms, &cue.text))
+        .collect())
 }
 
 fn write_styled_or_flat(
     cues: &[StyledCue],
     output: &std::path::Path,
-    target_styled: bool,
+    target_format: SubtitleFormat,
     appearance: &TextAppearance,
+    language: Option<&str>,
 ) -> Result<(), String> {
-    if target_styled {
-        write_ttml_styled(cues, output, appearance)
+    if target_format.is_ttml() {
+        write_ttml_styled(cues, output, target_format, appearance, language)
     } else {
-        write_ttml(&to_srt_cues(cues), output, appearance)
+        write_ttml(
+            &to_srt_cues(cues),
+            output,
+            target_format,
+            appearance,
+            language,
+        )
     }
 }
 
@@ -222,10 +276,29 @@ fn paragraph_style(style: Option<&String>) -> String {
     }
 }
 
+const IMSC_TEXT_PROFILE: &str = "http://www.w3.org/ns/ttml/profile/imsc1/text";
+
+// the wrap reads the profile off the root element for the track's NamespaceURI
+fn profile_attribute(target_format: SubtitleFormat) -> String {
+    match target_format {
+        SubtitleFormat::ImscTtml => format!(r#" ttp:profile="{IMSC_TEXT_PROFILE}""#),
+        _ => String::new(),
+    }
+}
+
+fn language_attribute(language: Option<&str>) -> String {
+    match language {
+        Some(tag) => format!(r#" xml:lang="{}""#, escape_xml(tag)),
+        None => String::new(),
+    }
+}
+
 fn write_ttml(
     cues: &[SrtCue],
     output: &std::path::Path,
+    target_format: SubtitleFormat,
     appearance: &TextAppearance,
+    language: Option<&str>,
 ) -> Result<(), String> {
     use std::io::Write;
     let mut f =
@@ -236,12 +309,16 @@ fn write_ttml(
     match &style {
         Some(_) => writeln!(
             f,
-            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}>"#,
-            appearance.cell_resolution()
+            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}{}{}>"#,
+            profile_attribute(target_format),
+            appearance.cell_resolution(),
+            language_attribute(language)
         ),
         None => writeln!(
             f,
-            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter">"#
+            r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}{}>"#,
+            profile_attribute(target_format),
+            language_attribute(language)
         ),
     }
     .map_err(|e| e.to_string())?;
@@ -280,7 +357,9 @@ fn write_ttml(
 fn write_ttml_styled(
     cues: &[StyledCue],
     output: &std::path::Path,
+    target_format: SubtitleFormat,
     appearance: &TextAppearance,
+    language: Option<&str>,
 ) -> Result<(), String> {
     use std::io::Write;
 
@@ -306,8 +385,10 @@ fn write_ttml_styled(
     let style = appearance.style_attributes();
     writeln!(
         f,
-        r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}>"#,
-        appearance.cell_resolution()
+        r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"{}{}{}>"#,
+        profile_attribute(target_format),
+        appearance.cell_resolution(),
+        language_attribute(language)
     )
     .map_err(|e| e.to_string())?;
     writeln!(f, "  <head>").map_err(|e| e.to_string())?;
@@ -426,11 +507,22 @@ mod tests {
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
         assert!(ttml.contains(r#"<p begin="00:00:01.000" end="00:00:04.000">Hello world</p>"#));
         assert!(ttml.contains("Second cue"));
+        assert!(
+            root_element(&ttml).contains(&format!(r#"ttp:profile="{IMSC_TEXT_PROFILE}""#)),
+            "ttml: {ttml}"
+        );
+    }
+
+    fn root_element(ttml: &str) -> &str {
+        ttml.lines()
+            .find(|line| line.starts_with("<tt "))
+            .expect("a <tt> element")
     }
 
     #[test]
@@ -450,6 +542,7 @@ mod tests {
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
@@ -470,6 +563,7 @@ mod tests {
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
 
@@ -499,6 +593,7 @@ Dialogue: 0,0:00:04.00,0:00:05.00,Top,,0,0,0,,{\\an9}corner\n",
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
@@ -510,6 +605,10 @@ Dialogue: 0,0:00:04.00,0:00:05.00,Top,,0,0,0,,{\\an9}corner\n",
         assert!(ttml.contains(r#"tts:textAlign="end""#), "ttml: {ttml}");
         assert!(
             ttml.contains(r#"tts:displayAlign="before""#),
+            "ttml: {ttml}"
+        );
+        assert!(
+            root_element(&ttml).contains(&format!(r#"ttp:profile="{IMSC_TEXT_PROFILE}""#)),
             "ttml: {ttml}"
         );
     }
@@ -535,6 +634,7 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
             &output,
             SubtitleFormat::Srt,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
@@ -572,6 +672,7 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();
@@ -610,6 +711,7 @@ Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
             &output,
             SubtitleFormat::ImscTtml,
             &TextAppearance::default(),
+            None,
         )
         .unwrap();
         let ttml = std::fs::read_to_string(output).unwrap();

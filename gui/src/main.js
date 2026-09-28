@@ -313,7 +313,7 @@ function guessType(name) {
   const ext = name.split('.').pop().toLowerCase();
   if (['mp4','mkv','mov','avi','mxf','webm','j2c','tiff','tif','dpx','exr'].includes(ext)) return 'video';
   if (['wav','aiff','flac','mp3','pcm'].includes(ext)) return 'audio';
-  if (['xml','ttml','srt','vtt','imsc'].includes(ext)) return 'subtitle';
+  if (['xml','ttml','srt','imsc'].includes(ext)) return 'subtitle';
   return 'video';
 }
 
@@ -334,7 +334,7 @@ document.getElementById("import-audio")?.addEventListener("click", async () => {
 
 document.getElementById("import-subtitle")?.addEventListener("click", async () => {
   const path = await open({ directory: false, multiple: false,
-    filters: [{ name: 'Subtitle', extensions: ['xml','ttml','imsc','srt','vtt'] }, { name: 'All', extensions: ['*'] }]
+    filters: [{ name: 'Subtitle', extensions: ['xml','ttml','imsc','srt'] }, { name: 'All', extensions: ['*'] }]
   });
   if (path) importAssetFromPath(path, 'subtitle');
 });
@@ -359,17 +359,10 @@ function importAssetFromPath(path, type) {
     probeVideo(path).then(info => {
       if (!info) return;
       asset.meta = `${info.width}×${info.height} ${info.fps}`;
-      if (project.assets.filter(a => a.type === 'video').length === 1) {
-        const fpsMatch = info.fps?.match(/^(\d+)\/1$/);
-        if (fpsMatch) {
-          const fpsEl = document.getElementById("prop-framerate");
-          if (fpsEl) {
-            const fps = parseInt(fpsMatch[1]);
-            for (const opt of fpsEl.options) {
-              if (parseInt(opt.value) === fps) { fpsEl.value = opt.value; break; }
-            }
-          }
-        }
+      const fpsEl = document.getElementById("prop-framerate");
+      const probedRate = [...(fpsEl?.options ?? [])].find(opt => opt.value === info.fps);
+      if (project.assets.filter(a => a.type === 'video').length === 1 && probedRate) {
+        fpsEl.value = probedRate.value;
       }
       renderAssets();
     });

@@ -11,6 +11,7 @@ use postkit::hints::{
 };
 
 use crate::preflight::CreatePlan;
+use crate::source_edits::TimedTextCue;
 
 /// What the hints are decided from. Kept apart from the probing so the rules can
 /// be driven directly.
@@ -59,39 +60,18 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
 
     let mut subtitles = Vec::new();
     for path in &plan.timed_text_files {
-        if let Ok(cues) = crate::source_edits::read_timed_text_cues(path, fps) {
-            subtitles.push(SubtitleCues {
-                file: short_name(path),
-                cues: cues
-                    .into_iter()
-                    .map(|cue| HintCue {
-                        start_ms: cue.start_ms,
-                        end_ms: cue.end_ms,
-                        lines: cue.lines,
-                    })
-                    .collect(),
-            });
+        if let Ok(cues) = crate::subtitle_convert::read_subtitle_cues(path, fps) {
+            subtitles.push(subtitle_cues(path, cues));
         }
     }
     if let Some(burn) = &plan.burn_subtitle
         && let Ok(cues) = crate::subtitle_burn::load_styled_cues(burn)
     {
-        subtitles.push(SubtitleCues {
-            file: short_name(burn),
-            cues: cues
-                .into_iter()
-                .map(|cue| HintCue {
-                    start_ms: cue.start_ms,
-                    end_ms: cue.end_ms,
-                    lines: cue
-                        .plain_text()
-                        .lines()
-                        .map(|line| line.trim().to_string())
-                        .filter(|line| !line.is_empty())
-                        .collect(),
-                })
-                .collect(),
-        });
+        let cues = cues
+            .iter()
+            .map(|cue| TimedTextCue::from_text(cue.start_ms, cue.end_ms, &cue.plain_text()))
+            .collect();
+        subtitles.push(subtitle_cues(burn, cues));
     }
 
     HintFacts {
@@ -100,6 +80,20 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
         audio_language: plan.audio_language.clone(),
         subtitles,
         fps,
+    }
+}
+
+fn subtitle_cues(path: &Path, cues: Vec<TimedTextCue>) -> SubtitleCues {
+    SubtitleCues {
+        file: short_name(path),
+        cues: cues
+            .into_iter()
+            .map(|cue| HintCue {
+                start_ms: cue.start_ms,
+                end_ms: cue.end_ms,
+                lines: cue.lines,
+            })
+            .collect(),
     }
 }
 

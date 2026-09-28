@@ -24,6 +24,7 @@ pub const TRIMMED_AUDIO_PREFIX: &str = "trimmed_audio_";
 pub const FITTED_AUDIO_PREFIX: &str = "fitted_audio_";
 pub const WIDENED_AUDIO_PREFIX: &str = "widened_audio_";
 pub const TRIMMED_SUBTITLE_PREFIX: &str = "trimmed_subtitle_";
+pub const CONVERTED_SUBTITLE_PREFIX: &str = "converted_subtitle_";
 
 /// The only sample depth App 2E sound may carry. 8 and 16-bit PCM widen to it
 /// losslessly; 32-bit and float would have to drop bits to reach it.
@@ -364,6 +365,7 @@ pub struct CompositionSource {
     pub j2k_dir: Option<PathBuf>,
     pub audio_files: Vec<PathBuf>,
     pub timed_text_files: Vec<PathBuf>,
+    pub timed_text_language: Option<String>,
 }
 
 /// Apply the edits, writing intermediates under `work_dir`, and return the
@@ -382,6 +384,23 @@ pub fn apply_source_edits(
     fps_den: u32,
     encode_window: Option<FrameRange>,
 ) -> Result<CompositionSource, String> {
+    // the trim retimes TTML, so every other format is converted first
+    let timed_text_files = source
+        .timed_text_files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            crate::subtitle_convert::timed_text_as_ttml(
+                path,
+                &work_dir.join(format!("{CONVERTED_SUBTITLE_PREFIX}{index}.ttml")),
+                source.timed_text_language.as_deref(),
+            )
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let source = &CompositionSource {
+        timed_text_files,
+        ..source.clone()
+    };
     if *edits == SourceEdits::default() {
         return Ok(source.clone());
     }
@@ -662,12 +681,22 @@ fn retimed_timed_text(
     Ok(writer.into_inner())
 }
 
-/// One `<p>` cue of a timed-text file, as the hints read it.
+/// One cue of a subtitle file, as the hints read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimedTextCue {
     pub start_ms: u64,
     pub end_ms: u64,
     pub lines: Vec<String>,
+}
+
+impl TimedTextCue {
+    pub fn from_text(start_ms: u64, end_ms: u64, text: &str) -> Self {
+        finished_cue(Self {
+            start_ms,
+            end_ms,
+            lines: text.lines().map(str::to_string).collect(),
+        })
+    }
 }
 
 /// Read the `<p>` cues of a timed-text file, through the same time parser the
@@ -1396,6 +1425,7 @@ mod tests {
             j2k_dir: Some(picture),
             audio_files: vec![audio],
             timed_text_files: vec![],
+            timed_text_language: None,
         };
         let edited = apply_source_edits(&edits, &source, &work, 24, 1, None).unwrap();
 
@@ -1606,6 +1636,7 @@ mod tests {
             j2k_dir: Some(PathBuf::from("/pictures")),
             audio_files: vec![PathBuf::from("/sound.wav")],
             timed_text_files: vec![PathBuf::from("/subs.xml")],
+            timed_text_language: None,
         };
         let edited = apply_source_edits(
             &SourceEdits::default(),

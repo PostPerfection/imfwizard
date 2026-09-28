@@ -687,9 +687,15 @@ enum Commands {
         #[command(flatten)]
         soundfield: Box<SoundfieldArguments>,
 
-        /// TTML/IMSC subtitle file to package (repeatable)
+        /// Subtitle file to package (repeatable): TTML/IMSC is wrapped as given,
+        /// SRT, SCC, ASS/SSA, FCPXML and MKS are converted to IMSC first
         #[arg(long = "subtitle")]
         subtitles: Vec<String>,
+
+        /// RFC 5646 language tag written into the IMSC a --subtitle is converted
+        /// to (default: --audio-lang)
+        #[arg(long = "subtitle-lang")]
+        subtitle_lang: Option<String>,
 
         #[command(flatten)]
         burn: Box<BurnArguments>,
@@ -701,13 +707,13 @@ enum Commands {
         #[command(flatten)]
         compression: Box<CompressionArguments>,
 
-        /// Frame rate numerator
-        #[arg(long, default_value = "24")]
-        fps_num: u32,
+        /// Edit rate numerator (default: a video file's own rate, else 24)
+        #[arg(long)]
+        fps_num: Option<u32>,
 
-        /// Frame rate denominator
-        #[arg(long, default_value = "1")]
-        fps_den: u32,
+        /// Edit rate denominator (default: a video file's own rate, else 1)
+        #[arg(long)]
+        fps_den: Option<u32>,
 
         /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020,
         /// pq-p3d65 or hlg-bt2020. Writes the transfer/colour ULs into the MXF
@@ -1350,7 +1356,7 @@ enum Commands {
     },
 
     /// Check accessibility compliance or mix audio description with ducking
-    #[command(name = "audio-desc")]
+    #[command(name = "audio-desc", allow_negative_numbers = true)]
     AudioDesc {
         /// Package directory (for compliance check) or main audio file (for mix)
         #[arg(short, long)]
@@ -1832,6 +1838,7 @@ fn run() {
             audio_role,
             soundfield,
             subtitles,
+            subtitle_lang,
             burn: burn_arguments,
             kind,
             compression,
@@ -1939,11 +1946,23 @@ fn run() {
 
             let picture_options = picture_arguments.resolve();
 
-            if fps_num == 0 || fps_den == 0 {
-                fail(format!(
-                    "--fps-num {fps_num} --fps-den {fps_den}: an edit rate needs both above 0"
-                ));
-            }
+            let requested_rate = (fps_num.is_some() || fps_den.is_some()).then(|| {
+                let default = imfwizard_core::preflight::DEFAULT_EDIT_RATE;
+                let fps_num = fps_num.unwrap_or(default.numerator);
+                let fps_den = fps_den.unwrap_or(default.denominator);
+                if fps_num == 0 || fps_den == 0 {
+                    fail(format!(
+                        "--fps-num {fps_num} --fps-den {fps_den}: an edit rate needs both above 0"
+                    ));
+                }
+                imfwizard_core::encode::FrameRate::new(fps_num, fps_den)
+            });
+            let edit_rate = imfwizard_core::preflight::resolve_edit_rate(
+                video.as_deref().map(std::path::Path::new),
+                requested_rate,
+            )
+            .unwrap_or_else(|e| fail(e));
+            let (fps_num, fps_den) = (edit_rate.numerator, edit_rate.denominator);
 
             // durations are in edit-rate frames, so they parse against the
             // declared frame rate and fail before the encode
@@ -1998,6 +2017,7 @@ fn run() {
                 audio_files: audio.iter().map(PathBuf::from).collect(),
                 audio_language: audio_lang.clone(),
                 timed_text_files: timed_text_files.clone(),
+                timed_text_language: subtitle_lang.clone(),
                 fps_num,
                 fps_den,
                 edits,
@@ -2081,7 +2101,7 @@ fn run() {
                 )
                 .unwrap_or_else(|e| fail(e));
                 tracing::info!("Picture: {}", picture.plan.describe());
-                let fps = imfwizard_core::encode::FrameRate::new(fps_num, fps_den);
+                let fps = edit_rate;
                 // a hold encodes at the default ratio whatever --bitrate says,
                 // so the sub level is the one that ratio reaches
                 let still_bitrate_mbps = imfwizard_core::encode::bitrate_mbps_for_job(
@@ -2144,13 +2164,9 @@ fn run() {
                     | postkit::encode::InputType::ImageSequence => {
                         let is_image_sequence =
                             input_type == postkit::encode::InputType::ImageSequence;
-                        // an image sequence's frames carry no rate of their own,
-                        // so the requested one is the rate it is encoded at
-                        let probed = match is_image_sequence {
-                            true => None,
-                            false => imfwizard_core::probe::probe_video(&video_path),
-                        };
-                        if let Some(ref info) = probed {
+                        if !is_image_sequence
+                            && let Some(info) = imfwizard_core::probe::probe_video(&video_path)
+                        {
                             tracing::info!(
                                 "Input: {}x{} @ {}/{} fps",
                                 info.width,
@@ -2159,22 +2175,13 @@ fn run() {
                                 info.fps_den
                             );
                         }
-                        // ffprobe answers 0/0 for a stream whose rate it cannot
-                        // read, and the declared rate is the better guess
-                        let (rate_num, rate_den) = match &probed {
-                            Some(info) if info.fps_num > 0 && info.fps_den > 0 => {
-                                (info.fps_num, info.fps_den)
-                            }
-                            _ => (fps_num, fps_den),
-                        };
-                        let encode_fps = imfwizard_core::encode::FrameRate::new(rate_num, rate_den);
                         tracing::info!(
-                            "Detected {}, encoding to J2K at {:.2} fps ({rate_num}/{rate_den})",
+                            "Detected {}, encoding to J2K at {:.2} fps ({fps_num}/{fps_den})",
                             match is_image_sequence {
                                 true => "image sequence",
                                 false => "video file",
                             },
-                            encode_fps.as_f64()
+                            edit_rate.as_f64()
                         );
 
                         let (source_width, source_height) =
@@ -2205,7 +2212,7 @@ fn run() {
                             imfwizard_core::encode::target_codestream_bytes_for_job(
                                 bitrate,
                                 preset_bitrate_mbps,
-                                encode_fps.as_f64(),
+                                edit_rate.as_f64(),
                             );
                         // the codestreams declare an IMF profile, not the cinema
                         // one a DCP carries: the levels come from this raster,
@@ -2213,13 +2220,13 @@ fn run() {
                         let rsiz = imfwizard_core::encode::imf_rsiz_for_encode(
                             picture.encode_width,
                             picture.encode_height,
-                            encode_fps.as_f64(),
+                            edit_rate.as_f64(),
                             imfwizard_core::encode::bitrate_mbps_for_job(
                                 bitrate,
                                 preset_bitrate_mbps,
                                 picture.encode_width,
                                 picture.encode_height,
-                                encode_fps.as_f64(),
+                                edit_rate.as_f64(),
                             ),
                         )
                         .unwrap_or_else(|e| fail(e));
@@ -2230,7 +2237,7 @@ fn run() {
                             .and(bitrate.or(preset_bitrate_mbps))
                             .map(|mbps| {
                                 imfwizard_core::encode::codestream_byte_cap_for_bitrate(
-                                    encode_fps.as_f64(),
+                                    edit_rate.as_f64(),
                                     mbps,
                                 )
                             });
@@ -2279,8 +2286,8 @@ fn run() {
                             &edits,
                             &video_path,
                             input_type,
-                            rate_num,
-                            rate_den,
+                            fps_num,
+                            fps_den,
                         )
                         .unwrap_or_else(|e| fail(e));
                         if let Some(window) = encode_window {
@@ -2300,11 +2307,11 @@ fn run() {
                                 target_codestream_bytes,
                                 quality_psnr,
                                 codestream_byte_cap,
-                                fps: encode_fps,
+                                fps: edit_rate,
                                 frame_range: encode_window,
                                 source_colour: source_colour.clone(),
                                 rsiz,
-                                subtitle_burn: build_subtitle_burn(encode_fps),
+                                subtitle_burn: build_subtitle_burn(edit_rate),
                                 picture: picture.processing.clone(),
                                 ..Default::default()
                             },
@@ -2313,7 +2320,7 @@ fn run() {
                         let (j2k_out, picture_mxf) = match encoded {
                             Ok((r, track)) => {
                                 tracing::info!("Encoded {} frames", r.frames_encoded);
-                                for finding in r.picture_findings.describe(encode_fps.as_f64()) {
+                                for finding in r.picture_findings.describe(edit_rate.as_f64()) {
                                     tracing::warn!("{finding}");
                                 }
                                 if let Some(track) = &track {
@@ -2404,6 +2411,7 @@ fn run() {
                     j2k_dir,
                     audio_files,
                     timed_text_files,
+                    timed_text_language: subtitle_lang.or_else(|| audio_lang.clone()),
                 },
                 &output,
                 fps_num,
@@ -2492,6 +2500,7 @@ fn run() {
                 &output,
                 bitrate,
                 imfwizard_core::encode::FrameRate::default(),
+                &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             );
             match result {
                 Ok(result) => println!(
@@ -2544,6 +2553,7 @@ fn run() {
                 &output,
                 imfwizard_core::subtitle_convert::SubtitleFormat::ImscTtml,
                 &appearance,
+                None,
             ) {
                 Ok(()) => println!("Converted to {}", output.display()),
                 Err(e) => {
@@ -2906,8 +2916,15 @@ fn run() {
                     std::path::Path::new(&dir),
                     sd,
                 ) {
-                    Ok(results) => {
-                        for r in &results {
+                    Ok(report) => {
+                        for skipped in &report.skipped {
+                            println!(
+                                "  XSD {}: SKIPPED, no {} in the schema dir",
+                                skipped.file,
+                                skipped.schema_names.join(" or ")
+                            );
+                        }
+                        for r in &report.checked {
                             if r.valid {
                                 println!("  XSD {}: PASS", r.file);
                             } else {
@@ -3216,10 +3233,13 @@ fn run() {
         }
 
         Commands::Serve { bind, api_key } => {
-            let parts: Vec<&str> = bind.split(':').collect();
+            let (host, port) = parse_bind_address(&bind).unwrap_or_else(|e| {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            });
             let config = imfwizard_core::rest_api::ApiConfig {
-                host: parts.first().unwrap_or(&"127.0.0.1").to_string(),
-                port: parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8081),
+                host,
+                port,
                 api_key,
             };
             if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
@@ -4550,19 +4570,31 @@ fn prores_container_help() -> String {
     )
 }
 
+// name on the command line, then the prores_ks profile number
+const PRORES_PROFILES: [(&str, &str); 6] = [
+    ("proxy", "0"),
+    ("lt", "1"),
+    ("standard", "2"),
+    ("hq", "3"),
+    ("4444", "4"),
+    ("4444xq", "5"),
+];
+
 fn encode_prores_file(input: &str, output: &str, profile: &str, container: Option<&str>) {
     if container.is_some() {
         eprintln!("Error: --container fits an IMP's picture, and {input} is not an IMP directory");
         std::process::exit(1);
     }
-    let prores_profile = match profile.to_lowercase().as_str() {
-        "proxy" => "0",
-        "lt" => "1",
-        "standard" => "2",
-        "hq" => "3",
-        "4444" => "4",
-        "4444xq" => "5",
-        _ => "3",
+    let Some((_, prores_profile)) = PRORES_PROFILES
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(profile))
+    else {
+        let names: Vec<&str> = PRORES_PROFILES.iter().map(|(name, _)| *name).collect();
+        eprintln!(
+            "Error: unknown ProRes profile '{profile}', use one of {}",
+            names.join(", ")
+        );
+        std::process::exit(1);
     };
     let status = std::process::Command::new("ffmpeg")
         .arg("-y")
@@ -4591,4 +4623,45 @@ fn encode_prores_file(input: &str, output: &str, profile: &str, container: Optio
 
 fn parse_colour_space(s: &str) -> postkit::colour::ColourSpace {
     postkit::colour::parse_colour_space(s).unwrap_or(postkit::colour::ColourSpace::Rec709)
+}
+
+fn parse_bind_address(bind: &str) -> Result<(String, u16), String> {
+    let refusal = || format!("--bind takes host:port, and '{bind}' is not one");
+    let (host, port) = bind.rsplit_once(':').ok_or_else(refusal)?;
+    if host.is_empty() {
+        return Err(refusal());
+    }
+    let port = port.parse().map_err(|_| refusal())?;
+    Ok((host.to_string(), port))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bind_address_splits_into_host_and_port() {
+        assert_eq!(
+            parse_bind_address("0.0.0.0:9090"),
+            Ok(("0.0.0.0".to_string(), 9090))
+        );
+        assert_eq!(
+            parse_bind_address("[::1]:9090"),
+            Ok(("[::1]".to_string(), 9090))
+        );
+    }
+
+    #[test]
+    fn a_bind_address_without_a_valid_port_is_refused() {
+        for bind in [
+            "0.0.0.0:90x0",
+            "0.0.0.0",
+            "0.0.0.0:",
+            ":9090",
+            "0.0.0.0:70000",
+        ] {
+            let error = parse_bind_address(bind).unwrap_err();
+            assert!(error.contains(bind), "{error}");
+        }
+    }
 }

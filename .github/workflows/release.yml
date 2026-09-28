@@ -145,11 +145,11 @@ jobs:
             echo "::error::no libgrokj2k under grok-install/lib64 or grok-install/lib"
             exit 1
           fi
-          cp -a "$grok_lib"/libgrokj2k* dist/lib/
           if [ "$RUNNER_OS" = Linux ]; then
+            cp -a "$grok_lib"/libgrokj2k* dist/lib/
             patchelf --set-rpath '$ORIGIN/lib' "dist/${{ matrix.binary }}"
           else
-            install_name_tool -add_rpath @loader_path/lib "dist/${{ matrix.binary }}"
+            scripts/bundle-macos-cli-libraries.sh "dist/${{ matrix.binary }}" dist/lib "$grok_lib"
           fi
           tar -czf ${{ matrix.artifact }}.tar.gz -C dist .
 
@@ -158,7 +158,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "rust/target/release/${{ matrix.binary }}" "dist/"
-          Copy-Item "$env:GITHUB_WORKSPACE/grok-install/bin/grokj2k.dll" "dist/"
+          ./scripts/bundle-windows-cli-dlls.ps1 -Binary "dist/${{ matrix.binary }}" `
+            -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
           Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Test packaged CLI (Unix)
@@ -167,6 +168,19 @@ jobs:
         run: |
           mkdir cli-test
           tar -xzf ${{ matrix.artifact }}.tar.gz -C cli-test
+          if [ "$RUNNER_OS" = macOS ]
+          then
+            for file in "cli-test/${{ matrix.binary }}" cli-test/lib/*.dylib
+            do
+              otool -L "$file"
+              # a Mac without Homebrew has only /usr/lib and /System
+              if otool -L "$file" | awk 'NR > 1 {print $1}' | grep -vE '^(/usr/lib/|/System/|@rpath/|@loader_path/)'
+              then
+                echo "$file loads a library from outside the archive"
+                exit 1
+              fi
+            done
+          fi
           # the archive has to find libgrokj2k on its own rpath
           run="env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH cli-test/${{ matrix.binary }}"
           $run --version | grep -F "${{ needs.version.outputs.project_version }}"
@@ -176,6 +190,12 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           Expand-Archive "${{ matrix.artifact }}.zip" -DestinationPath cli-test
+          # the runner's System32 has the VC++ runtime, which hides a missing copy from the run below
+          foreach ($runtime in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
+            if (-not (Test-Path (Join-Path cli-test $runtime))) { throw "the archive does not carry $runtime" }
+          }
+          # setup-grok puts grok-install/bin on PATH, which a user's machine does not have
+          $env:PATH = @("$env:SystemRoot\System32", (Resolve-Path cli-test).Path) -join [IO.Path]::PathSeparator
           $version = "${{ needs.version.outputs.project_version }}"
           $output = & "cli-test/${{ matrix.binary }}" --version
           if ($LASTEXITCODE -ne 0 -or $output -notmatch [regex]::Escape($version)) {
@@ -208,7 +228,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev
+          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev patchelf
           cargo install cargo-deb
 
       - name: Setup grok
@@ -216,19 +236,54 @@ jobs:
         with:
           grok-ref: v20.4.12
 
-      - name: Build .deb package
+      - name: Build release
         working-directory: rust
         env:
           OPENSSL_STATIC: "1"
-        run: cargo deb -p imfwizard-cli
+        run: cargo build --release -p imfwizard-cli
 
+      # the deb carries libgrokj2k at /usr/lib/imfwizard, like the desktop deb and rpm
+      - name: Bundle libgrokj2k
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$GITHUB_WORKSPACE/grok-install/lib64" "$GITHUB_WORKSPACE/grok-install/lib"
+          do
+            if [ -f "$candidate/libgrokj2k.so.1" ]
+            then
+              GROK_LIB="$candidate"
+              break
+            fi
+          done
+          if [ -z "${GROK_LIB:-}" ]
+          then
+            echo "no libgrokj2k.so.1 under grok-install/lib64 or grok-install/lib"
+            exit 1
+          fi
+          cp -L "$GROK_LIB/libgrokj2k.so.1" rust/target/release/libgrokj2k.so.1
+          # strip run after patchelf can corrupt the binary, so cargo deb gets --no-strip
+          strip rust/target/release/imfwizard
+          patchelf --set-rpath /usr/lib/imfwizard rust/target/release/imfwizard
+
+      - name: Build .deb package
+        working-directory: rust
+        run: cargo deb -p imfwizard-cli --no-build --no-strip
+
+      # setup-grok's LD_LIBRARY_PATH would find a libgrokj2k the package does not carry
       - name: Test installed CLI
         shell: bash
         run: |
+          set -euo pipefail
           package=$(realpath "$(find rust/target/debian -name '*.deb' -print -quit)")
+          dpkg-deb -f "$package" Depends
           sudo apt-get install -y "$package"
-          imfwizard --version | grep -F "${{ needs.version.outputs.project_version }}"
-          imfwizard --help >/dev/null
+          env -u LD_LIBRARY_PATH imfwizard --version | grep -F "${{ needs.version.outputs.project_version }}"
+          env -u LD_LIBRARY_PATH imfwizard --help >/dev/null
+          env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard
+          env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard | grep -F "libgrokj2k.so.1 => /usr/lib/imfwizard/libgrokj2k.so.1"
+          # the runner already has every library the package depends on, a clean image does not
+          docker run --rm -v "$package:/tmp/imfwizard.deb:ro" ubuntu:24.04 bash -euo pipefail -c \
+            'apt-get update && apt-get install -y --no-install-recommends /tmp/imfwizard.deb && imfwizard --version'
 
       - name: Upload .deb package
         uses: actions/upload-artifact@v4
@@ -350,9 +405,12 @@ jobs:
           cargo build --release -p imfwizard-cli
           Copy-Item "target/release/imfwizard.exe" "../gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe"
 
-      - name: Stage grok DLL (Windows)
+      # tauri.windows.conf.json ships every dll staged here beside the installed exes
+      - name: Stage grok and VC++ runtime DLLs (Windows)
         if: runner.os == 'Windows'
-        run: Copy-Item "$env:GITHUB_WORKSPACE/grok-install/bin/grokj2k.dll" "gui/src-tauri/"
+        run: |
+          ./scripts/bundle-windows-cli-dlls.ps1 -Binary "gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe" `
+            -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
 
       # the deb and rpm ship it through bundle.linux.*.files, the .app through bundle.macOS.frameworks
       - name: Stage grok library (Unix)
@@ -533,6 +591,14 @@ jobs:
           if ($null -eq $entry) { throw "Installed application was not registered" }
 
           $installDirectory = $entry.InstallLocation.Trim('"')
+          foreach ($dll in Get-ChildItem gui/src-tauri/*.dll) {
+            if (-not (Test-Path (Join-Path $installDirectory $dll.Name))) { throw "the installer does not carry $($dll.Name)" }
+          }
+          $runnerPath = $env:PATH
+          $env:PATH = @("$env:SystemRoot\System32", $installDirectory) -join [IO.Path]::PathSeparator
+          & (Join-Path $installDirectory "imfwizard.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed sidecar exited with $LASTEXITCODE" }
+          $env:PATH = $runnerPath
           $application = Get-ChildItem "$installDirectory/*.exe" |
             Where-Object { $_.Name -notmatch "uninstall" } |
             Select-Object -First 1

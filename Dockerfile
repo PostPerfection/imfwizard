@@ -1,10 +1,10 @@
 # Headless imfwizard. Build: docker build -t imfwizard .
 # Create:   docker run -v /path/to/media:/data imfwizard create --title "My Film" --video /data/master.mov --audio /data/audio.wav --output /data/out
-# REST API: docker run -p 8081:8081 -v /path/to/media:/data imfwizard serve --bind 0.0.0.0:8081
+# REST API: docker run -p 8081:8081 -v /path/to/media:/data imfwizard serve --bind 0.0.0.0:8081 --api-key <key>
 # Watch:    docker run -v /path/to/incoming:/in -v /path/to/out:/out imfwizard watch /in --output /out
 # Photon validation needs a JRE and the photon jars mounted, set PHOTON_JAR to their path.
 
-ARG GROK_REF=v20.4.11
+ARG GROK_REF=v20.4.12
 ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
 
 FROM ubuntu:24.04 AS grok

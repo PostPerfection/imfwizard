@@ -47,3 +47,41 @@ fn audio_desc_writes_the_mix_it_was_asked_for() {
         hound::WavReader::open(&main).unwrap().duration()
     );
 }
+
+fn samples(path: &Path) -> Vec<i32> {
+    hound::WavReader::open(path)
+        .unwrap()
+        .samples::<i32>()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[test]
+fn a_negative_duck_level_parses_and_reaches_the_mix() {
+    let directory = tempfile::TempDir::new().unwrap();
+    let main = tone(directory.path(), "main.wav", 200);
+    let narration = tone(directory.path(), "narration.wav", 1000);
+    let default_duck = directory.path().join("default_duck.wav");
+    let light_duck = directory.path().join("light_duck.wav");
+
+    for (output, duck_level) in [(&default_duck, None), (&light_duck, Some("-6"))] {
+        let mut run = Command::cargo_bin("imfwizard").unwrap();
+        run.arg("audio-desc")
+            .arg("-i")
+            .arg(&main)
+            .arg("--narration")
+            .arg(&narration)
+            .arg("-o")
+            .arg(output);
+        if let Some(duck_level) = duck_level {
+            run.args(["--duck-level", duck_level]);
+        }
+        run.assert().success();
+    }
+
+    assert_ne!(
+        samples(&default_duck),
+        samples(&light_duck),
+        "--duck-level -6 mixed the same as the -12 default"
+    );
+}

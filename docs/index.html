@@ -435,12 +435,12 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">⚡</div>
             <h3>Delivery presets</h3>
-            <p>One choice sets the right bitrate and constraints for Netflix, Disney+, HBO Max, cinema, broadcast, and archival, so you're not cross-checking spec sheets by hand. Or name a bitrate directly.</p>
+            <p>One choice sets the J2K bitrate cap for Netflix, HBO Max, cinema and broadcast. Check the finished package against a platform's raster, colour and audio rules with compliance. Or name a bitrate directly.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
             <h3>JPEG 2000 on every core</h3>
-            <p>Encode App 2E picture through Grok on all available CPU cores. The job log is written beside the package. Grok's GPU accelerator plugin is a separate commercial product and is not in the released builds.</p>
+            <p>Encode App 2E picture through Grok on all available CPU cores. The desktop app writes imfwizard.log into the package folder. Grok's GPU accelerator plugin is a separate commercial product and is not in the released builds.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
@@ -474,7 +474,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">📝</div>
             <h3>TTML and IMSC subtitles</h3>
-            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS, FCPXML, and MKS keep their styling and placement. Burn the same cues into the picture as it encodes when you need a burnt master.</p>
+            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS and MKS keep their styling and placement, FCPXML keeps italic, bold, underline and colour. Burn the same cues into the picture as it encodes when you need a burnt master.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,164,175,0.15);">🗣️</div>
@@ -517,7 +517,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,186,116,0.15);">🎵</div>
             <h3>Dolby Atmos ADM import</h3>
-            <p>Import a Dolby Atmos ADM Broadcast Wave master and wrap the audio for immersive-audio deliveries.</p>
+            <p>Import a Dolby Atmos ADM Broadcast Wave master: its channels are wrapped as multichannel AS-02 PCM and the ADM XML is written beside it. No IAB track is produced.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">📊</div>
@@ -604,7 +604,7 @@
 <span class="cmd">$</span> imfwizard watch <span class="val">/incoming/</span> <span class="flag">--output</span> <span class="val">./packages/</span> <span class="flag">--webhook-url</span> <span class="val">https://pipeline/hook</span><br>
 <br>
 <span class="comment"># Serve the REST API for a render farm or pipeline</span><br>
-<span class="cmd">$</span> imfwizard serve <span class="flag">--bind</span> <span class="val">0.0.0.0:9090</span>
+<span class="cmd">$</span> imfwizard serve <span class="flag">--bind</span> <span class="val">0.0.0.0:9090</span> <span class="flag">--api-key</span> <span class="val">&lt;key&gt;</span>
         </code>
     </div>
 </section>
@@ -627,7 +627,8 @@
         <div class="install-step">
             <div class="step-num">3</div>
             <h4>Run the desktop app</h4>
-            <p><code>cd gui && pnpm install && pnpm tauri dev</code></p>
+            <p><code>cd ../gui && pnpm install && ../scripts/setup-tauri-bin.sh && pnpm tauri dev</code></p>
+            <p>The script copies the CLI from step 2 into gui/src-tauri and needs patchelf on Linux.</p>
         </div>
         <div class="install-step">
             <div class="step-num">4</div>

@@ -526,7 +526,7 @@ fn a_dolby_vision_rpu_fills_the_light_levels_no_flag_passed() {
 }
 
 /// The flags are the operator's own measurement, so a passed value stands
-/// instead of the RPU's.
+/// instead of the RPU's and the RPU fills the one left out.
 #[test]
 fn a_passed_light_level_beats_the_rpu() {
     let dir = TempDir::new().unwrap();
@@ -562,9 +562,10 @@ fn a_passed_light_level_beats_the_rpu() {
         extension_property(&cpl, "MaxCLL").as_deref(),
         Some(measured.to_string().as_str())
     );
-    assert!(
-        extension_property(&cpl, "MaxFALL").is_none(),
-        "MaxFALL was neither passed nor taken from the RPU: {cpl}"
+    assert_eq!(
+        extension_property(&cpl, "MaxFALL").as_deref(),
+        Some(RPU_MAX_FRAME_AVERAGE_LIGHT_LEVEL.to_string().as_str()),
+        "MaxFALL was not passed, so it comes from the RPU: {cpl}"
     );
 }
 
