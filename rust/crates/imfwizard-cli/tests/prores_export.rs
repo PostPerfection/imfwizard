@@ -246,9 +246,10 @@ fn a_file_input_still_encodes_at_the_default_profile() {
 }
 
 #[test]
-fn a_frame_directory_encodes_every_frame_at_the_default_rate() {
+fn a_frame_directory_needs_a_rate_and_encodes_every_frame_at_the_one_named() {
     const SEQUENCE_FRAMES: u32 = 3;
-    const DEFAULT_RATE: &str = "24/1";
+    const NAMED_FPS: &str = "25";
+    const NAMED_RATE: &str = "25/1";
     let dir = TempDir::new().unwrap();
     let frames = dir.path().join("frames");
     std::fs::create_dir(&frames).unwrap();
@@ -270,14 +271,48 @@ fn a_frame_directory_encodes_every_frame_at_the_default_rate() {
         .args(["prores", "-i", &frames.to_string_lossy()])
         .args(["-o", &movie.to_string_lossy()])
         .assert()
+        .failure()
+        .stderr(predicate::str::contains(frames.to_string_lossy()))
+        .stderr(predicate::str::contains("--fps-num and --fps-den"));
+    assert!(
+        !movie.exists(),
+        "a rateless frame directory still wrote {movie:?}"
+    );
+
+    cmd()
+        .args(["prores", "-i", &frames.to_string_lossy()])
+        .args(["-o", &movie.to_string_lossy()])
+        .args(["--fps-num", NAMED_FPS, "--fps-den", "1"])
+        .assert()
         .success()
         .stdout(predicate::str::contains("ProRes encoded"));
 
     assert_eq!(probe(&movie, "v:0", "codec_name"), "prores");
     assert_eq!(probe(&movie, "v:0", "profile"), "HQ");
     assert_eq!(probe(&movie, "v:0", "width"), "64");
-    assert_eq!(probe(&movie, "v:0", "r_frame_rate"), DEFAULT_RATE);
+    assert_eq!(probe(&movie, "v:0", "r_frame_rate"), NAMED_RATE);
     assert_eq!(counted_frames(&movie), SEQUENCE_FRAMES);
+}
+
+#[test]
+fn a_frame_rate_for_a_file_or_an_imp_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let clip = testsrc_clip(dir.path());
+    let empty = dir.path().join("empty_imp");
+    std::fs::create_dir(&empty).unwrap();
+    let movie = dir.path().join("file.mov");
+
+    for input in [&clip, &empty] {
+        cmd()
+            .args(["prores", "-i", &input.to_string_lossy()])
+            .args(["-o", &movie.to_string_lossy()])
+            .args(["--fps-num", "25", "--fps-den", "1"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("no input is one"))
+            .stderr(predicate::str::contains(input.to_string_lossy()));
+    }
+    assert!(!movie.exists(), "a refused rate still wrote {movie:?}");
 }
 
 fn only_cpl(imp: &Path) -> PathBuf {
@@ -361,6 +396,86 @@ fn every_segment_of_a_composition_reaches_the_export() {
         counted_frames(&movie),
         FIRST_SEGMENT_FRAMES + SECOND_SEGMENT_FRAMES,
         "the export must hold both segments and nothing else"
+    );
+}
+
+// the created CPL names no EntryPoint, so every resource plays the whole track file
+fn trim_resources(imp: &Path, picture: (u32, u32), sound: (u32, u32)) {
+    let cpl = only_cpl(imp);
+    let xml = std::fs::read_to_string(&cpl).expect("the CPL");
+    let whole_duration = format!("<SourceDuration>{FRAMES}</SourceDuration>");
+    let sound_start = xml.find("MainAudioSequence").expect("a sound sequence");
+    let (picture_part, sound_part) = xml.split_at(sound_start);
+    assert!(picture_part.contains(&whole_duration), "{xml}");
+    assert!(sound_part.contains(&whole_duration), "{xml}");
+    let span = |(entry_point, source_duration): (u32, u32)| {
+        format!(
+            "<EntryPoint>{entry_point}</EntryPoint><SourceDuration>{source_duration}</SourceDuration>"
+        )
+    };
+    let trimmed = format!(
+        "{}{}",
+        picture_part.replace(&whole_duration, &span(picture)),
+        sound_part.replace(&whole_duration, &span(sound))
+    );
+    std::fs::write(&cpl, trimmed).expect("the trimmed CPL");
+}
+
+// the IMP holds files only, and its ASSETMAP names them relative to itself
+fn copy_imp(imp: &Path, copy: &Path) {
+    std::fs::create_dir(copy).unwrap();
+    for entry in std::fs::read_dir(imp).unwrap().flatten() {
+        std::fs::copy(entry.path(), copy.join(entry.file_name())).unwrap();
+    }
+}
+
+fn picture_frame_digests(movie: &Path) -> Vec<String> {
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(movie)
+        .args(["-map", "0:v:0", "-f", "framemd5", "-"])
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.rsplit(',').next())
+        .map(|digest| digest.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn the_export_plays_the_picture_resource_span_when_the_sound_starts_elsewhere() {
+    const PICTURE_SPAN: (u32, u32) = (2, 3);
+    const SOUND_FROM_THE_START: (u32, u32) = (0, 3);
+    let dir = TempDir::new().unwrap();
+    let imp = build_sound_imp(dir.path(), "imp_mixed");
+    let reference = dir.path().join("imp_reference");
+    copy_imp(&imp, &reference);
+    trim_resources(&imp, PICTURE_SPAN, SOUND_FROM_THE_START);
+    trim_resources(&reference, PICTURE_SPAN, PICTURE_SPAN);
+    let movie = dir.path().join("mixed.mov");
+    let reference_movie = dir.path().join("reference.mov");
+
+    for (package, output) in [(&imp, &movie), (&reference, &reference_movie)] {
+        cmd()
+            .args(["prores", "-i", &package.to_string_lossy()])
+            .args(["-o", &output.to_string_lossy()])
+            .assert()
+            .success();
+    }
+
+    let exported = picture_frame_digests(&movie);
+    assert_eq!(exported.len(), PICTURE_SPAN.1 as usize, "{exported:?}");
+    assert_eq!(
+        exported,
+        picture_frame_digests(&reference_movie),
+        "the export did not play frames 2 to 4 of the picture"
     );
 }
 

@@ -29,7 +29,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Image encoding pipeline**, DPX, TIFF, EXR, PNG, BMP, JPEG → 12-bit JPEG 2000 through the linked Grok library. TIFF frames are read by imfwizard itself, at 8, 12 or 16 bits, and every other format decodes through ffmpeg first
 - **CPU encoding** on all available cores. GPU encoding needs Grok's accelerator plugin, a commercial product sold separately, see [GPU builds](#gpu-builds)
 - **Video transcoding via ffmpeg** (`transcode`, pick the output codec, e.g. libx264/prores)
-- **ProRes encoding** (`prores`), encode a video file or a directory of numbered frames (at 24 fps) to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
+- **ProRes encoding** (`prores`), encode a video file or a directory of numbered frames (at the frame rate `--fps-num` and `--fps-den` name, required for one since stills carry no rate) to a ProRes .mov master, or export an IMP as a ProRes 4444 delivery master fitted into a named cinema container
 - **Burn-in during the encode**, `create --burn-subtitle <file>` (+ `--burn-subtitle-font <ttf/otf>`) draws the cues into the picture as it encodes, so a burnt master costs one generation rather than two. Reads SRT, ASS/SSA, SCC, FCPXML and MKS/MKV, and covers video, image sequences and held stills. Burnt text is part of the image and registers no timed-text track, the same file cannot be both, and burning onto a J2K directory is refused
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT or ASS into video frames via ffmpeg, outside a package
@@ -92,7 +92,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Partial restore** (`restore --input <imp> --output <dir> [--video-only|--audio-only]`), unwraps every track file the IMP's CPLs name, in process: a picture track becomes one numbered `.j2c` codestream per frame and a sound track becomes one WAV at the channel count, rate and depth the track file declares, each under a directory named after the track file
 
 ### Comparison & Analysis
-- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate), or with `--pixel`/`--vmaf` pixel PSNR/SSIM/VMAF between the picture track files of the two IMPs' first CPLs, or between two video or MXF files or frame directories
+- **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate), or with `--pixel`/`--vmaf` pixel PSNR/SSIM/VMAF between the picture track files of the two IMPs' first CPLs, or between two video or MXF files or frame directories, which need `--fps-num` and `--fps-den`
 - **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
 
 ### Distributed & Advanced
@@ -648,8 +648,8 @@ imfwizard prores \
   -o /path/to/master_prores.mov \
   -p hq
 
-# A directory of numbered frames encodes at 24 fps
-imfwizard prores -i /path/to/frames/ -o /path/to/master_prores.mov
+# A directory of numbered frames needs --fps-num and --fps-den, stills carry no rate
+imfwizard prores -i /path/to/frames/ -o /path/to/master_prores.mov --fps-num 24 --fps-den 1
 
 # An IMP directory exports its first CPL's picture and main sound as ProRes 4444
 # at the CPL's edit rate. --cpl <uuid> picks another composition. --ov <dir>
@@ -820,7 +820,7 @@ imfwizard audio-desc -i mix_51.wav --narration ad_narration.wav -o combined.wav 
 
 ```bash
 # A directory of numbered frames in, frame_000001 onward out in the same image format
-imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/
+imfwizard lut --lut grading.cube -i /frames/ -o /graded_frames/ --fps-num 24 --fps-den 1
 
 # The same with ffmpeg image patterns
 imfwizard lut --lut grading.cube -i /frames/frame_%06d.tif -o /graded_frames/frame_%06d.tif
@@ -831,7 +831,7 @@ imfwizard lut --lut grading.cube -i /frames/frame_%06d.tif -o /graded_frames/fra
 ```bash
 # AP0 to Rec.709 primaries and transfer, no ACES rendering transform, TIFF out.
 # A directory of numbered frames in, frame_000001.tif onward out
-imfwizard aces -i /ap0_frames/ -o /rec709_frames/
+imfwizard aces -i /ap0_frames/ -o /rec709_frames/ --fps-num 24 --fps-den 1
 
 # The same with ffmpeg image patterns
 imfwizard aces -i /ap0_frames/frame_%06d.tif -o /rec709_frames/frame_%06d.tif
@@ -869,7 +869,7 @@ imfwizard partial-version -i /orig_imp/ -o /partial/ --cpl <cpl-uuid>
 ```bash
 # Prepend black frames with white centred text, --frames defaults to 24.
 # A directory of numbered frames in, frame_000001 onward out in the same image format
-imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 48
+imfwizard slate -i /frames/ -o /slated/ --text "MY FILM, Final Master" --frames 48 --fps-num 24 --fps-den 1
 
 # A video in, frames out through an image pattern
 imfwizard slate -i /path/to/clip.mov -o /slated/slated_%04d.png --text "MY FILM, Final Master" --frames 48
@@ -898,8 +898,9 @@ imfwizard/
 ```
 
 IMF Wizard shares common functionality with [DCP Wizard](https://github.com/PostPerfection/dcpwizard)
-via the [postkit](https://github.com/PostPerfection/postkit) library (encoding, hashing,
-job queue, preferences, REST API, and more).
+via the [postkit](https://github.com/PostPerfection/postkit) library (encoding, hashing, job queue,
+preferences, REST API, the watch folder loop, the cancellable ffmpeg transcode runner behind
+`transcode`, and more). The IMP build each watched master starts stays in IMF Wizard.
 
 ## License
 

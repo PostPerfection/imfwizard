@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+- **`watch` and `transcode` run postkit's code**: the watch folder loop is `postkit::watch`, and `transcode` and the REST transcode job run `postkit::transcode::transcode`, the same code DCP Wizard runs.
+- **The Windows release installs the msi too**: after the NSIS check, the release workflow uninstalls the NSIS install, installs the msi, checks it carries every staged dll, runs the sidecar and opens the app from it, then uninstalls it.
+
+### Fixed
+- **A frame directory given to `compare`, `lut`, `aces`, `slate` or `prores` needs `--fps-num` and `--fps-den`**: the five commands played every frame directory at 24 fps with no flag and no message, and now refuse one without the flags and refuse the flags for a file or IMP input.
+- **`compare --pixel` and `--vmaf` read only the frames an IMP's CPL plays**: an IMP input read its whole picture track file, and now it is cut to the resource's EntryPoint and SourceDuration the way `prores` cuts it.
+- **An ASS override tag warning prints once per run**: `create` printed it for every parse of the file, two or three times, and now its hint pass prints it once, `--check` included, and `subtitle-convert` prints it once.
+- **An IMP's picture plays its own resource's EntryPoint and SourceDuration**: the CPL reader let the sound resource's values replace the picture's, so `prores` and `compare` read the wrong frames when the two differed, and each track now keeps its own span, with the sound cut in the units of its own EditRate.
+
 ## [1.4.0] - 2026-09-28
 
 ### Changed

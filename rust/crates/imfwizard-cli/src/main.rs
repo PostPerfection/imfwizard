@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use imfwizard_core::prores::ContainerRaster;
 use postkit::ffmpeg_input::{FfmpegInput, frame_output};
+use postkit::frame_compare::ComparisonInput;
 use postkit::restore::{RestoreSelection, TrackKind};
 use std::path::{Path, PathBuf};
 
@@ -362,7 +363,7 @@ const PERCENT_OF_A_WHOLE: f32 = 100.0;
 /// actually starts from.
 static BURN_FONT_SIZE_HELP: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     format!(
-        "Burnt-in text height as a percent of the frame height (default: {:.1})",
+        "Burnt-in text height as a percent of the frame height (default: {:.2})",
         postkit::subtitle_raster::DEFAULT_FONT_SIZE_RATIO * PERCENT_OF_A_WHOLE
     )
 });
@@ -609,6 +610,57 @@ impl MasteringDisplayArguments {
     }
 }
 
+#[derive(clap::Args)]
+struct FrameDirectoryRateArguments {
+    /// Frame rate numerator of a directory of frames, required for one since stills carry no rate
+    #[arg(long)]
+    fps_num: Option<u32>,
+
+    /// Frame rate denominator of a directory of frames, required for one since stills carry no rate
+    #[arg(long)]
+    fps_den: Option<u32>,
+}
+
+impl FrameDirectoryRateArguments {
+    fn rate_for(&self, inputs: &[&Path]) -> Option<postkit::encode::FrameRate> {
+        let rate = match (self.fps_num, self.fps_den) {
+            (None, None) => None,
+            (Some(fps_num), Some(fps_den)) if fps_num > 0 && fps_den > 0 => {
+                Some(postkit::encode::FrameRate::new(fps_num, fps_den))
+            }
+            (Some(fps_num), Some(fps_den)) => fail(format!(
+                "--fps-num {fps_num} --fps-den {fps_den}: a frame rate needs both above 0"
+            )),
+            _ => fail("--fps-num and --fps-den name a frame rate together, and only one was given"),
+        };
+        let frame_directory = inputs.iter().find(|input| is_frame_directory(input));
+        match (frame_directory, rate) {
+            (Some(directory), None) => fail(format!(
+                "{} is a frame directory, which carries no frame rate: name one with --fps-num \
+                 and --fps-den",
+                directory.display()
+            )),
+            (None, Some(_)) => {
+                let names: Vec<String> = inputs
+                    .iter()
+                    .map(|input| input.display().to_string())
+                    .collect();
+                fail(format!(
+                    "--fps-num and --fps-den set the rate of a frame directory, and no input is \
+                     one: {}",
+                    names.join(", ")
+                ))
+            }
+            _ => rate,
+        }
+    }
+}
+
+fn is_frame_directory(path: &Path) -> bool {
+    path.is_dir()
+        && postkit::encode::detect_input_type(path) == postkit::encode::InputType::ImageSequence
+}
+
 impl BurnArguments {
     /// Read the flags into the rasteriser's overrides, failing on a colour or an
     /// effect name that cannot be read.
@@ -659,6 +711,117 @@ impl BurnArguments {
     }
 }
 
+#[derive(clap::Args)]
+struct CreateArguments {
+    /// Output directory for the IMP
+    #[arg(short, long)]
+    output: PathBuf,
+
+    /// Title of the content
+    #[arg(short, long)]
+    title: String,
+
+    /// Video file (mp4/mov/mkv) or J2K directory
+    #[arg(long)]
+    video: Option<String>,
+
+    /// Audio WAV file (auto-demuxed from video if not provided)
+    #[arg(long)]
+    audio: Option<String>,
+
+    /// RFC 5646 language tag for the audio track (e.g. de-DE)
+    #[arg(long = "audio-lang")]
+    audio_lang: Option<String>,
+
+    /// Accessibility role for the audio track: ad (audio description /
+    /// visually impaired) or hi (hearing impaired). Emits an MCA descriptor.
+    #[arg(long = "audio-role")]
+    audio_role: Option<String>,
+
+    #[command(flatten)]
+    soundfield: Box<SoundfieldArguments>,
+
+    /// Subtitle file to package (repeatable): TTML/IMSC is wrapped as given,
+    /// SRT, SCC, ASS/SSA, FCPXML and MKS are converted to IMSC first
+    #[arg(long = "subtitle")]
+    subtitles: Vec<String>,
+
+    /// RFC 5646 language tag written into the IMSC a --subtitle is converted
+    /// to (default: --audio-lang)
+    #[arg(long = "subtitle-lang")]
+    subtitle_lang: Option<String>,
+
+    #[command(flatten)]
+    burn: Box<BurnArguments>,
+
+    /// Content kind (feature, trailer, etc.)
+    #[arg(short, long, default_value = "feature")]
+    kind: String,
+
+    #[command(flatten)]
+    compression: Box<CompressionArguments>,
+
+    /// Edit rate numerator (default: a video file's own rate, else 24)
+    #[arg(long)]
+    fps_num: Option<u32>,
+
+    /// Edit rate denominator (default: a video file's own rate, else 1)
+    #[arg(long)]
+    fps_den: Option<u32>,
+
+    /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020,
+    /// pq-p3d65 or hlg-bt2020. Writes the transfer/colour ULs into the MXF
+    /// and CPL, and has to agree with what the source signals.
+    #[arg(long)]
+    hdr: Option<String>,
+
+    /// ST 2086 mastering display, x265 master-display string, e.g.
+    /// "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)".
+    /// Requires --hdr.
+    #[arg(long = "mastering-display")]
+    mastering_display: Option<String>,
+
+    /// Maximum content light level in nits, written as a ST 2067-21 CPL
+    /// ExtensionProperty. Requires a PQ --hdr preset.
+    #[arg(long = "max-cll")]
+    max_cll: Option<u16>,
+
+    /// Maximum frame-average light level in nits, same placement as
+    /// --max-cll. Requires a PQ --hdr preset.
+    #[arg(long = "max-fall")]
+    max_fall: Option<u16>,
+
+    #[command(flatten)]
+    source_edits: Box<SourceEditArguments>,
+
+    #[command(flatten)]
+    picture: Box<PictureArguments>,
+
+    /// Route and mix the --audio channels, as comma-separated IN:OUT or
+    /// IN:OUT@GAIN entries. IN is a 1-based input channel, OUT is a channel
+    /// number or a name (L, R, C, LFE, Ls, Rs, Lrs, Rrs) and GAIN is
+    /// decibels, e.g. "1:L,2:R,1:C@-6".
+    #[arg(long = "audio-map")]
+    audio_map: Option<String>,
+
+    #[command(flatten)]
+    atmos: Box<AtmosArguments>,
+
+    /// Run the pre-build check and stop: every refusal and every hint,
+    /// without encoding or writing anything under --output.
+    #[arg(long)]
+    check: bool,
+
+    /// Leave the codestreams and the edited sound in the output directory
+    /// once the IMP is written. A finished package holds neither.
+    #[arg(long = "keep-intermediates")]
+    keep_intermediates: bool,
+
+    /// Skip the validation that otherwise runs over the finished package.
+    #[arg(long = "no-verify")]
+    no_verify: bool,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     #[command(about = "Show or change saved preferences")]
@@ -668,115 +831,7 @@ enum Commands {
     },
     /// Create a new IMP (Interoperable Master Package)
     #[command(allow_negative_numbers = true)]
-    Create {
-        /// Output directory for the IMP
-        #[arg(short, long)]
-        output: PathBuf,
-
-        /// Title of the content
-        #[arg(short, long)]
-        title: String,
-
-        /// Video file (mp4/mov/mkv) or J2K directory
-        #[arg(long)]
-        video: Option<String>,
-
-        /// Audio WAV file (auto-demuxed from video if not provided)
-        #[arg(long)]
-        audio: Option<String>,
-
-        /// RFC 5646 language tag for the audio track (e.g. de-DE)
-        #[arg(long = "audio-lang")]
-        audio_lang: Option<String>,
-
-        /// Accessibility role for the audio track: ad (audio description /
-        /// visually impaired) or hi (hearing impaired). Emits an MCA descriptor.
-        #[arg(long = "audio-role")]
-        audio_role: Option<String>,
-
-        #[command(flatten)]
-        soundfield: Box<SoundfieldArguments>,
-
-        /// Subtitle file to package (repeatable): TTML/IMSC is wrapped as given,
-        /// SRT, SCC, ASS/SSA, FCPXML and MKS are converted to IMSC first
-        #[arg(long = "subtitle")]
-        subtitles: Vec<String>,
-
-        /// RFC 5646 language tag written into the IMSC a --subtitle is converted
-        /// to (default: --audio-lang)
-        #[arg(long = "subtitle-lang")]
-        subtitle_lang: Option<String>,
-
-        #[command(flatten)]
-        burn: Box<BurnArguments>,
-
-        /// Content kind (feature, trailer, etc.)
-        #[arg(short, long, default_value = "feature")]
-        kind: String,
-
-        #[command(flatten)]
-        compression: Box<CompressionArguments>,
-
-        /// Edit rate numerator (default: a video file's own rate, else 24)
-        #[arg(long)]
-        fps_num: Option<u32>,
-
-        /// Edit rate denominator (default: a video file's own rate, else 1)
-        #[arg(long)]
-        fps_den: Option<u32>,
-
-        /// HDR/WCG preset for the picture essence (ST 2067-21): pq-bt2020,
-        /// pq-p3d65 or hlg-bt2020. Writes the transfer/colour ULs into the MXF
-        /// and CPL, and has to agree with what the source signals.
-        #[arg(long)]
-        hdr: Option<String>,
-
-        /// ST 2086 mastering display, x265 master-display string, e.g.
-        /// "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)".
-        /// Requires --hdr.
-        #[arg(long = "mastering-display")]
-        mastering_display: Option<String>,
-
-        /// Maximum content light level in nits, written as a ST 2067-21 CPL
-        /// ExtensionProperty. Requires a PQ --hdr preset.
-        #[arg(long = "max-cll")]
-        max_cll: Option<u16>,
-
-        /// Maximum frame-average light level in nits, same placement as
-        /// --max-cll. Requires a PQ --hdr preset.
-        #[arg(long = "max-fall")]
-        max_fall: Option<u16>,
-
-        #[command(flatten)]
-        source_edits: Box<SourceEditArguments>,
-
-        #[command(flatten)]
-        picture: Box<PictureArguments>,
-
-        /// Route and mix the --audio channels, as comma-separated IN:OUT or
-        /// IN:OUT@GAIN entries. IN is a 1-based input channel, OUT is a channel
-        /// number or a name (L, R, C, LFE, Ls, Rs, Lrs, Rrs) and GAIN is
-        /// decibels, e.g. "1:L,2:R,1:C@-6".
-        #[arg(long = "audio-map")]
-        audio_map: Option<String>,
-
-        #[command(flatten)]
-        atmos: Box<AtmosArguments>,
-
-        /// Run the pre-build check and stop: every refusal and every hint,
-        /// without encoding or writing anything under --output.
-        #[arg(long)]
-        check: bool,
-
-        /// Leave the codestreams and the edited sound in the output directory
-        /// once the IMP is written. A finished package holds neither.
-        #[arg(long = "keep-intermediates")]
-        keep_intermediates: bool,
-
-        /// Skip the validation that otherwise runs over the finished package.
-        #[arg(long = "no-verify")]
-        no_verify: bool,
-    },
+    Create(Box<CreateArguments>),
 
     /// Encode image sequence to J2K codestreams
     Encode {
@@ -912,9 +967,9 @@ enum Commands {
         /// Seconds between polls
         #[arg(
             long,
-            default_value_t = imfwizard_core::watch::DEFAULT_POLL_INTERVAL_SECONDS,
+            default_value_t = postkit::watch::DEFAULT_POLL_INTERVAL_SECONDS,
             value_parser = clap::value_parser!(u64).range(
-                imfwizard_core::watch::MINIMUM_POLL_INTERVAL_SECONDS..
+                postkit::watch::MINIMUM_POLL_INTERVAL_SECONDS..
             )
         )]
         interval: u64,
@@ -1429,6 +1484,9 @@ enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        #[command(flatten)]
+        frame_directory_rate: FrameDirectoryRateArguments,
     },
 
     /// Apply 3D LUT to image sequence
@@ -1444,6 +1502,9 @@ enum Commands {
         /// 3D LUT file (.cube, .3dl)
         #[arg(short, long)]
         lut: String,
+
+        #[command(flatten)]
+        frame_directory_rate: FrameDirectoryRateArguments,
     },
 
     /// Encode to ProRes
@@ -1470,6 +1531,9 @@ enum Commands {
         /// OV directory holding the track files a supplemental IMP does not ship
         #[arg(long)]
         ov: Option<String>,
+
+        #[command(flatten)]
+        frame_directory_rate: FrameDirectoryRateArguments,
     },
 
     /// Create partial IMP version
@@ -1535,6 +1599,9 @@ enum Commands {
         /// Number of frames
         #[arg(long, default_value = "24")]
         frames: u32,
+
+        #[command(flatten)]
+        frame_directory_rate: FrameDirectoryRateArguments,
     },
 
     /// Write MCA (Multi-Channel Audio) labels into a sound MXF's descriptor
@@ -1595,6 +1662,9 @@ enum Commands {
         /// Output image/video
         #[arg(short, long)]
         output: String,
+
+        #[command(flatten)]
+        frame_directory_rate: FrameDirectoryRateArguments,
     },
 
     /// Check regulatory compliance
@@ -1858,33 +1928,34 @@ fn run() {
 
     match cli.command {
         Commands::Preferences { .. } => unreachable!(),
-        Commands::Create {
-            output,
-            title,
-            video,
-            audio,
-            audio_lang,
-            audio_role,
-            soundfield,
-            subtitles,
-            subtitle_lang,
-            burn: burn_arguments,
-            kind,
-            compression,
-            fps_num,
-            fps_den,
-            hdr,
-            mastering_display,
-            max_cll,
-            max_fall,
-            source_edits,
-            picture: picture_arguments,
-            audio_map,
-            atmos,
-            check,
-            keep_intermediates,
-            no_verify,
-        } => {
+        Commands::Create(create_arguments) => {
+            let CreateArguments {
+                output,
+                title,
+                video,
+                audio,
+                audio_lang,
+                audio_role,
+                soundfield,
+                subtitles,
+                subtitle_lang,
+                burn: burn_arguments,
+                kind,
+                compression,
+                fps_num,
+                fps_den,
+                hdr,
+                mastering_display,
+                max_cll,
+                max_fall,
+                source_edits,
+                picture: picture_arguments,
+                audio_map,
+                atmos,
+                check,
+                keep_intermediates,
+                no_verify,
+            } = *create_arguments;
             for component in postkit::component_versions::installed_components(
                 "IMF Wizard",
                 env!("CARGO_PKG_VERSION"),
@@ -2552,13 +2623,13 @@ fn run() {
             output,
             codec,
         } => {
-            let opts = imfwizard_core::transcode::TranscodeOptions {
+            let opts = postkit::transcode::TranscodeOptions {
                 input,
                 output,
                 codec,
                 ..Default::default()
             };
-            let result = imfwizard_core::transcode::transcode(&opts);
+            let result = postkit::transcode::transcode(&opts);
             if result.success {
                 println!("Transcode complete: {}", result.output.display());
             } else {
@@ -2716,10 +2787,12 @@ fn run() {
             interval,
             create_arguments,
         } => {
-            use imfwizard_core::watch::{
+            use postkit::watch::{
                 AUDIO_SIDECAR_EXTENSION, DONE_DIRECTORY_NAME, FAILED_DIRECTORY_NAME,
-                SUBTITLE_SIDECAR_EXTENSION,
             };
+
+            const SUBTITLE_SIDECAR_EXTENSION: &str = "ttml";
+
             use std::path::Path;
 
             fn free_destination(directory: &Path, file_name: &str) -> PathBuf {
@@ -2801,7 +2874,7 @@ fn run() {
                 ..Default::default()
             });
 
-            imfwizard_core::watch::watch_directory(
+            postkit::watch::watch_directory(
                 &dir,
                 std::time::Duration::from_secs(interval),
                 &|| false,
@@ -3687,8 +3760,16 @@ fn run() {
             pixel,
             vmaf,
             json,
+            frame_directory_rate,
         } => {
-            let pictures = (pixel || vmaf).then(|| (comparison_input(&a), comparison_input(&b)));
+            let (path_a, path_b) = (Path::new(&a), Path::new(&b));
+            let pictures = (pixel || vmaf).then(|| {
+                let sequence_rate = frame_directory_rate.rate_for(&[path_a, path_b]);
+                (
+                    comparison_input(path_a, sequence_rate),
+                    comparison_input(path_b, sequence_rate),
+                )
+            });
             let vmaf_score = pictures
                 .as_ref()
                 .filter(|_| vmaf)
@@ -3778,12 +3859,16 @@ fn run() {
             }
         }
 
-        Commands::Lut { input, output, lut } => {
-            let source = FfmpegInput::resolve(
-                Path::new(&input),
-                imfwizard_core::preflight::DEFAULT_EDIT_RATE,
-            )
-            .unwrap_or_else(|e| fail(e));
+        Commands::Lut {
+            input,
+            output,
+            lut,
+            frame_directory_rate,
+        } => {
+            let input_path = Path::new(&input);
+            let source =
+                FfmpegInput::resolve(input_path, frame_directory_rate.rate_for(&[input_path]))
+                    .unwrap_or_else(|e| fail(e));
             let frames_out = frame_output(Path::new(&output), source.image_extension())
                 .unwrap_or_else(|e| fail(e));
             match postkit::colour::convert_colour_input(
@@ -3808,12 +3893,11 @@ fn run() {
             container,
             cpl,
             ov,
+            frame_directory_rate,
         } => {
             let input_path = PathBuf::from(&input);
-            let frame_directory = input_path.is_dir()
-                && postkit::encode::detect_input_type(&input_path)
-                    == postkit::encode::InputType::ImageSequence;
-            if input_path.is_dir() && !frame_directory {
+            let sequence_rate = frame_directory_rate.rate_for(&[&input_path]);
+            if input_path.is_dir() && !is_frame_directory(&input_path) {
                 let raster = container.as_deref().map(|name| {
                     ContainerRaster::parse(name).unwrap_or_else(|| {
                         eprintln!(
@@ -3843,8 +3927,7 @@ fn run() {
                     ));
                 }
                 let source =
-                    FfmpegInput::resolve(&input_path, imfwizard_core::preflight::DEFAULT_EDIT_RATE)
-                        .unwrap_or_else(|e| fail(e));
+                    FfmpegInput::resolve(&input_path, sequence_rate).unwrap_or_else(|e| fail(e));
                 encode_prores_file(&source, &output, &profile);
             }
         }
@@ -3991,12 +4074,12 @@ fn run() {
             output,
             text,
             frames,
+            frame_directory_rate,
         } => {
-            let source = FfmpegInput::resolve(
-                Path::new(&input),
-                imfwizard_core::preflight::DEFAULT_EDIT_RATE,
-            )
-            .unwrap_or_else(|e| fail(e));
+            let input_path = Path::new(&input);
+            let source =
+                FfmpegInput::resolve(input_path, frame_directory_rate.rate_for(&[input_path]))
+                    .unwrap_or_else(|e| fail(e));
             let (width, height, fps_num, fps_den) = match &source {
                 FfmpegInput::ImageSequence(sequence) => {
                     let (width, height) = postkit::encode::source_raster(&sequence.directory)
@@ -4172,10 +4255,16 @@ fn run() {
             }
         }
 
-        Commands::Aces { input, output } => {
+        Commands::Aces {
+            input,
+            output,
+            frame_directory_rate,
+        } => {
+            let input_path = Path::new(&input);
             match imfwizard_core::aces::convert_ap0_to_rec709(
-                std::path::Path::new(&input),
-                std::path::Path::new(&output),
+                input_path,
+                frame_directory_rate.rate_for(&[input_path]),
+                Path::new(&output),
             ) {
                 Ok(()) => println!("ACES AP0 converted to Rec.709: {output}"),
                 Err(e) => {
@@ -4653,20 +4742,28 @@ const PRORES_PROFILES: [(&str, &str); 6] = [
     ("4444xq", "5"),
 ];
 
-// an IMP directory reads as the one picture track file its first CPL plays
-fn comparison_input(path: &str) -> FfmpegInput {
-    let path = Path::new(path);
-    let frame_directory =
-        postkit::encode::detect_input_type(path) == postkit::encode::InputType::ImageSequence;
-    if !path.is_dir() || frame_directory {
-        return FfmpegInput::resolve(path, imfwizard_core::preflight::DEFAULT_EDIT_RATE)
-            .unwrap_or_else(|e| fail(e));
+// an IMP directory reads as the frames its first CPL plays of its one picture track file
+fn comparison_input(
+    path: &Path,
+    sequence_rate: Option<postkit::encode::FrameRate>,
+) -> ComparisonInput {
+    if !path.is_dir() || is_frame_directory(path) {
+        return ComparisonInput {
+            input: FfmpegInput::resolve(path, sequence_rate).unwrap_or_else(|e| fail(e)),
+            frame_span: None,
+        };
     }
     let composition =
         imfwizard_core::prores::composition_pictures(path, None, None).unwrap_or_else(|e| fail(e));
-    match composition.pictures.as_slice() {
-        [picture] => FfmpegInput::File(picture.clone()),
-        pictures => fail(format!(
+    match (
+        composition.pictures.as_slice(),
+        composition.segments.as_slice(),
+    ) {
+        ([picture], [segment]) => ComparisonInput {
+            input: FfmpegInput::File(picture.clone()),
+            frame_span: Some(imfwizard_core::prores::segment_frame_span(segment)),
+        },
+        (pictures, _) => fail(format!(
             "CPL {} in {} plays {} picture track files, and compare reads a single one",
             composition.cpl_id,
             path.display(),

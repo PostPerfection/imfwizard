@@ -1801,6 +1801,52 @@ fn subtitled_imp(dir: &Path, subtitle: &Path, extra: &[&str]) -> PathBuf {
     create_imp(dir, "subtitled", &clip, &arguments)
 }
 
+const POSITIONED_ASS: &str = "[Script Info]\nTitle: t\n\n\
+[V4+ Styles]\n\
+Format: Name, Fontname, Fontsize, PrimaryColour, Bold, Italic, Underline, Alignment\n\
+Style: Default,Arial,40,&H00FFFFFF,0,0,0,2\n\n\
+[Events]\n\
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+Dialogue: 0,0:00:00.10,0:00:00.40,Default,,0,0,0,,{\\pos(1,1)}hello\n";
+
+#[test]
+fn a_dropped_ass_override_tag_is_reported_once_per_create() {
+    let dir = TempDir::new().unwrap();
+    let ass = dir.path().join("cues.ass");
+    std::fs::write(&ass, POSITIONED_ASS).unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_solid_clip(&clip, "red", SUBTITLED_CLIP_FRAMES, SUBTITLED_CLIP_RATE);
+
+    for (flag, warning) in [
+        ("--subtitle", "unsupported ASS override tag \\pos"),
+        (
+            "--burn-subtitle",
+            "ASS override tag not modelled, dropped: \\pos",
+        ),
+    ] {
+        for check in [false, true] {
+            let imp = dir
+                .path()
+                .join(format!("{}_{check}", flag.trim_start_matches('-')));
+            let mut command = cmd();
+            command
+                .args(["create", "-o", &imp.to_string_lossy(), "-t", "Positioned"])
+                .args(["--video", &clip.to_string_lossy()])
+                .args([flag, &ass.to_string_lossy()]);
+            if check {
+                command.arg("--check");
+            }
+            let run = command.assert().success();
+            let stderr = String::from_utf8_lossy(&run.get_output().stderr).into_owned();
+            let warnings = stderr.lines().filter(|line| line.contains(warning)).count();
+            assert_eq!(
+                warnings, 1,
+                "{flag} with check {check} printed the warning {warnings} times: {stderr}"
+            );
+        }
+    }
+}
+
 /// An SRT is converted to IMSC on the way in, since the track file carries TTML.
 #[test]
 fn an_srt_subtitle_is_packaged_as_imsc() {

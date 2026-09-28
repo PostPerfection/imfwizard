@@ -7,7 +7,7 @@ use postkit::subtitle_formats::{StyledCue, StyledRun};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::subtitle_convert::SubtitleFormat;
+use crate::subtitle_convert::{ParsedCues, SubtitleFormat};
 
 /// The burn sources there is a cue reader for, as the error messages spell them.
 const BURN_SOURCE_FORMATS: &str = "SRT, ASS/SSA, SCC, FCPXML or MKS/MKV";
@@ -17,7 +17,7 @@ const BURN_SOURCE_FORMATS: &str = "SRT, ASS/SSA, SCC, FCPXML or MKS/MKV";
 /// The set is narrower than `subtitle-convert` takes: TTML/IMSC is the format
 /// imfwizard packages rather than reads, and nothing here parses one back to
 /// cues.
-pub fn load_styled_cues(path: &Path) -> Result<Vec<StyledCue>, String> {
+pub fn load_styled_cues(path: &Path) -> Result<ParsedCues<Vec<StyledCue>>, String> {
     let extension = path
         .extension()
         .and_then(|e| e.to_str())
@@ -28,15 +28,14 @@ pub fn load_styled_cues(path: &Path) -> Result<Vec<StyledCue>, String> {
     })?;
 
     let read = || std::fs::read_to_string(path).map_err(|e| format!("cannot read {path:?}: {e}"));
+    let mut dropped_override_tags = Vec::new();
     let cues = match format {
         SubtitleFormat::Srt => plain_cues(postkit::subtitle_retime::parse_srt(&read()?)),
         SubtitleFormat::Scc => plain_cues(crate::scc::parse_scc(&read()?)?),
         SubtitleFormat::Ass => {
             let parsed = postkit::subtitle_formats::ass::parse_ass(&read()?)
                 .map_err(|e| format!("ASS parse: {e}"))?;
-            for tag in &parsed.warnings {
-                tracing::warn!("ASS override tag not modelled, dropped: {tag}");
-            }
+            dropped_override_tags = parsed.warnings;
             parsed.cues
         }
         SubtitleFormat::Fcpxml => postkit::subtitle_formats::fcpxml::parse_fcpxml(&read()?)
@@ -60,7 +59,10 @@ pub fn load_styled_cues(path: &Path) -> Result<Vec<StyledCue>, String> {
     if cues.is_empty() {
         return Err(format!("no subtitle cues in {}", path.display()));
     }
-    Ok(cues)
+    Ok(ParsedCues {
+        cues,
+        dropped_override_tags,
+    })
 }
 
 fn plain_cues(cues: Vec<postkit::subtitle_retime::SrtCue>) -> Vec<StyledCue> {
@@ -90,6 +92,7 @@ pub fn resolve_burn_style(
 /// finds are used, and a machine with no font at all is an error rather than a
 /// silently subtitle-free encode. `appearance` carries whatever the caller named
 /// about how the text looks, and leaves the rest at the burn defaults.
+// the hint pass reports the dropped override tags
 pub fn prepare_subtitle_burn(
     input: &Path,
     font: Option<&Path>,
@@ -102,8 +105,12 @@ pub fn prepare_subtitle_burn(
         return Err(format!("burn-in font not found: {}", path.display()));
     }
     let style = resolve_burn_style(appearance)?;
-    let cues = load_styled_cues(input)?;
+    let cues = load_styled_cues(input)?.cues;
     postkit::subtitle_raster::SubtitleBurn::new(cues, font, style, fps.as_f64())
         .map(Arc::new)
         .map_err(|e| format!("cannot burn {}: {e}", input.display()))
+}
+
+pub fn dropped_override_tag_message(tag: &str) -> String {
+    format!("ASS override tag not modelled, dropped: {tag}")
 }

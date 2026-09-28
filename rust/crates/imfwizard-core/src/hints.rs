@@ -23,6 +23,7 @@ pub struct HintFacts {
     pub has_audio: bool,
     pub audio_language: Option<String>,
     pub subtitles: Vec<SubtitleCues>,
+    pub dropped_override_tag_messages: Vec<String>,
     pub fps: f64,
 }
 
@@ -39,6 +40,14 @@ fn hints_from(facts: &HintFacts) -> Vec<Hint> {
         facts.audio_language.as_deref(),
     ));
     hints.extend(subtitle_hints(&facts.subtitles, facts.fps));
+    hints.extend(
+        facts
+            .dropped_override_tag_messages
+            .iter()
+            .map(|message| Hint {
+                text: message.clone(),
+            }),
+    );
     hints
 }
 
@@ -59,15 +68,29 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
         .collect();
 
     let mut subtitles = Vec::new();
+    let mut dropped_override_tag_messages = Vec::new();
     for path in &plan.timed_text_files {
-        if let Ok(cues) = crate::subtitle_convert::read_subtitle_cues(path, fps) {
-            subtitles.push(subtitle_cues(path, cues));
+        if let Ok(parsed) = crate::subtitle_convert::read_subtitle_cues(path, fps) {
+            dropped_override_tag_messages.extend(
+                parsed
+                    .dropped_override_tags
+                    .iter()
+                    .map(|tag| crate::subtitle_convert::unsupported_override_tag_message(tag)),
+            );
+            subtitles.push(subtitle_cues(path, parsed.cues));
         }
     }
     if let Some(burn) = &plan.burn_subtitle
-        && let Ok(cues) = crate::subtitle_burn::load_styled_cues(burn)
+        && let Ok(parsed) = crate::subtitle_burn::load_styled_cues(burn)
     {
-        let cues = cues
+        dropped_override_tag_messages.extend(
+            parsed
+                .dropped_override_tags
+                .iter()
+                .map(|tag| crate::subtitle_burn::dropped_override_tag_message(tag)),
+        );
+        let cues = parsed
+            .cues
             .iter()
             .map(|cue| TimedTextCue::from_text(cue.start_ms, cue.end_ms, &cue.plain_text()))
             .collect();
@@ -79,6 +102,7 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
         has_audio: !plan.audio_files.is_empty() || plan.atmos_frame_directory.is_some(),
         audio_language: plan.audio_language.clone(),
         subtitles,
+        dropped_override_tag_messages,
         fps,
     }
 }
@@ -126,6 +150,7 @@ mod tests {
                     lines: vec!["hello".to_string()],
                 }],
             }],
+            dropped_override_tag_messages: Vec::new(),
             fps: 24.0,
         };
         let texts: Vec<String> = hints_from(&facts)
@@ -166,6 +191,7 @@ mod tests {
                     lines: vec!["a line".to_string()],
                 }],
             }],
+            dropped_override_tag_messages: Vec::new(),
             fps: 24.0,
         };
         assert_eq!(hints_from(&facts), vec![]);

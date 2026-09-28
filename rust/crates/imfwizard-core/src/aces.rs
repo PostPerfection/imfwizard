@@ -1,8 +1,7 @@
 use std::path::Path;
 
+use postkit::encode::FrameRate;
 use postkit::ffmpeg_input::{FfmpegInput, frame_output};
-
-use crate::preflight::DEFAULT_EDIT_RATE;
 
 const TIFF_EXTENSION: &str = "tif";
 
@@ -33,13 +32,17 @@ fn channel_mixer(matrix: &[[f64; 3]; 3]) -> String {
     format!("colorchannelmixer={}", coefficients.join(":"))
 }
 
-pub fn convert_ap0_to_rec709(input: &Path, output: &Path) -> Result<(), String> {
+pub fn convert_ap0_to_rec709(
+    input: &Path,
+    sequence_rate: Option<FrameRate>,
+    output: &Path,
+) -> Result<(), String> {
     let filter = format!(
         "format=gbrpf32le,{},{},zscale=transferin=linear:transfer=bt709,format=gbrp16le",
         channel_mixer(&AP0_TO_AP1),
         channel_mixer(&AP1_TO_REC709)
     );
-    let input = FfmpegInput::resolve(input, DEFAULT_EDIT_RATE)?;
+    let input = FfmpegInput::resolve(input, sequence_rate)?;
     let output = frame_output(output, Some(TIFF_EXTENSION))?;
     let converted = std::process::Command::new("ffmpeg")
         .args(["-y", "-v", "error"])

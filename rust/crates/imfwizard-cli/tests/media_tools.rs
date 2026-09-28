@@ -292,6 +292,7 @@ fn compare_pixel_scores_two_frame_directories() {
             .args(["compare", "-a", &reference.to_string_lossy()])
             .args(["-b", &copy.to_string_lossy()])
             .args(["--pixel", "--json"])
+            .args(["--fps-num", &CLIP_FPS.to_string(), "--fps-den", "1"])
             .assert()
             .success(),
     );
@@ -424,6 +425,7 @@ fn slate_prepends_black_frames_to_a_frame_directory() {
     cmd()
         .args(["slate", "-i", &frames.to_string_lossy()])
         .args(["-o", &directory_argument(&slated)])
+        .args(["--fps-num", &CLIP_FPS.to_string(), "--fps-den", "1"])
         .args(["--text", "TEST SLATE"])
         .args(["--frames", &SLATE_FRAMES.to_string()])
         .assert()
@@ -591,6 +593,7 @@ fn aces_converts_every_frame_of_a_directory_into_numbered_tiffs() {
     cmd()
         .args(["aces", "-i", &frames.to_string_lossy()])
         .args(["-o", &directory_argument(&converted)])
+        .args(["--fps-num", &CLIP_FPS.to_string(), "--fps-den", "1"])
         .assert()
         .success();
 

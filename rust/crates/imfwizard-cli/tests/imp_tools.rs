@@ -289,6 +289,71 @@ fn compare_pixel_scores_the_picture_track_files_of_two_imps() {
     );
 }
 
+// the created CPL names no EntryPoint, so every resource plays the whole track file
+fn trim_resources(imp: &Path, picture: (u32, u32), sound: (u32, u32)) {
+    let cpl = imp.join(format!("CPL_{}.xml", cpl_uuid(imp)));
+    let xml = std::fs::read_to_string(&cpl).expect("the CPL");
+    let whole_duration = format!("<SourceDuration>{SHORT_FRAMES}</SourceDuration>");
+    let sound_start = xml.find("MainAudioSequence").expect("a sound sequence");
+    let (picture_part, sound_part) = xml.split_at(sound_start);
+    assert!(picture_part.contains(&whole_duration), "{xml}");
+    assert!(sound_part.contains(&whole_duration), "{xml}");
+    let span = |(entry_point, source_duration): (u32, u32)| {
+        format!(
+            "<EntryPoint>{entry_point}</EntryPoint><SourceDuration>{source_duration}</SourceDuration>"
+        )
+    };
+    let trimmed = format!(
+        "{}{}",
+        picture_part.replace(&whole_duration, &span(picture)),
+        sound_part.replace(&whole_duration, &span(sound))
+    );
+    std::fs::write(&cpl, trimmed).expect("the trimmed CPL");
+}
+
+// the IMP holds files only, and its ASSETMAP names them relative to itself
+fn copy_imp(imp: &Path, copy: &Path) {
+    std::fs::create_dir(copy).unwrap();
+    for entry in std::fs::read_dir(imp).unwrap().flatten() {
+        std::fs::copy(entry.path(), copy.join(entry.file_name())).unwrap();
+    }
+}
+
+#[test]
+fn compare_pixel_reads_only_the_frames_the_cpl_plays() {
+    const PICTURE_SPAN: (u32, u32) = (2, 3);
+    const SOUND_FROM_THE_START: (u32, u32) = (0, 3);
+    // frames 0 to 2 against frames 2 to 4 score about 35 dB
+    const IDENTICAL_FRAMES_MINIMUM_PSNR: f64 = 60.0;
+    let directory = TempDir::new().unwrap();
+    let imp = build_imp(directory.path(), "trimmed", "Trimmed", SHORT_FRAMES, 24);
+    let reference = directory.path().join("reference");
+    copy_imp(&imp, &reference);
+    trim_resources(&imp, PICTURE_SPAN, SOUND_FROM_THE_START);
+    trim_resources(&reference, PICTURE_SPAN, PICTURE_SPAN);
+
+    let json = stdout_of(
+        cmd()
+            .args(["compare", "-a", &imp.to_string_lossy()])
+            .args(["-b", &reference.to_string_lossy()])
+            .args(["--pixel", "--json"])
+            .assert()
+            .success(),
+    );
+
+    let result: Value = serde_json::from_str(&json).expect("the compare json");
+    let scores = &result["psnr_ssim"];
+    assert_eq!(
+        scores["frames_compared"].as_u64(),
+        Some(u64::from(PICTURE_SPAN.1))
+    );
+    let minimum_psnr = scores["min_psnr"].as_f64().expect("min_psnr");
+    assert!(
+        minimum_psnr > IDENTICAL_FRAMES_MINIMUM_PSNR,
+        "the picture resource's frames scored {minimum_psnr} dB against themselves"
+    );
+}
+
 #[test]
 fn annotate_writes_the_note_into_a_cpl_the_package_still_matches() {
     let directory = TempDir::new().unwrap();

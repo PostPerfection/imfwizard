@@ -91,13 +91,13 @@ pub fn execute_job(job: &Job, cancel: &Arc<AtomicBool>) -> Result<(), String> {
         )
         .map(|_| ()),
         JobType::Transcode => {
-            let opts = crate::transcode::TranscodeOptions {
+            let opts = postkit::transcode::TranscodeOptions {
                 input: job.input.clone(),
                 output: job.output.clone(),
                 cancel: cancel.clone(),
                 ..Default::default()
             };
-            let r = crate::transcode::transcode(&opts);
+            let r = postkit::transcode::transcode(&opts);
             if r.success { Ok(()) } else { Err(r.error) }
         }
         JobType::Validate => {

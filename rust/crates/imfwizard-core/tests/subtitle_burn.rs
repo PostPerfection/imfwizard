@@ -93,7 +93,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\
 Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,hello\n",
     )
     .unwrap();
-    let cues = imfwizard_core::subtitle_burn::load_styled_cues(&ass).unwrap();
+    let cues = imfwizard_core::subtitle_burn::load_styled_cues(&ass)
+        .unwrap()
+        .cues;
     assert_eq!(cues.len(), 1);
     assert_eq!(cues[0].plain_text(), "hello");
 }

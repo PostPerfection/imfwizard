@@ -299,6 +299,7 @@ fn a_lut_grades_every_frame_of_a_directory_into_numbered_frames() {
             &format!("{}{}", graded.display(), std::path::MAIN_SEPARATOR),
         ])
         .args(["-l", &lut.to_string_lossy()])
+        .args(["--fps-num", &FPS.to_string(), "--fps-den", "1"])
         .assert()
         .success();
 

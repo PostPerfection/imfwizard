@@ -2,6 +2,8 @@ pub use postkit::prores::*;
 
 use std::path::{Path, PathBuf};
 
+use postkit::ffmpeg_input::FrameSpan;
+
 use crate::timeline::{SegmentEntry, get_timeline_with_ov, list_cpls};
 
 const STDERR_TAIL_LINES: usize = 10;
@@ -115,11 +117,14 @@ pub fn export_imp_to_prores(
         .collect();
     // a segment with no sound would leave the concat filter short an input
     let has_sound = sounds.iter().all(Option::is_some);
-    let edit_rate = edit_rate_pair(&segments[0].edit_rate);
-    if has_sound && edit_rate.is_none() {
+    let sound_without_edit_rate = segments
+        .iter()
+        .find(|segment| edit_rate_pair(&segment.audio_edit_rate).is_none());
+    if has_sound && let Some(segment) = sound_without_edit_rate {
         return Err(format!(
-            "CPL {} names no edit rate, so its sound cannot be cut to its segments",
-            cpl_id
+            "CPL {} names no edit rate for the sound of segment {}, so its sound cannot be \
+             cut to its segments",
+            cpl_id, segment.segment_number
         ));
     }
 
@@ -140,8 +145,8 @@ pub fn export_imp_to_prores(
     for (index, segment) in segments.iter().enumerate() {
         let video_input = index * inputs_a_segment;
         graph.push_str(&format!(
-            "[{video_input}:v:0]{},setpts=PTS-STARTPTS[v{index}];",
-            frame_trim(segment)
+            "[{video_input}:v:0]{}[v{index}];",
+            segment_frame_span(segment).trim_filter()
         ));
         concat_inputs.push_str(&format!("[v{index}]"));
         if has_sound {
@@ -150,7 +155,8 @@ pub fn export_imp_to_prores(
                 "[{audio_input}:a:0]{},asetpts=PTS-STARTPTS[a{index}];",
                 second_trim(
                     segment,
-                    edit_rate.expect("sound needs an edit rate, checked above")
+                    edit_rate_pair(&segment.audio_edit_rate)
+                        .expect("sound needs an edit rate, checked above")
                 )
             ));
             concat_inputs.push_str(&format!("[a{index}]"));
@@ -216,26 +222,25 @@ fn ffmpeg_frame_rate(edit_rate: &str) -> Option<String> {
     Some(format!("{numerator}/{denominator}"))
 }
 
-// a resource plays SourceDuration frames from EntryPoint, and one that names no duration runs to the end
-fn frame_trim(segment: &SegmentEntry) -> String {
-    let start = segment.entry_point;
-    match segment.duration_frames {
-        0 => format!("trim=start_frame={start}"),
-        frames => format!("trim=start_frame={start}:end_frame={}", start + frames),
+pub fn segment_frame_span(segment: &SegmentEntry) -> FrameSpan {
+    FrameSpan {
+        entry_point: segment.entry_point,
+        duration_frames: segment.duration_frames,
     }
 }
 
 const TRIM_SECOND_DECIMALS: usize = 6;
 
-fn second_trim(segment: &SegmentEntry, edit_rate: (u32, u32)) -> String {
-    let (numerator, denominator) = edit_rate;
-    let seconds = |frames: u64| frames as f64 * denominator as f64 / numerator as f64;
-    let start = seconds(segment.entry_point);
+// the sound resource counts in its own edit units, samples when its EditRate is 48000 1
+fn second_trim(segment: &SegmentEntry, sound_edit_rate: (u32, u32)) -> String {
+    let (numerator, denominator) = sound_edit_rate;
+    let seconds = |edit_units: u64| edit_units as f64 * denominator as f64 / numerator as f64;
+    let start = seconds(segment.audio_entry_point);
     let decimals = TRIM_SECOND_DECIMALS;
-    match segment.duration_frames {
+    match segment.audio_duration_edit_units {
         0 => format!("atrim=start={start:.decimals$}"),
-        frames => {
-            let end = seconds(segment.entry_point + frames);
+        edit_units => {
+            let end = seconds(segment.audio_entry_point + edit_units);
             format!("atrim=start={start:.decimals$}:end={end:.decimals$}")
         }
     }
@@ -244,6 +249,25 @@ fn second_trim(segment: &SegmentEntry, edit_rate: (u32, u32)) -> String {
 #[cfg(test)]
 mod imp_export_tests {
     use super::*;
+
+    #[test]
+    fn the_sound_trim_reads_the_sound_resource_in_its_own_edit_units() {
+        const SAMPLE_RATE: (u32, u32) = (48000, 1);
+        let segment = SegmentEntry {
+            entry_point: 48,
+            duration_frames: 24,
+            edit_rate: "24 1".to_string(),
+            audio_entry_point: 24000,
+            audio_duration_edit_units: 96000,
+            audio_edit_rate: "48000 1".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            second_trim(&segment, SAMPLE_RATE),
+            "atrim=start=0.500000:end=2.500000"
+        );
+    }
 
     #[test]
     fn container_sizes() {

@@ -13,6 +13,9 @@ pub struct SegmentEntry {
     pub duration_frames: u64,
     pub entry_point: u64,
     pub edit_rate: String,
+    pub audio_duration_edit_units: u64,
+    pub audio_entry_point: u64,
+    pub audio_edit_rate: String,
     pub video_track_file_id: String,
     pub audio_track_file_id: String,
     pub video_file: String,
@@ -63,6 +66,9 @@ pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<Segme
     let mut in_image_seq = false;
     let mut in_audio_seq = false;
     let mut in_resource = false;
+    // a segment's first resource of each track is the one it plays
+    let mut picture_resource_read = false;
+    let mut sound_resource_read = false;
     let mut seg = SegmentEntry::default();
     // the element we are currently reading text for
     let mut cur: String = String::new();
@@ -80,6 +86,8 @@ pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<Segme
                             segment_number,
                             ..Default::default()
                         };
+                        picture_resource_read = false;
+                        sound_resource_read = false;
                     }
                     "MainImageSequence" => {
                         in_image_seq = true;
@@ -101,6 +109,8 @@ pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<Segme
                 if text.is_empty() {
                     continue;
                 }
+                let picture_resource = in_resource && in_image_seq && !picture_resource_read;
+                let sound_resource = in_resource && in_audio_seq && !sound_resource_read;
                 match cur.as_str() {
                     // segment id lives directly under Segment, before any sequence/resource
                     "Id" if !in_image_seq
@@ -110,37 +120,33 @@ pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<Segme
                     {
                         seg.segment_id = strip_urn(&text);
                     }
-                    "EditRate" if seg.edit_rate.is_empty() => seg.edit_rate = text,
-                    "TrackFileId" if in_resource => {
-                        let id = strip_urn(&text);
-                        if in_image_seq && seg.video_track_file_id.is_empty() {
-                            seg.video_track_file_id = id;
-                        } else if in_audio_seq && seg.audio_track_file_id.is_empty() {
-                            seg.audio_track_file_id = id;
-                        }
-                    }
-                    "SourceDuration" if in_resource => {
-                        if let Ok(v) = text.parse::<u64>() {
-                            seg.duration_frames = v;
-                        }
-                    }
-                    "IntrinsicDuration" if in_resource && seg.duration_frames == 0 => {
-                        if let Ok(v) = text.parse::<u64>() {
-                            seg.duration_frames = v;
-                        }
-                    }
-                    "EntryPoint" if in_resource => {
-                        if let Ok(v) = text.parse::<u64>() {
-                            seg.entry_point = v;
-                        }
-                    }
+                    "EditRate" if picture_resource => seg.edit_rate = text,
+                    "EditRate" if sound_resource => seg.audio_edit_rate = text,
+                    "TrackFileId" if picture_resource => seg.video_track_file_id = strip_urn(&text),
+                    "TrackFileId" if sound_resource => seg.audio_track_file_id = strip_urn(&text),
+                    element if picture_resource => read_resource_timing(
+                        element,
+                        &text,
+                        &mut seg.entry_point,
+                        &mut seg.duration_frames,
+                    ),
+                    element if sound_resource => read_resource_timing(
+                        element,
+                        &text,
+                        &mut seg.audio_entry_point,
+                        &mut seg.audio_duration_edit_units,
+                    ),
                     _ => {}
                 }
             }
             Ok(Event::End(e)) => {
                 cur.clear();
                 match local_name(e.name()).as_str() {
-                    "Resource" => in_resource = false,
+                    "Resource" => {
+                        in_resource = false;
+                        picture_resource_read |= in_image_seq;
+                        sound_resource_read |= in_audio_seq;
+                    }
                     "MainImageSequence" => in_image_seq = false,
                     "MainAudioSequence" => in_audio_seq = false,
                     "Segment" => {
@@ -170,6 +176,19 @@ pub fn get_timeline_with_ov(cpl_path: &Path, ov_dir: Option<&Path>) -> Vec<Segme
     }
 
     entries
+}
+
+// SourceDuration wins over IntrinsicDuration in either order
+fn read_resource_timing(element: &str, text: &str, entry_point: &mut u64, duration: &mut u64) {
+    let Ok(value) = text.parse::<u64>() else {
+        return;
+    };
+    match element {
+        "SourceDuration" => *duration = value,
+        "IntrinsicDuration" if *duration == 0 => *duration = value,
+        "EntryPoint" => *entry_point = value,
+        _ => {}
+    }
 }
 
 /// List CPLs in an IMP directory by scanning ASSETMAP.
@@ -377,5 +396,58 @@ mod tests {
         assert_eq!(t[0].duration_frames, 200);
         assert_eq!(t[0].entry_point, 5);
         assert_eq!(t[0].edit_rate, "24 1");
+    }
+
+    #[test]
+    fn each_track_keeps_the_span_of_its_own_resource() {
+        let dir = tempfile::tempdir().unwrap();
+        let cpl = dir.path().join("CPL.xml");
+        std::fs::write(
+            &cpl,
+            r#"<?xml version="1.0"?>
+<CompositionPlaylist>
+  <SegmentList><Segment>
+    <Id>urn:uuid:seg-1</Id>
+    <SequenceList>
+      <cc:MainImageSequence>
+        <ResourceList><Resource>
+          <EditRate>24 1</EditRate>
+          <IntrinsicDuration>240</IntrinsicDuration>
+          <EntryPoint>5</EntryPoint>
+          <SourceDuration>200</SourceDuration>
+          <TrackFileId>urn:uuid:video-1</TrackFileId>
+        </Resource><Resource>
+          <EditRate>24 1</EditRate>
+          <IntrinsicDuration>240</IntrinsicDuration>
+          <EntryPoint>7</EntryPoint>
+          <SourceDuration>9</SourceDuration>
+          <TrackFileId>urn:uuid:video-2</TrackFileId>
+        </Resource></ResourceList>
+      </cc:MainImageSequence>
+      <cc:MainAudioSequence>
+        <ResourceList><Resource>
+          <EditRate>48000 1</EditRate>
+          <IntrinsicDuration>480000</IntrinsicDuration>
+          <SourceDuration>400000</SourceDuration>
+          <TrackFileId>urn:uuid:audio-1</TrackFileId>
+        </Resource></ResourceList>
+      </cc:MainAudioSequence>
+    </SequenceList>
+  </Segment></SegmentList>
+</CompositionPlaylist>"#,
+        )
+        .unwrap();
+
+        let t = get_timeline(&cpl);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].video_track_file_id, "video-1");
+        assert_eq!((t[0].entry_point, t[0].duration_frames), (5, 200));
+        assert_eq!(t[0].edit_rate, "24 1");
+        assert_eq!(t[0].audio_track_file_id, "audio-1");
+        assert_eq!(
+            (t[0].audio_entry_point, t[0].audio_duration_edit_units),
+            (0, 400000)
+        );
+        assert_eq!(t[0].audio_edit_rate, "48000 1");
     }
 }

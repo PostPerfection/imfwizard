@@ -616,6 +616,73 @@ jobs:
           if ($process.MainWindowHandle -eq 0) { throw "Installed application did not open a window" }
           Stop-Process -Id $process.Id
 
+      - name: Test installed GUI (Windows, msi)
+        if: runner.os == 'Windows'
+        run: |
+          $nsisEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+            Where-Object { $_.DisplayName -eq "IMF Wizard" } |
+            Select-Object -First 1
+          if ($null -eq $nsisEntry) { throw "NSIS installer was not registered" }
+          $uninstall = Start-Process -FilePath $nsisEntry.UninstallString.Trim('"') -ArgumentList "/S" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstaller exited with $($uninstall.ExitCode)" }
+          # the NSIS uninstaller returns before it removes the entry
+          foreach ($attempt in 1..30) {
+            $nsisEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+              Where-Object { $_.DisplayName -eq "IMF Wizard" } |
+              Select-Object -First 1
+            if ($null -eq $nsisEntry) { break }
+            Start-Sleep -Seconds 1
+          }
+          if ($null -ne $nsisEntry) { throw "NSIS installer was still registered after uninstall" }
+
+          $installer = Get-ChildItem "gui/src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if ($null -eq $installer) { throw "msi not found" }
+
+          $install = Start-Process -FilePath msiexec -ArgumentList "/i `"$($installer.FullName)`" /qn" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "msi exited with $($install.ExitCode)" }
+
+          $uninstallKeys = @(
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+          )
+          $entry = Get-ItemProperty $uninstallKeys |
+            Where-Object { $_.DisplayName -eq "IMF Wizard" } |
+            Select-Object -First 1
+          if ($null -eq $entry) { throw "Installed application was not registered" }
+
+          $installDirectory = "$($entry.InstallLocation)".Trim('"')
+          if ($installDirectory -eq "") { $installDirectory = Split-Path ($entry.DisplayIcon -replace ',\d+$', '').Trim('"') }
+          foreach ($dll in Get-ChildItem gui/src-tauri/*.dll) {
+            if (-not (Test-Path (Join-Path $installDirectory $dll.Name))) { throw "the msi does not carry $($dll.Name)" }
+          }
+          $runnerPath = $env:PATH
+          $env:PATH = @("$env:SystemRoot\System32", $installDirectory) -join [IO.Path]::PathSeparator
+          & (Join-Path $installDirectory "imfwizard.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "the installed sidecar exited with $LASTEXITCODE" }
+          $env:PATH = $runnerPath
+          $application = Get-ChildItem "$installDirectory/*.exe" |
+            Where-Object { $_.Name -notmatch "uninstall" } |
+            Select-Object -First 1
+          if ($null -eq $application) { throw "Installed application executable not found" }
+
+          $process = Start-Process -FilePath $application.FullName -PassThru
+          foreach ($attempt in 1..30) {
+            Start-Sleep -Seconds 1
+            $process.Refresh()
+            if ($process.HasExited) { throw "Installed application exited with $($process.ExitCode)" }
+            if ($process.MainWindowHandle -ne 0) { break }
+          }
+          if ($process.MainWindowHandle -eq 0) { throw "Installed application did not open a window" }
+          Stop-Process -Id $process.Id
+          $process.WaitForExit()
+
+          $uninstall = Start-Process -FilePath msiexec -ArgumentList "/x `"$($installer.FullName)`" /qn" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "msi uninstall exited with $($uninstall.ExitCode)" }
+          $entry = Get-ItemProperty $uninstallKeys |
+            Where-Object { $_.DisplayName -eq "IMF Wizard" } |
+            Select-Object -First 1
+          if ($null -ne $entry) { throw "msi was still registered after uninstall" }
+
       - name: Upload GUI packages
         uses: actions/upload-artifact@v4
         with:

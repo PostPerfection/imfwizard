@@ -80,7 +80,8 @@ pub fn timed_text_as_ttml(
     if readable_source_format(input)?.is_ttml() {
         return Ok(input.to_path_buf());
     }
-    convert_subtitles(
+    // the hint pass reports the dropped override tags
+    convert_listing_dropped_tags(
         input,
         converted,
         SubtitleFormat::ImscTtml,
@@ -167,6 +168,25 @@ pub fn convert_subtitles(
     appearance: &TextAppearance,
     language: Option<&str>,
 ) -> Result<(), String> {
+    let dropped_override_tags =
+        convert_listing_dropped_tags(input, output, target_format, appearance, language)?;
+    for tag in &dropped_override_tags {
+        eprintln!("warning: {}", unsupported_override_tag_message(tag));
+    }
+    Ok(())
+}
+
+pub fn unsupported_override_tag_message(tag: &str) -> String {
+    format!("unsupported ASS override tag {tag}")
+}
+
+fn convert_listing_dropped_tags(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    target_format: SubtitleFormat,
+    appearance: &TextAppearance,
+    language: Option<&str>,
+) -> Result<Vec<String>, String> {
     appearance.check()?;
     let source_format = readable_source_format(input)?;
 
@@ -179,15 +199,22 @@ pub fn convert_subtitles(
             );
         }
         std::fs::copy(input, output).map_err(|e| format!("Failed to copy TTML: {e}"))?;
-        return Ok(());
+        return Ok(Vec::new());
     }
 
-    match parse_source_cues(input, source_format)? {
+    let parsed = parse_source_cues(input, source_format)?;
+    match parsed.cues {
         SourceCues::Styled(cues) => {
             write_styled_or_flat(&cues, output, target_format, appearance, language)
         }
         SourceCues::Plain(cues) => write_ttml(&cues, output, target_format, appearance, language),
-    }
+    }?;
+    Ok(parsed.dropped_override_tags)
+}
+
+pub struct ParsedCues<Cues> {
+    pub cues: Cues,
+    pub dropped_override_tags: Vec<String>,
 }
 
 enum SourceCues {
@@ -198,41 +225,55 @@ enum SourceCues {
 fn parse_source_cues(
     input: &std::path::Path,
     source_format: SubtitleFormat,
-) -> Result<SourceCues, String> {
+) -> Result<ParsedCues<SourceCues>, String> {
     let read = || std::fs::read_to_string(input).map_err(|e| format!("Failed to read input: {e}"));
-    match source_format {
+    let cues = match source_format {
         SubtitleFormat::Ass => {
             let parsed = postkit::subtitle_formats::ass::parse_ass(&read()?)
                 .map_err(|e| format!("ASS parse: {e}"))?;
-            for w in &parsed.warnings {
-                eprintln!("warning: unsupported ASS override tag {w}");
-            }
-            Ok(SourceCues::Styled(parsed.cues))
+            return Ok(ParsedCues {
+                cues: SourceCues::Styled(parsed.cues),
+                dropped_override_tags: parsed.warnings,
+            });
         }
         SubtitleFormat::Fcpxml => postkit::subtitle_formats::fcpxml::parse_fcpxml(&read()?)
             .map(SourceCues::Styled)
-            .map_err(|e| format!("FCPXML parse: {e}")),
+            .map_err(|e| format!("FCPXML parse: {e}"))?,
         SubtitleFormat::Mks => postkit::subtitle_formats::mks::parse_mks(input, None)
             .map(SourceCues::Styled)
-            .map_err(|e| format!("MKS parse: {e}")),
-        SubtitleFormat::Scc => crate::scc::parse_scc(&read()?).map(SourceCues::Plain),
-        _ => Ok(SourceCues::Plain(parse_srt(&read()?))),
-    }
+            .map_err(|e| format!("MKS parse: {e}"))?,
+        SubtitleFormat::Scc => crate::scc::parse_scc(&read()?).map(SourceCues::Plain)?,
+        _ => SourceCues::Plain(parse_srt(&read()?)),
+    };
+    Ok(ParsedCues {
+        cues,
+        dropped_override_tags: Vec::new(),
+    })
 }
 
-pub fn read_subtitle_cues(input: &std::path::Path, fps: f64) -> Result<Vec<TimedTextCue>, String> {
+pub fn read_subtitle_cues(
+    input: &std::path::Path,
+    fps: f64,
+) -> Result<ParsedCues<Vec<TimedTextCue>>, String> {
     let source_format = readable_source_format(input)?;
     if source_format.is_ttml() {
-        return crate::source_edits::read_timed_text_cues(input, fps);
+        return Ok(ParsedCues {
+            cues: crate::source_edits::read_timed_text_cues(input, fps)?,
+            dropped_override_tags: Vec::new(),
+        });
     }
-    let cues = match parse_source_cues(input, source_format)? {
+    let parsed = parse_source_cues(input, source_format)?;
+    let cues = match parsed.cues {
         SourceCues::Styled(cues) => to_srt_cues(&cues),
         SourceCues::Plain(cues) => cues,
     };
-    Ok(cues
-        .iter()
-        .map(|cue| TimedTextCue::from_text(cue.start_ms, cue.end_ms, &cue.text))
-        .collect())
+    Ok(ParsedCues {
+        cues: cues
+            .iter()
+            .map(|cue| TimedTextCue::from_text(cue.start_ms, cue.end_ms, &cue.text))
+            .collect(),
+        dropped_override_tags: parsed.dropped_override_tags,
+    })
 }
 
 fn write_styled_or_flat(

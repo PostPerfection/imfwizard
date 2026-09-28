@@ -19,7 +19,6 @@ pub mod preflight;
 pub mod probe;
 pub mod source_edits;
 pub mod source_picture;
-pub mod transcode;
 
 // HDR/Color
 pub mod aces;
@@ -50,7 +49,6 @@ pub mod preferences;
 pub mod rest_api;
 pub mod store;
 pub mod tools;
-pub mod watch;
 
 // Delivery
 pub mod profiles;
