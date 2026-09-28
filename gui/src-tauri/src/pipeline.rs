@@ -861,7 +861,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     let output = &job.output_dir;
     std::fs::create_dir_all(output)
         .map_err(|e| format!("Cannot create the output folder {}: {e}", output.display()))?;
-    let log_path = output.join("imfwizard.log");
+    let log_path = imfwizard_core::imp::job_log_path(output)?;
     let log_file = Arc::new(Mutex::new(std::fs::File::create(&log_path).map_err(
         |e| format!("Cannot create the job log {}: {e}", log_path.display()),
     )?));

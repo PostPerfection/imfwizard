@@ -7,6 +7,7 @@
 - **The Windows release installs the msi too**: after the NSIS check, the release workflow uninstalls the NSIS install, installs the msi, checks it carries every staged dll, runs the sidecar and opens the app from it, then uninstalls it.
 
 ### Fixed
+- **The desktop job log is written beside the package**: `imfwizard.log` sat inside the IMP folder where validators read it as a file the ASSETMAP does not list, and the log for a package at `<output>` is now `<output>.log` in the folder above it.
 - **A frame directory given to `compare`, `lut`, `aces`, `slate` or `prores` needs `--fps-num` and `--fps-den`**: the five commands played every frame directory at 24 fps with no flag and no message, and now refuse one without the flags and refuse the flags for a file or IMP input.
 - **`compare --pixel` and `--vmaf` read only the frames an IMP's CPL plays**: an IMP input read its whole picture track file, and now it is cut to the resource's EntryPoint and SourceDuration the way `prores` cuts it.
 - **An ASS override tag warning prints once per run**: `create` printed it for every parse of the file, two or three times, and now its hint pass prints it once, `--check` included, and `subtitle-convert` prints it once.

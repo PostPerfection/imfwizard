@@ -185,6 +185,21 @@ pub fn track_file_path(output_dir: &Path, prefix: &str, asset_uuid: &uuid::Uuid)
     output_dir.join(format!("{prefix}_{asset_uuid}.mxf"))
 }
 
+const JOB_LOG_SUFFIX: &str = ".log";
+
+// a file inside the IMP that the ASSETMAP does not list fails validation
+pub fn job_log_path(output: &Path) -> Result<PathBuf, String> {
+    let (Some(parent), Some(folder_name)) = (output.parent(), output.file_name()) else {
+        return Err(format!(
+            "Cannot place the job log beside {}: the path has no folder name",
+            output.display()
+        ));
+    };
+    let mut log_name = folder_name.to_os_string();
+    log_name.push(JOB_LOG_SUFFIX);
+    Ok(parent.join(log_name))
+}
+
 pub(crate) fn wrap_one(
     opts: &ImpOptions,
     output_dir: &Path,
@@ -583,6 +598,29 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_job_log_sits_beside_the_package() {
+        assert_eq!(
+            job_log_path(Path::new("/deliveries/Feature_IMP")).unwrap(),
+            PathBuf::from("/deliveries/Feature_IMP.log")
+        );
+        assert_eq!(
+            job_log_path(Path::new("/deliveries/Feature_IMP/")).unwrap(),
+            PathBuf::from("/deliveries/Feature_IMP.log")
+        );
+    }
+
+    #[test]
+    fn a_package_path_without_a_folder_name_has_no_job_log() {
+        for output in ["/", "..", "/deliveries/.."] {
+            let error = job_log_path(Path::new(output)).unwrap_err();
+            assert!(
+                error.contains(output),
+                "the error does not name {output}: {error}"
+            );
+        }
+    }
 
     #[test]
     fn a_layout_without_a_standard_group_is_numbered_sources() {
