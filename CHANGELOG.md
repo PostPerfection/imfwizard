@@ -16,6 +16,7 @@
 - **The Settings page lists the component versions**: a Components box shows the versions of the app, PostKit, Grok, FFmpeg and mpv. Every job log starts with the same lines.
 
 ### Fixed
+- **The settings Save button stays in view**: the settings page is taller than a small window and the Save and Reset buttons scrolled off the bottom, so the row now sits at the foot of the visible page until the end of the form is reached.
 - **`aces`, `slate` and `prores` read a directory of frames**: the three commands handed a directory to `ffmpeg -i`, which cannot open one, and `prores` sent every directory to the IMP export, which refused a frame folder as holding no CPL. A directory of numbered frames is now read as its ffmpeg pattern from its first frame number at 24 fps, and a directory output from `aces` or `slate` gets `frame_000001` onward, TIFF for `aces` and the input's image format for `slate`. A gap in the numbering is refused naming the frame.
 - **`compare --pixel` and `--vmaf` read two IMP directories**: both handed the directories to ffmpeg and failed. Each IMP now gives the picture track file its first CPL plays, and a CPL with more than one picture track file is refused.
 - **`lut` and `compare --pixel`/`--vmaf` read a directory of frames**: both handed a directory to `ffmpeg -i` and failed. A directory of numbered frames is now read as its ffmpeg pattern from its first frame number at 24 fps, and a directory output from `lut` gets `frame_000001` onward in the input's image format.
