@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [1.4.0] - 2026-09-28
+
 ### Changed
 - **`validate --xsd` carries its schemas**: with no `--schema-dir`, `validate --xsd` looked for schemas under /usr/share and in `IMF_SCHEMA_DIR` and failed when neither held any, and a `--schema-dir` holding only the CPL schema skipped the PKL and AssetMap. The binary now carries the ST 2067-3 CPL, ST 2067-2 PKL, ST 429-9 AssetMap and ST 2067-100 OPL schemas from the SMPTE registry with the dcmlTypes, xmldsig and XML namespace schemas they import, and checks every CPL, PKL, AssetMap and OPL against them offline. The carried PKL schema joins the UUID pattern the published file wraps across a line break, which rejected every PKL Id. `--schema-dir` and then `IMF_SCHEMA_DIR` replace the carried set, the /usr/share lookup is gone, and SKIPPED now prints only for a document with no schema in that directory.
 - **A video file is packaged at its own frame rate**: `create` declared 24/1 in the CPL and the picture MXF unless `--fps-num`/`--fps-den` said otherwise, so a 25 fps file was encoded at 25 and declared 24. With neither flag, a video file is now encoded and declared at the rate ffprobe reads from it, and a named rate it does not play at is refused before the encode, `--check` included. Image sequences, codestream directories and held stills still take the flags or 24/1. The GUI refuses a Frame Rate the video does not play at, and selects the probed rate on import for every rate the list offers.
