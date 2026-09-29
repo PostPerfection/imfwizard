@@ -80,13 +80,14 @@ impl ExecutorQueue {
 /// `input`/`output`/`description` are the only parameters the queue carries, so
 /// richer jobs (Create) take their title from `description`. Job types that need
 /// parameters the queue cannot express fail loud rather than silently no-op.
-pub fn execute_job(job: &Job, cancel: &Arc<AtomicBool>) -> Result<(), String> {
+pub fn execute_job(job: &Job, encode_threads: u32, cancel: &Arc<AtomicBool>) -> Result<(), String> {
     match job.job_type {
         JobType::Encode => crate::encode::encode_image_sequence(
             &job.input,
             &job.output,
             crate::encode::DEFAULT_ENCODE_BITRATE_MBPS,
             crate::encode::FrameRate::default(),
+            encode_threads,
             cancel,
         )
         .map(|_| ()),
@@ -145,12 +146,12 @@ pub fn execute_job(job: &Job, cancel: &Arc<AtomicBool>) -> Result<(), String> {
 
 /// Worker loop: pick the next runnable job, run it, record the outcome. Runs
 /// until `stop` is set and no runnable job remains. One worker per queue.
-pub fn run_worker(queue: ExecutorQueue, stop: Arc<AtomicBool>) {
+pub fn run_worker(queue: ExecutorQueue, encode_threads: u32, stop: Arc<AtomicBool>) {
     loop {
         match queue.queue.next_runnable() {
             Some(job) => {
                 if let Some(cancel) = queue.start(job.id) {
-                    queue.finish(job.id, execute_job(&job, &cancel));
+                    queue.finish(job.id, execute_job(&job, encode_threads, &cancel));
                 }
             }
             None => {
@@ -165,11 +166,11 @@ pub fn run_worker(queue: ExecutorQueue, stop: Arc<AtomicBool>) {
 
 /// Spawn `run_worker` on a background thread over a clone of the queue. The
 /// returned flag stops the worker when set (after the current job, if any).
-pub fn spawn_worker(queue: &ExecutorQueue) -> Arc<AtomicBool> {
+pub fn spawn_worker(queue: &ExecutorQueue, encode_threads: u32) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
     let queue = queue.clone();
     let stop_clone = stop.clone();
-    std::thread::spawn(move || run_worker(queue, stop_clone));
+    std::thread::spawn(move || run_worker(queue, encode_threads, stop_clone));
     stop
 }
 
@@ -184,7 +185,14 @@ mod tests {
             job_type: JobType::Kdm,
             ..Default::default()
         };
-        assert!(execute_job(&job, &Arc::default()).is_err());
+        assert!(
+            execute_job(
+                &job,
+                crate::preferences::AUTOMATIC_ENCODE_THREADS,
+                &Arc::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -196,7 +204,14 @@ mod tests {
             input: PathBuf::from("/nonexistent/imp/dir"),
             ..Default::default()
         };
-        assert!(execute_job(&job, &Arc::default()).is_err());
+        assert!(
+            execute_job(
+                &job,
+                crate::preferences::AUTOMATIC_ENCODE_THREADS,
+                &Arc::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -208,7 +223,11 @@ mod tests {
             ..Default::default()
         });
         let stop = Arc::new(AtomicBool::new(true));
-        run_worker(queue.clone(), stop);
+        run_worker(
+            queue.clone(),
+            crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            stop,
+        );
         // the job must have been executed (and failed), not left queued
         assert_eq!(queue.get(id).unwrap().state, JobState::Failed);
     }

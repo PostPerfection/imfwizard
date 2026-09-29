@@ -4,7 +4,11 @@
 
 ### Changed
 - **`watch` and `transcode` run postkit's code**: the watch folder loop is `postkit::watch`, and `transcode` and the REST transcode job run `postkit::transcode::transcode`, the same code DCP Wizard runs.
+- **The release and CI builds carry grok v20.4.14, and a bitrate no frame fits under fails with grok's message**: grok v20.4.14 refuses to start a codestream whose per-frame byte cap is below its packet headers, so the encode fails with `grok cannot fit a frame under the N byte per-frame cap: lower the bitrate`, where v20.4.12 wrote the frame over the cap and the codestream writer's size check failed the run.
 - **The Windows release installs the msi too**: after the NSIS check, the release workflow uninstalls the NSIS install, installs the msi, checks it carries every staged dll, runs the sidecar and opens the app from it, then uninstalls it.
+
+### Added
+- **An encode threads setting**: `--threads N` and the desktop *Encode threads* field, saved as `encodeThreads`, set how many threads the encoder runs and size the accelerator plugin's host threads to the same count. 0 or an empty field runs one per available CPU, and the desktop job log prints the count on an `Encode threads:` line.
 
 ### Fixed
 - **The desktop job log is written beside the package**: `imfwizard.log` sat inside the IMP folder where validators read it as a file the ASSETMAP does not list, and the log for a package at `<output>` is now `<output>.log` in the folder above it.

@@ -33,6 +33,7 @@ pub struct ToDcpOptions {
     pub content_kind: String,
     // defaults to the DCI maximum, is refused above it, and the rewrap path ignores it
     pub bitrate_mbps: Option<f64>,
+    pub encode_threads: u32,
 }
 
 /// Result of IMP to DCP conversion.
@@ -142,8 +143,14 @@ fn build_dcp(
             let bitrate_mbps = opts
                 .bitrate_mbps
                 .unwrap_or(postkit::j2k::DCI_MAX_BITRATE_MBPS);
-            let rsiz =
-                transcode_picture_to_cinema(pic_path, pic, edit_rate, bitrate_mbps, &frame_dir)?;
+            let rsiz = transcode_picture_to_cinema(
+                pic_path,
+                pic,
+                edit_rate,
+                bitrate_mbps,
+                opts.encode_threads,
+                &frame_dir,
+            )?;
             let container = match rsiz {
                 postkit::j2k::CINEMA_4K_RSIZ => "4K",
                 _ => "2K",
@@ -488,6 +495,7 @@ fn transcode_picture_to_cinema(
     pic: &PictureInfo,
     edit_rate: u32,
     bitrate_mbps: f64,
+    encode_threads: u32,
     j2k_dir: &Path,
 ) -> Result<u16, String> {
     let dci_max = postkit::j2k::DCI_MAX_BITRATE_MBPS;
@@ -514,6 +522,7 @@ fn transcode_picture_to_cinema(
         fps,
         source_colour: postkit::encode::SourceColour::DisplayRgb,
         rsiz,
+        encode_threads,
         ..Default::default()
     };
 
@@ -988,9 +997,15 @@ mod tests {
             fps_num: 24,
             fps_den: 1,
         };
-        let refusal =
-            transcode_picture_to_cinema(&mxf, &picture, 24, over, &directory.path().join("out"))
-                .expect_err("a bitrate over the DCI limit has to be refused");
+        let refusal = transcode_picture_to_cinema(
+            &mxf,
+            &picture,
+            24,
+            over,
+            crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            &directory.path().join("out"),
+        )
+        .expect_err("a bitrate over the DCI limit has to be refused");
         assert!(
             refusal.contains(&over.to_string()) && refusal.contains("250"),
             "the refusal names neither the bitrate nor the limit: {refusal:?}"

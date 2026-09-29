@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const CURRENT_PREFERENCES_VERSION: u32 = 2;
+pub const AUTOMATIC_ENCODE_THREADS: u32 = 0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -43,6 +44,7 @@ pub struct Preferences {
     pub gpu: bool,
     pub gpu_license: String,
     pub gpu_registration_url: String,
+    pub encode_threads: u32,
     #[serde(flatten)]
     pub additional: BTreeMap<String, serde_json::Value>,
 }
@@ -71,6 +73,7 @@ impl Default for Preferences {
             gpu: false,
             gpu_license: String::new(),
             gpu_registration_url: String::new(),
+            encode_threads: AUTOMATIC_ENCODE_THREADS,
             additional: BTreeMap::new(),
         }
     }
@@ -181,6 +184,32 @@ mod tests {
         );
         assert!(saved.contains("gpuRegistrationUrl"));
         assert!(saved.contains("gpu_device"));
+    }
+
+    #[test]
+    fn a_file_without_encode_threads_encodes_on_automatic_threads() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("preferences.json");
+        let contents = format!(r#"{{"version":{CURRENT_PREFERENCES_VERSION},"gpu":true}}"#);
+        postkit::preferences::write_preferences_file(&path, &contents).unwrap();
+
+        let preferences = load_preferences_from(&path).unwrap().unwrap();
+
+        assert_eq!(preferences.encode_threads, AUTOMATIC_ENCODE_THREADS);
+        assert!(!preferences.additional.contains_key("encodeThreads"));
+    }
+
+    #[test]
+    fn saved_preferences_name_the_encode_threads() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("preferences.json");
+
+        save_preferences_to(&Preferences::default(), &path).unwrap();
+
+        let saved = postkit::preferences::read_preferences_file(&path)
+            .unwrap()
+            .unwrap();
+        assert!(saved.contains(r#""encodeThreads": 0"#));
     }
 
     #[test]

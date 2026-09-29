@@ -791,6 +791,14 @@ fn log_to(log_file: &Arc<Mutex<std::fs::File>>, msg: &str) {
 
 const SECONDS_PER_MINUTE: u64 = 60;
 
+fn encode_threads_status(encode_threads: u32) -> String {
+    let count = postkit::grok_encoder::encode_thread_count(encode_threads);
+    if encode_threads == imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS {
+        return format!("{count} (automatic)");
+    }
+    count.to_string()
+}
+
 /// One `[TIMING]` line for the job log, sitting alongside the `[ENCODE]` and
 /// `[PACKAGE]` lines the same stage writes.
 fn format_stage_timing(stage: &str, duration: std::time::Duration) -> String {
@@ -880,9 +888,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     log_to(&log_file, &format!("Job ID: {}", job.id));
     log_to(&log_file, &format!("Title: {}", job.title));
     log_to(&log_file, &format!("Output: {}", output.display()));
+    let encode_threads = imfwizard_core::preferences::load_preferences()
+        .map_err(|e| format!("Cannot load the preferences: {e}"))?
+        .encode_threads;
     log_to(
         &log_file,
         &format!("Accelerator: {}", guikit::gpu::accelerator_status()),
+    );
+    log_to(
+        &log_file,
+        &format!("Encode threads: {}", encode_threads_status(encode_threads)),
     );
     log_to(
         &log_file,
@@ -1109,6 +1124,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     filters: &plan.plan.filters,
                     apply_xyz_transform: job.source_colour.applies_xyz_transform(),
                     rsiz: still_rsiz,
+                    encode_threads,
                     colour_transform: job.source_colour.frame_transform()?,
                     burn: subtitle_burn.clone(),
                     watermark: None,
@@ -1139,6 +1155,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                         .as_ref()
                         .map(|resolved| resolved.processing.clone())
                         .unwrap_or_default(),
+                    encode_threads,
                     ..Default::default()
                 };
                 let on_progress = |p: &postkit::pipeline::PipelineProgress| {
@@ -1418,8 +1435,8 @@ fn emit_progress(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_encode_breakdown, format_stage_timing, verification_log, verify_package,
-        CompositionInput, SourceSettings,
+        encode_threads_status, format_encode_breakdown, format_stage_timing, verification_log,
+        verify_package, CompositionInput, SourceSettings,
     };
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -1683,6 +1700,15 @@ mod tests {
             format_stage_timing("total", Duration::from_secs(3600)),
             "[TIMING] total took 60m0s"
         );
+    }
+
+    #[test]
+    fn the_thread_count_says_when_it_was_chosen_automatically() {
+        assert_eq!(encode_threads_status(2), "2");
+        let automatic =
+            encode_threads_status(imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS);
+        assert!(automatic.ends_with(" (automatic)"), "{automatic}");
+        assert_ne!(automatic, "0 (automatic)");
     }
 
     #[test]

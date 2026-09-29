@@ -772,6 +772,10 @@
                   <label><input type="checkbox" id="set-gpu-enable"> Encode on the GPU (grok accelerator plugin)</label>
                 </div>
                 <div class="prop-field">
+                  <label for="set-encode-threads">Encode threads</label>
+                  <input type="number" id="set-encode-threads" min="0" step="1" placeholder="Automatic">
+                </div>
+                <div class="prop-field">
                   <label for="set-gpu-license">Grok License</label>
                   <div class="input-with-btn">
                     <input type="password" id="set-gpu-license" autocomplete="off" spellcheck="false">
@@ -781,10 +785,6 @@
                 <div class="prop-field">
                   <label for="set-gpu-registration-url">Registration URL</label>
                   <input type="url" id="set-gpu-registration-url" placeholder="Use the plugin default" spellcheck="false">
-                </div>
-                <div class="prop-field">
-                  <label for="set-threads">Encoding Threads (0 = auto)</label>
-                  <input type="number" id="set-threads" value="0" min="0" max="64">
                 </div>
               </fieldset>
               <fieldset>

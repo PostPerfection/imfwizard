@@ -26,6 +26,7 @@ fn serve() -> SocketAddr {
         host: "127.0.0.1".into(),
         port: 0,
         api_key: Some(API_KEY.into()),
+        encode_threads: imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS,
     };
     let (server, listener) = bind_server(&config).unwrap();
     let address = listener.local_addr().unwrap();

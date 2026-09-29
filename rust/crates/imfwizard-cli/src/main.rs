@@ -26,6 +26,14 @@ struct Cli {
     #[arg(long, global = true, conflicts_with = "gpu")]
     no_gpu: bool,
 
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        help = "Encoder threads on the CPU and in the accelerator plugin, 0 for one per available CPU"
+    )]
+    threads: Option<u32>,
+
     #[arg(long, global = true, help = "Grok accelerator plugin license")]
     license: Option<String>,
 
@@ -1902,6 +1910,7 @@ fn run() {
         .registration_url
         .as_deref()
         .or_else(|| nonempty(&preferences.gpu_registration_url));
+    let encode_threads = cli.threads.unwrap_or(preferences.encode_threads);
 
     if (cli.license.is_some() || cli.registration_url.is_some()) && !gpu_enabled {
         eprintln!("--license and --registration-url require GPU encoding");
@@ -1912,11 +1921,14 @@ fn run() {
         std::process::exit(2);
     }
 
-    postkit::grok_encoder::initialize(0);
+    postkit::grok_encoder::initialize(encode_threads);
 
     if gpu_enabled
-        && let Err(e) =
-            postkit::grok_encoder::use_gpu_with_authentication(license, registration_url)
+        && let Err(e) = postkit::grok_encoder::use_gpu_with_authentication(
+            license,
+            registration_url,
+            encode_threads,
+        )
     {
         // the preference file is the GUI's too
         if cli.gpu {
@@ -2230,6 +2242,7 @@ fn run() {
                     filters: &picture.plan.filters,
                     apply_xyz_transform: source_colour.applies_xyz_transform(),
                     rsiz,
+                    encode_threads,
                     colour_transform: source_colour.frame_transform().unwrap_or_else(|e| fail(e)),
                     burn: build_subtitle_burn(fps),
                     watermark: None,
@@ -2415,6 +2428,7 @@ fn run() {
                                 rsiz,
                                 subtitle_burn: build_subtitle_burn(edit_rate),
                                 picture: picture.processing.clone(),
+                                encode_threads,
                                 ..Default::default()
                             },
                             wrap_target,
@@ -2603,6 +2617,7 @@ fn run() {
                 &output,
                 bitrate,
                 imfwizard_core::encode::FrameRate::default(),
+                encode_threads,
                 &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             );
             match result {
@@ -3211,6 +3226,7 @@ fn run() {
                 title,
                 content_kind: kind,
                 bitrate_mbps: bitrate,
+                encode_threads,
             };
             let result = imfwizard_core::to_dcp::imp_to_dcp(&opts);
             if result.success {
@@ -3362,6 +3378,7 @@ fn run() {
                 host,
                 port,
                 api_key,
+                encode_threads,
             };
             if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
                 eprintln!("Error: {e}");
@@ -3516,6 +3533,7 @@ fn run() {
                     let conformed = imfwizard_core::conform::conform_to_imp(
                         &plan,
                         std::path::Path::new(&output),
+                        encode_threads,
                     )
                     .unwrap_or_else(|e| fail(e));
                     println!(

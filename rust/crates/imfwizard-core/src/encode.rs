@@ -17,6 +17,7 @@ pub fn encode_image_sequence(
     output_dir: &std::path::Path,
     bitrate_mbps: f64,
     fps: FrameRate,
+    encode_threads: u32,
     cancel: &Arc<AtomicBool>,
 ) -> Result<postkit::pipeline::EncodeResult, String> {
     let (width, height) = postkit::encode::source_raster(input_dir)?;
@@ -33,6 +34,7 @@ pub fn encode_image_sequence(
             fps,
             source_colour: postkit::encode::SourceColour::KeepRgb,
             rsiz,
+            encode_threads,
             ..postkit::pipeline::EncodeRunOptions::default()
         },
         cancel,

@@ -222,7 +222,11 @@ pub struct ConformResult {
 /// Build an IMP whose one composition follows the plan: one picture track file
 /// per event, played in order through the main image track, and the sound cut
 /// from the same media through the main audio track.
-pub fn conform_to_imp(plan: &ConformPlan, output_dir: &Path) -> Result<ConformResult, String> {
+pub fn conform_to_imp(
+    plan: &ConformPlan,
+    output_dir: &Path,
+    encode_threads: u32,
+) -> Result<ConformResult, String> {
     std::fs::create_dir_all(output_dir)
         .map_err(|e| format!("cannot create {}: {e}", output_dir.display()))?;
     let raster = checked_raster(plan)?;
@@ -261,7 +265,7 @@ pub fn conform_to_imp(plan: &ConformPlan, output_dir: &Path) -> Result<ConformRe
             event.source_in,
             event.source_out
         );
-        let picture = encode_event_picture(event, index, output_dir, plan, rsiz)?;
+        let picture = encode_event_picture(event, index, output_dir, plan, rsiz, encode_threads)?;
         let frames = picture.duration;
         options.duration = frames;
         manifest.events[index].picture_track_file = file_name(&picture.path);
@@ -335,6 +339,7 @@ fn encode_event_picture(
     output_dir: &Path,
     plan: &ConformPlan,
     rsiz: u16,
+    encode_threads: u32,
 ) -> Result<crate::MxfTrackFile, String> {
     let encode_dir = output_dir.join(format!(
         "{}{index}",
@@ -351,6 +356,7 @@ fn encode_event_picture(
             frame_count: event.frames(),
         }),
         rsiz,
+        encode_threads,
         ..Default::default()
     };
     let cancel = Arc::new(AtomicBool::new(false));

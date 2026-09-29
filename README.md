@@ -277,7 +277,7 @@ export GRK_PLUGIN_PATH=/path/to/grok/lib64
 imfwizard --gpu create --title "My Film" --video master.mov --output ./imp
 ```
 
-The desktop GPU setting applies to encode and preview decode. Its job log, written beside the package as `<output>.log`, prints `Accelerator: requested, active` and `[ENCODE] Frames on the device: N of M` when the plugin ran. Use `--no-gpu` to override a saved GPU preference for one CLI run.
+The desktop GPU setting applies to encode and preview decode. Its job log, written beside the package as `<output>.log`, prints `Accelerator: requested, active` and `[ENCODE] Frames on the device: N of M` when the plugin ran. Use `--no-gpu` to override a saved GPU preference for one CLI run. `--threads N` sets the encoder threads, and the same count sizes the accelerator plugin's host threads. The desktop *Encode threads* setting under the GPU checkbox is saved as `encodeThreads` and applies to the GUI and to a CLI run without `--threads`. 0, an empty field, or no flag and no saved setting runs one thread per available CPU. The desktop job log prints the count as `Encode threads: N`.
 
 **GPU encoding on Fedora.** An rpm with the CUDA plugin is built from a local Grok installation that carries it:
 

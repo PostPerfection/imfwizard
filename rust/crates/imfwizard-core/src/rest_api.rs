@@ -20,6 +20,7 @@ pub struct ApiConfig {
     pub host: String,
     pub port: u16,
     pub api_key: Option<String>,
+    pub encode_threads: u32,
 }
 
 impl Default for ApiConfig {
@@ -28,6 +29,7 @@ impl Default for ApiConfig {
             host: "127.0.0.1".into(),
             port: 8081,
             api_key: None,
+            encode_threads: crate::preferences::AUTOMATIC_ENCODE_THREADS,
         }
     }
 }
@@ -101,7 +103,7 @@ fn build_server(config: &ApiConfig) -> RestServer {
 
     // Background worker runs submitted jobs. The queue is in-memory, so jobs
     // live only for the lifetime of this server process.
-    let _worker_stop = crate::executor::spawn_worker(&queue);
+    let _worker_stop = crate::executor::spawn_worker(&queue, config.encode_threads);
 
     for path in HEALTH_PATHS {
         server.route(

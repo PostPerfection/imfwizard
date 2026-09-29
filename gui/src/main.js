@@ -119,12 +119,13 @@ refreshButtonTooltips();
 
 // === Preferences ===
 const PREFS_KEY = "imfwizard-preferences";
+const AUTOMATIC_ENCODE_THREADS = 0;
 const PREF_DEFAULTS = {
   profile: "App2e", creator: "", language: "en",
   bandwidth: 250, colourspace: "Rec.709",
   signingCert: "", signingKey: "", outputDir: "",
   showHintsBeforeBuild: true, verifyAfterBuild: true, gpu: false,
-  gpuLicense: "", gpuRegistrationUrl: "",
+  gpuLicense: "", gpuRegistrationUrl: "", encodeThreads: AUTOMATIC_ENCODE_THREADS,
   preferredEncoder: "grok", channelConfig: "5.1",
   loudnessTargetLufs: -24, namingTemplate: "", theme: "dark",
   showAdvancedOptions: false,
@@ -175,6 +176,7 @@ async function initializePreferences() {
     preferences.gpu,
     preferences.gpuLicense,
     preferences.gpuRegistrationUrl,
+    preferences.encodeThreads,
   );
   await loadComponentVersions(invoke);
 }
@@ -189,6 +191,7 @@ function loadSettings() {
     "set-output-dir": prefs.outputDir,
     "set-gpu-license": prefs.gpuLicense,
     "set-gpu-registration-url": prefs.gpuRegistrationUrl,
+    "set-encode-threads": prefs.encodeThreads || "",
   };
   for (const [id, val] of Object.entries(map)) {
     const el = document.getElementById(id);
@@ -203,12 +206,13 @@ function loadSettings() {
 }
 
 // grok routes every compress and decompress in the process
-async function applyGpuSetting(enabled, license, registrationUrl) {
+async function applyGpuSetting(enabled, license, registrationUrl, encodeThreads) {
   try {
     const active = await invoke("set_gpu", {
       enabled,
       license: license || null,
       registrationUrl: registrationUrl || null,
+      encodeThreads,
     });
     if (enabled && !active) throw new Error("Grok did not enable the GPU");
     return true;
@@ -239,8 +243,15 @@ document.getElementById("settings-form")?.addEventListener("submit", async (e) =
     gpu,
     gpuLicense: document.getElementById("set-gpu-license")?.value.trim() || "",
     gpuRegistrationUrl: document.getElementById("set-gpu-registration-url")?.value.trim() || "",
+    encodeThreads:
+      parseInt(document.getElementById("set-encode-threads")?.value) || AUTOMATIC_ENCODE_THREADS,
   };
-  if (!await applyGpuSetting(prefs.gpu, prefs.gpuLicense, prefs.gpuRegistrationUrl)) return;
+  if (!await applyGpuSetting(
+    prefs.gpu,
+    prefs.gpuLicense,
+    prefs.gpuRegistrationUrl,
+    prefs.encodeThreads,
+  )) return;
   if (!await savePrefs(prefs)) return;
   setStatus("Settings saved");
 });

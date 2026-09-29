@@ -369,7 +369,7 @@ mod tests {
             u64::from(n),
             &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             &std::sync::Arc::new(postkit::grok_encoder::PhaseClocks::default()),
-            || {
+            |_| {
                 if next >= n {
                     return None;
                 }
