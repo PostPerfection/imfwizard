@@ -12,6 +12,7 @@
 - **`compare --pixel` and `--vmaf` read only the frames an IMP's CPL plays**: an IMP input read its whole picture track file, and now it is cut to the resource's EntryPoint and SourceDuration the way `prores` cuts it.
 - **An ASS override tag warning prints once per run**: `create` printed it for every parse of the file, two or three times, and now its hint pass prints it once, `--check` included, and `subtitle-convert` prints it once.
 - **An IMP's picture plays its own resource's EntryPoint and SourceDuration**: the CPL reader let the sound resource's values replace the picture's, so `prores` and `compare` read the wrong frames when the two differed, and each track now keeps its own span, with the sound cut in the units of its own EditRate.
+- **The README and the site describe what the code does**: the README says version 1.4.0 and names the GPU packages 1.4.0, `frame-extract` decodes JPEG 2000 MXF with Grok and other files with ffmpeg, the REST paragraph says only create, validate, encode and transcode have routes and a QC report is `imfwizard report`, and the site's `--profile netflix` example says the preset sets only the bitrate ceiling.
 
 ## [1.4.0] - 2026-09-28
 

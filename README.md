@@ -6,7 +6,7 @@
 
 Interoperable Master Format (IMF) package creator, CLI tool and desktop GUI. Written in Rust.
 
-Version 1.3 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
+Version 1.4.0 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
 
 ## Overview
 
@@ -93,7 +93,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Comparison & Analysis
 - **IMF package compare** (`compare`), metadata diff of two IMPs (title, CPL count, duration, edit rate), or with `--pixel`/`--vmaf` pixel PSNR/SSIM/VMAF between the picture track files of the two IMPs' first CPLs, or between two video or MXF files or frame directories, which need `--fps-num` and `--fps-den`
-- **MXF probe**, inspect MXF files and extract frames (via ffmpeg)
+- **Frame extract** (`frame-extract`), write one frame of a video or MXF file as an image. JPEG 2000 MXF (IMF App 2E and DCI cinema) is decoded in process with Grok, and other files go through ffmpeg
 
 ### Distributed & Advanced
 - **Dolby Vision profile 8.1**, `dv-extract`, `dv-convert --target-profile 8.1|mel` and `dv-inject` retarget and rewrap an RPU. A profile 7 MEL comes from an 8.1 RPU. FEL and profile 4 have no input and are not converted
@@ -150,7 +150,7 @@ sudo apt install ./IMF.Wizard_*_amd64.deb     # Debian, Ubuntu
 sudo dnf install ./IMF.Wizard-*.x86_64.rpm    # Fedora
 ```
 
-On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. Nothing else has to be installed by hand. `dv-extract` and `dv-inject` need `dovi_tool` on the PATH, and `hdr10plus-extract` needs `hdr10plus_tool`, from their GitHub releases listed under runtime dependencies below.
+On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. `dv-extract` and `dv-inject` need `dovi_tool` on the PATH, and `hdr10plus-extract` needs `hdr10plus_tool`, from their GitHub releases listed under runtime dependencies below.
 
 The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint from the PATH. For the `.dmg`, install libmpv with `brew install mpv`.
 
@@ -285,7 +285,7 @@ The desktop GPU setting applies to encode and preview decode. Its job log, writt
 ./scripts/build-fedora-rpm.sh /path/to/grok/install
 ```
 
-The RPM is written under `gui/src-tauri/target/release/bundle/rpm`. The plugin is built for one CUDA compute capability, and the file name carries it in the release field, for example `IMF-Wizard-1.3.3-1.sm75.x86_64.rpm` for a 2080 Ti. Remove an installed test build with `sudo dnf remove imf-wizard`.
+The RPM is written under `gui/src-tauri/target/release/bundle/rpm`. The plugin is built for one CUDA compute capability, and the file name carries it in the release field, for example `IMF-Wizard-1.4.0-1.sm75.x86_64.rpm` for a 2080 Ti. Remove an installed test build with `sudo dnf remove imf-wizard`.
 
 That rpm needs two more things on the target machine: the RPM Fusion NVIDIA driver, and a Grok licence entered under Settings. The CUDA runtime is linked into the plugin, so the CUDA toolkit and the NVIDIA Container Toolkit are not needed:
 
@@ -301,7 +301,7 @@ sudo reboot
 ./scripts/build-ubuntu-deb.sh /path/to/grok/source 86
 ```
 
-The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_1.3.3-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
+The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_1.4.0-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
 
 **GPU encoding on macOS.** A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
 
@@ -309,7 +309,7 @@ The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example 
 ./scripts/build-macos-dmg.sh /path/to/grok/install
 ```
 
-The dmg is written under `gui/src-tauri/target/release/bundle/dmg`, and its name carries `metal`, for example `IMF-Wizard-1.3.3-metal_aarch64.dmg`. Enter a Grok licence under Settings to encode on the GPU.
+The dmg is written under `gui/src-tauri/target/release/bundle/dmg`, and its name carries `metal`, for example `IMF-Wizard-1.4.0-metal_aarch64.dmg`. Enter a Grok licence under Settings to encode on the GPU.
 
 ## Usage
 
@@ -729,9 +729,10 @@ curl -H "X-Api-Key: my-secret" http://localhost:9090/api/v1/jobs/1
 
 A `create` job takes a directory of JPEG 2000 codestreams as its `input`, a
 `validate` job takes an IMP directory, and `encode` and `transcode` take the
-file or frame directory their CLI commands take. A job type that needs
-parameters the queue cannot carry (`qc`, `copy`) has no endpoint: run its
-CLI command.
+file or frame directory their CLI commands take. These four are the only job
+types the server has a route for. The queue's `Qc` and `Copy` job types fail
+with an error when one runs, and the CLI has no `qc` or `copy` command. Write
+a QC report with `imfwizard report` (alias `qc-report`).
 
 `--api-key` is required on every endpoint but `/api/v1/health` and `/health`,
 in `X-Api-Key` or `Authorization: Bearer`, `/metrics` included. Without the flag

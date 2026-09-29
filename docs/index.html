@@ -435,7 +435,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">⚡</div>
             <h3>Delivery presets</h3>
-            <p>One choice sets the J2K bitrate cap for Netflix, HBO Max, cinema and broadcast. Check the finished package against a platform's raster, colour and audio rules with compliance. Or name a bitrate directly.</p>
+            <p>One choice sets the J2K bitrate cap for Netflix, HBO Max, cinema and broadcast. Check the finished package against a platform's raster, bit depth and audio rules with compliance. Or name a bitrate directly.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
@@ -594,7 +594,7 @@
 <span class="comment"># Raise every refusal and hint before committing to the encode</span><br>
 <span class="cmd">$</span> imfwizard create <span class="flag">--title</span> <span class="val">"My Feature"</span> <span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--check</span> <span class="flag">--output</span> <span class="val">./delivery/</span><br>
 <br>
-<span class="comment"># Build a Netflix delivery from a finished master</span><br>
+<span class="comment"># Build an IMP at the Netflix bitrate ceiling. Raster, colour, and audio stay the source's. `compliance -s netflix` checks the raster, bit depth, and audio.</span><br>
 <span class="cmd">$</span> imfwizard create \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--title</span> <span class="val">"My Feature"</span> \<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="flag">--video</span> <span class="val">master.mov</span> <span class="flag">--audio</span> <span class="val">mix.wav</span> \<br>
