@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- **Black and frozen run detection during an encode is opt-in**: every video encode ran ffmpeg's `blackdetect` and `freezedetect` on a branch of the decode, on the filter thread that bounds a GPU encode. `create --detect-picture-findings` and the desktop *Report black and frozen runs while encoding*, saved as `detectPictureFindings`, turn it on, `--no-detect-picture-findings` overrides the saved setting, and the desktop job log prints `Picture findings: on` or `off`. `report --scan-picture` is unchanged.
 - **`watch` and `transcode` run postkit's code**: the watch folder loop is `postkit::watch`, and `transcode` and the REST transcode job run `postkit::transcode::transcode`, the same code DCP Wizard runs.
 - **The release and CI builds carry grok v20.4.14, and a bitrate no frame fits under fails with grok's message**: grok v20.4.14 refuses to start a codestream whose per-frame byte cap is below its packet headers, so the encode fails with `grok cannot fit a frame under the N byte per-frame cap: lower the bitrate`, where v20.4.12 wrote the frame over the cap and the codestream writer's size check failed the run.
 - **The Windows release installs the msi too**: after the NSIS check, the release workflow uninstalls the NSIS install, installs the msi, checks it carries every staged dll, runs the sidecar and opens the app from it, then uninstalls it.

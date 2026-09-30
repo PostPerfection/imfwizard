@@ -56,6 +56,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **VMAF** (optional) via `compare --vmaf` (needs an ffmpeg built with libvmaf)
 - **Bitrate analytics**, per-second throughput, histogram, standard deviation (JSON output for dashboards)
 - **QC report** generation (text / JSON / HTML), with optional black and frozen picture detection via `report --scan-picture`
+- **Black and frozen runs while encoding**, opt in with `create --detect-picture-findings` or the desktop *Report black and frozen runs while encoding*, saved as `detectPictureFindings`. ffmpeg's `blackdetect` and `freezedetect` run on a branch of the decode, and each run of 2 seconds or more is logged as a warning. It is off by default because the branch runs on ffmpeg's single filter thread, which slows a GPU encode. `--no-detect-picture-findings` overrides the saved setting, and the desktop job log prints `Picture findings: on` or `off`
 - **Platform compliance checking** (ffprobe-based) against smpte, netflix, disney, hbo, dolby, dci-2k, dci-4k, archival and broadcast
 
 ### Color & Audio Processing

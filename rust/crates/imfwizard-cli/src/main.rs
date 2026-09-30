@@ -34,6 +34,16 @@ struct Cli {
     )]
     threads: Option<u32>,
 
+    #[arg(
+        long,
+        global = true,
+        help = "Report black and frozen runs of 2 seconds or more while encoding"
+    )]
+    detect_picture_findings: bool,
+
+    #[arg(long, global = true, conflicts_with = "detect_picture_findings")]
+    no_detect_picture_findings: bool,
+
     #[arg(long, global = true, help = "Grok accelerator plugin license")]
     license: Option<String>,
 
@@ -1911,6 +1921,11 @@ fn run() {
         .as_deref()
         .or_else(|| nonempty(&preferences.gpu_registration_url));
     let encode_threads = cli.threads.unwrap_or(preferences.encode_threads);
+    let detect_picture_findings = if cli.no_detect_picture_findings {
+        false
+    } else {
+        cli.detect_picture_findings || preferences.detect_picture_findings
+    };
 
     if (cli.license.is_some() || cli.registration_url.is_some()) && !gpu_enabled {
         eprintln!("--license and --registration-url require GPU encoding");
@@ -2429,6 +2444,7 @@ fn run() {
                                 subtitle_burn: build_subtitle_burn(edit_rate),
                                 picture: picture.processing.clone(),
                                 encode_threads,
+                                detect_picture_findings,
                                 ..Default::default()
                             },
                             wrap_target,

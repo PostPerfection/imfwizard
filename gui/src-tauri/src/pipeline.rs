@@ -888,9 +888,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     log_to(&log_file, &format!("Job ID: {}", job.id));
     log_to(&log_file, &format!("Title: {}", job.title));
     log_to(&log_file, &format!("Output: {}", output.display()));
-    let encode_threads = imfwizard_core::preferences::load_preferences()
-        .map_err(|e| format!("Cannot load the preferences: {e}"))?
-        .encode_threads;
+    let preferences = imfwizard_core::preferences::load_preferences()
+        .map_err(|e| format!("Cannot load the preferences: {e}"))?;
+    let encode_threads = preferences.encode_threads;
+    let detect_picture_findings = preferences.detect_picture_findings;
     log_to(
         &log_file,
         &format!("Accelerator: {}", guikit::gpu::accelerator_status()),
@@ -898,6 +899,13 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     log_to(
         &log_file,
         &format!("Encode threads: {}", encode_threads_status(encode_threads)),
+    );
+    log_to(
+        &log_file,
+        &format!(
+            "Picture findings: {}",
+            if detect_picture_findings { "on" } else { "off" }
+        ),
     );
     log_to(
         &log_file,
@@ -1156,6 +1164,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                         .map(|resolved| resolved.processing.clone())
                         .unwrap_or_default(),
                     encode_threads,
+                    detect_picture_findings,
                     ..Default::default()
                 };
                 let on_progress = |p: &postkit::pipeline::PipelineProgress| {
