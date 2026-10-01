@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { register } from 'node:module';
 import test from 'node:test';
 
-import { BUTTON_SHORTCUTS, PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, VIEW_SHORTCUTS } from '../src/shortcut-bindings.js';
+register('../../extern/guikit/test/tauri-plugins-hooks.mjs', import.meta.url);
+
+const { BUTTON_SHORTCUTS, PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, VIEW_SHORTCUTS } = await import('../src/shortcut-bindings.js');
 
 const page = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -12,11 +15,19 @@ function bindingFor(id) {
 
 test('the project buttons carry the bindings the README advertises', () => {
   assert.equal(bindingFor('new-project'), 'Ctrl+N');
-  assert.equal(bindingFor('open-project'), 'Ctrl+O');
+  assert.equal(bindingFor('project-open'), 'Ctrl+O');
+  assert.equal(bindingFor('project-save'), 'Ctrl+S');
+  assert.equal(bindingFor('project-save-as'), 'Ctrl+Shift+S');
+  assert.equal(bindingFor('open-imp'), 'Ctrl+Shift+O');
   assert.equal(bindingFor('build'), 'Ctrl+B');
   assert.equal(bindingFor('preview'), 'Ctrl+P');
   assert.equal(bindingFor('import-video'), 'Ctrl+I');
-  assert.equal(bindingFor('supplement'), 'Ctrl+Shift+S');
+  assert.equal(bindingFor('supplement'), 'Ctrl+Shift+N');
+});
+
+test('no two shortcuts share a binding', () => {
+  const bindings = [...BUTTON_SHORTCUTS, ...VIEW_SHORTCUTS].map((shortcut) => shortcut.binding);
+  assert.deepEqual(bindings.filter((binding, index) => bindings.indexOf(binding) !== index), []);
 });
 
 test('the seven views take Ctrl+1 to Ctrl+7 in sidebar order', () => {

@@ -104,7 +104,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Desktop GUI (Tauri 2)
 - **Dark theme** by default with optional light mode toggle
 - **File import** (video, WAV, TTML/subtitle) via file picker; a build packages the selected picture, audio and subtitle
-- **Keyboard shortcuts**, Ctrl+N/O/B/P/I, Ctrl+Shift+S, Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
+- **Keyboard shortcuts**, Ctrl+N/O/S/B/P/I, Ctrl+Shift+S (Save As), Ctrl+Shift+O (Open IMP), Ctrl+Shift+N (Create supplement), Ctrl+1..7 tab navigation and Space/arrows/Home during preview. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
 - **Preview player** with timeline scrubber (click-to-seek, drag-to-scrub, timecode display). An IMP, a picture track file, a CPL or a directory of codestreams plays through Grok in process. A CPU worker pool handles the decode, the App 2E tone map and the gamut conversion. Everything else plays through mpv
@@ -116,7 +116,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Per-stage timings in the job log**, `[TIMING]` lines next to the stage's own log lines giving probe, encode, audio map, source edits and packaging time per composition, plus the total
 - **Job queue manager**, submit, monitor, cancel background jobs. The queue is written to `~/.config/imfwizard/gui-jobs.jsonl`, one JSON line per job on submit and on every state change, and read back on start, so closing the window does not lose queued jobs. A job left running when the app closed is listed failed. `$IMFWIZARD_GUI_JOBS_FILE` points a second app at another file
 - **Progress notifications**, system notifications when jobs complete
-- **Recent projects**, quick access to previously created IMPs
+- **Projects**, New (Ctrl+N) asks where the `.imfwizard` file goes and starts from the default panel, titled after the file, with the IMP going in a folder of that name beside it. Save (Ctrl+S), Save As (Ctrl+Shift+S) and Open (Ctrl+O) write and read the whole Properties panel, with the sources, compositions, segments, channel map and output directory but not Settings. A source that moved is looked for beside the file. Every build also writes `<output>.imfwizard` beside the package and saves the open project, Recent lists these files, and unsaved changes are kept as a draft in the app data folder that comes back on the next launch. Open IMP (Ctrl+Shift+O) opens a built package
 
 ### Packaging & Deployment
 - **Docker image**, headless batch processing (`docker run imfwizard create ...`)

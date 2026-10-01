@@ -17,7 +17,7 @@ export function progressStatsText(payload) {
   return `${elapsed}${payload.fps > 0 ? ` ${payload.fps.toFixed(1)}fps` : ''}${eta}`;
 }
 
-export function titleForProgress(percent, stage) {
-  if (percent >= 0 && percent < 100) return `IMF Wizard — ${stage} ${Math.round(percent)}%`;
-  return "IMF Wizard";
+export function titleStatusForProgress(percent, stage) {
+  if (percent >= 0 && percent < 100) return `${stage} ${Math.round(percent)}%`;
+  return "";
 }

@@ -41,11 +41,23 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["imfwizard"]
+    "externalBin": ["imfwizard"],
+    "fileAssociations": [
+      {
+        "ext": ["imfwizard"],
+        "name": "IMF Wizard project",
+        "description": "IMF Wizard project",
+        "mimeType": "application/x-imfwizard",
+        "role": "Editor"
+      }
+    ]
   },
   "plugins": {
     "shell": {
       "open": true
+    },
+    "fs": {
+      "requireLiteralLeadingDot": false
     }
   }
 }

@@ -39,9 +39,11 @@
     "shell:allow-stdin-write",
     "shell:allow-kill",
     "dialog:allow-open",
+    "dialog:allow-save",
     "dialog:allow-confirm",
     "dialog:allow-message",
     "notification:default",
+    "core:window:allow-destroy",
     {
       "identifier": "fs:allow-read-file",
       "allow": [
@@ -51,7 +53,41 @@
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        { "path": "/**" }
+        { "path": "/**" },
+        { "path": "**" },
+        { "path": "$APPDATA/draft.imfwizard" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "**/*.imfwizard" },
+        { "path": "$APPDATA/draft.imfwizard" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "**/*.imfwizard" },
+        { "path": "$APPDATA/draft.imfwizard" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-rename",
+      "allow": [
+        { "path": "**/*.imfwizard" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPDATA" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "$APPDATA/draft.imfwizard" }
       ]
     }
   ]

@@ -22,8 +22,10 @@
           "imfwizard"
         ],
         "files": {
-          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
-        }
+          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1",
+          "/usr/share/mime/packages/imfwizard.xml": "linux/imfwizard-mime.xml"
+        },
+        "desktopTemplate": "linux/imfwizard-gui.desktop"
       },
       "rpm": {
         "depends": [
@@ -36,8 +38,10 @@
           "libtiff.so.6()(64bit)"
         ],
         "files": {
-          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1"
-        }
+          "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1",
+          "/usr/share/mime/packages/imfwizard.xml": "linux/imfwizard-mime.xml"
+        },
+        "desktopTemplate": "linux/imfwizard-gui.desktop"
       }
     }
   }

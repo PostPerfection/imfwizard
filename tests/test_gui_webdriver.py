@@ -8,6 +8,7 @@ import subprocess
 import tomllib
 import uuid
 import xml.etree.ElementTree as ElementTree
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,9 @@ CREATE_TIMEOUT_SECONDS = 900
 REACTION_TIMEOUT_SECONDS = 15
 
 BUILD_TITLE = "Wizard End To End"
+
+PROJECT_WIZARD = "imfwizard"
+PROJECT_FILE_VERSION = 1
 
 # both printed by imfwizard create --check on the media write_media makes
 LANGUAGE_HINT = "The sound has no language set. Set one unless it has no spoken parts."
@@ -229,6 +233,23 @@ def write_media(directory, seconds):
         str(sound),
     )
     return picture, sound
+
+
+# Recent offers Retitle only for a project file with its package beside it
+def write_project_beside(package_directory, title):
+    project_path = project_path_beside(package_directory)
+    project = {
+        "wizard": PROJECT_WIZARD,
+        "version": PROJECT_FILE_VERSION,
+        "saved": datetime.now(timezone.utc).isoformat(),
+        "form": {"title": title},
+    }
+    project_path.write_text(json.dumps(project))
+    return project_path
+
+
+def project_path_beside(package_directory):
+    return package_directory.with_name(f"{package_directory.name}.{PROJECT_WIZARD}")
 
 
 def run_ffmpeg(*arguments):
@@ -491,7 +512,11 @@ def test_the_build_shows_hints_progress_and_the_post_build_actions(finished_buil
     )
     assert (finished_build.output / "ASSETMAP.xml").is_file()
 
-    assert session.execute(RECENT_PATHS) == [str(finished_build.output)]
+    project_path = project_path_beside(finished_build.output)
+    project = json.loads(project_path.read_text())
+    assert (project["wizard"], project["form"]["title"]) == (PROJECT_WIZARD, BUILD_TITLE)
+    assert project["form"]["outputDir"] == str(finished_build.output)
+    assert session.execute(RECENT_PATHS) == [str(project_path)]
 
     session.execute(RECORD_REJECTIONS)
     assert session.execute("return window.__testRejections") == []
@@ -549,7 +574,7 @@ def test_the_queue_the_recent_list_and_the_theme_come_back_after_a_restart(finis
 
         window.press("ctrl+1")
         wait_for_view(session, "view-project")
-        assert session.execute(RECENT_PATHS) == [str(finished_build.output)]
+        assert session.execute(RECENT_PATHS) == [str(project_path_beside(finished_build.output))]
         assert "light" in body_classes(session)
         assert session.text("#theme-toggle") == "☀️"
     finally:
@@ -610,8 +635,9 @@ SEGMENT_ELEMENT = re.compile(r"[ \t]*<Segment>.*?</Segment>\n", re.DOTALL)
 
 
 class PlayablePackage:
-    def __init__(self, directory):
+    def __init__(self, directory, project_path):
         self.directory = directory
+        self.project_path = project_path
         self.segments = image_resources(only_cpl(directory))
 
 
@@ -730,7 +756,7 @@ def single_segment_imp(tmp_path_factory):
         timeout=CREATE_TIMEOUT_SECONDS,
     )
     assert created.returncode == 0, created.stderr[-4000:]
-    return PlayablePackage(output)
+    return PlayablePackage(output, write_project_beside(output, PLAYBACK_TITLE))
 
 
 # the CLI has no split option, so the two segments are written over a copy
@@ -740,7 +766,7 @@ def two_segment_imp(single_segment_imp, tmp_path_factory):
     shutil.copytree(single_segment_imp.directory, directory)
     frames, _ = single_segment_imp.segments[0]
     write_two_segment_cpl(directory, frames)
-    return PlayablePackage(directory)
+    return PlayablePackage(directory, write_project_beside(directory, PLAYBACK_TITLE))
 
 
 # the label timeline.js writes into .segment-duration
@@ -806,7 +832,7 @@ def text_dialog_open(session):
 
 
 def open_the_timeline(window, package):
-    choose_in_dialog(window, "#btn-open-project", package.directory)
+    choose_in_dialog(window, "#btn-open-imp", package.directory)
     window.press("ctrl+2")
     wait_for_view(window.session, "view-timeline")
 
@@ -838,6 +864,13 @@ def test_the_timeline_lists_one_segment_and_plays_the_imp_to_the_end(
     segments = single_segment_imp.segments
     assert len(segments) == 1, segments
 
+    # opening a project clears the preview selection
+    choose_in_dialog(window, "#btn-project-open", single_segment_imp.project_path)
+    wait_until(
+        "the opened project never reached the Recent list",
+        lambda: session.find(".recent-retitle"),
+        REACTION_TIMEOUT_SECONDS,
+    )
     open_the_timeline(window, single_segment_imp)
     assert listed_segments(session, "picture") == expected_segments(segments)
     assert listed_segments(session, "sound") == expected_segments(segments)

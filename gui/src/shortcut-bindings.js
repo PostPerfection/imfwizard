@@ -1,7 +1,9 @@
+import { PROJECT_FILE_SHORTCUTS } from "../../extern/guikit/src/project.js";
+
 export const PROJECT_BUTTON_SHORTCUTS = [
-  { id: "new-project", label: "New IMP", binding: "Ctrl+N", buttonId: "btn-new-project" },
-  { id: "open-project", label: "Open IMP", binding: "Ctrl+O", buttonId: "btn-open-project" },
-  { id: "supplement", label: "Create supplement", binding: "Ctrl+Shift+S", buttonId: "btn-supplement" },
+  ...PROJECT_FILE_SHORTCUTS,
+  { id: "open-imp", label: "Open IMP", binding: "Ctrl+Shift+O", buttonId: "btn-open-imp" },
+  { id: "supplement", label: "Create supplement", binding: "Ctrl+Shift+N", buttonId: "btn-supplement" },
   { id: "build", label: "Create IMP", binding: "Ctrl+B", buttonId: "btn-build" },
   { id: "preview", label: "Preview", binding: "Ctrl+P", buttonId: "btn-preview" },
   { id: "import-video", label: "Import video", binding: "Ctrl+I", buttonId: "import-video" },

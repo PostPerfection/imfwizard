@@ -12,7 +12,7 @@ export default defineConfig({
   // guikit sits outside gui/, so node resolution from its files never reaches
   // gui/node_modules. dedupe makes vite resolve these from the gui root instead.
   resolve: {
-    dedupe: ["@tauri-apps/api", "@tauri-apps/plugin-dialog"],
+    dedupe: ["@tauri-apps/api", "@tauri-apps/plugin-dialog", "@tauri-apps/plugin-fs"],
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

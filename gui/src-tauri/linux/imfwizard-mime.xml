@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-imfwizard">
+    <comment>IMF Wizard project</comment>
+    <glob pattern="*.imfwizard"/>
+  </mime-type>
+</mime-info>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatTime, progressStatsText, stageLabel, titleForProgress } from '../src/build-progress.js';
+import { formatTime, progressStatsText, stageLabel, titleStatusForProgress } from '../src/build-progress.js';
 
 test('a duration under a minute drops the minutes', () => {
   assert.equal(formatTime(9.7), '9s');
@@ -27,11 +27,11 @@ test('the stage reads as a capitalised word', () => {
 });
 
 test('the window title carries the stage and the rounded percent while a build runs', () => {
-  assert.equal(titleForProgress(41.4, 'encode'), 'IMF Wizard — encode 41%');
-  assert.equal(titleForProgress(0, 'queued'), 'IMF Wizard — queued 0%');
+  assert.equal(titleStatusForProgress(41.4, 'encode'), 'encode 41%');
+  assert.equal(titleStatusForProgress(0, 'queued'), 'queued 0%');
 });
 
-test('the window title goes back to the app name when the build ends', () => {
-  assert.equal(titleForProgress(100, 'done'), 'IMF Wizard');
-  assert.equal(titleForProgress(-1), 'IMF Wizard');
+test('the window title drops the build status when the build ends', () => {
+  assert.equal(titleStatusForProgress(100, 'done'), '');
+  assert.equal(titleStatusForProgress(-1), '');
 });

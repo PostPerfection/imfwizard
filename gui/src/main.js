@@ -14,9 +14,10 @@ import { escapeHtml } from "../../extern/guikit/src/html.js";
 import { PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, BUTTON_SHORTCUTS, VIEW_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
 import { askForText } from "../../extern/guikit/src/text-dialog.js";
-import { progressStatsText, stageLabel, titleForProgress } from "./build-progress.js";
+import { progressStatsText, stageLabel, titleStatusForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
-import { initRecentProjects, getRecentProjects, addRecentProject, removeRecentProject, renderRecentProjects } from "./recent-projects.js";
+import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
+import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 
 // === Browse wrapper ===
@@ -461,7 +462,7 @@ function renderSegments() {
     });
   });
 
-  renderAudioMap();
+  audioMapDrawn = renderAudioMap();
 }
 
 document.getElementById("add-segment")?.addEventListener("click", () => {
@@ -564,14 +565,26 @@ document.getElementById("prop-browse-burn-subtitle-font")?.addEventListener("cli
 });
 
 // === Output directory ===
+async function defaultOutputFolder() {
+  return getPrefs().outputDir || documentDir();
+}
+
+function setOutputFolder(folder) {
+  const outputEl = document.getElementById("prop-output");
+  outputEl.value = folder;
+  delete outputEl.dataset.autoFilled;
+  refreshDiskSpace();
+}
+
+// guikit sets the title to the project file's name first, so the IMP goes beside that file
+function placePackageInProjectFolder(folder) {
+  const separator = folder.includes("\\") && !folder.includes("/") ? "\\" : "/";
+  setOutputFolder(`${folder.replace(/[\\/]+$/, "")}${separator}${document.getElementById("prop-title").value}`);
+}
+
 document.getElementById("browse-output")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
-  if (dir) {
-    const outputEl = document.getElementById("prop-output");
-    outputEl.value = dir;
-    delete outputEl.dataset.autoFilled;
-    refreshDiskSpace();
-  }
+  if (dir) setOutputFolder(dir);
 });
 
 document.getElementById("prop-output")?.addEventListener("input", (event) => {
@@ -584,8 +597,6 @@ async function openImp(dir) {
   document.getElementById("project-name").textContent = name;
   project.title = name;
   document.getElementById("prop-title").value = name;
-  // a name given in the recent list is the label for that row, so opening it keeps it
-  addRecentProject(dir, getRecentProjects().find(r => r.path === dir)?.title || name);
   setStatus(`Opened: ${dir}`);
   openedPackage = dir;
   selectPreview("package", dir);
@@ -602,7 +613,7 @@ async function openImp(dir) {
   }
 }
 
-document.getElementById("btn-open-project")?.addEventListener("click", async () => {
+document.getElementById("btn-open-imp")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
   if (dir) openImp(dir);
 });
@@ -649,7 +660,7 @@ function applyPreviewSelection() {
     el.classList.toggle("selected", parseInt(el.dataset.assetId) === selectedAssetId);
   });
   document.querySelectorAll("#recent-list .recent-item").forEach(el => {
-    const isSelected = selectedPreview?.kind === "package" && el.dataset.path === selectedPreview.path;
+    const isSelected = selectedPreview?.kind === "package" && el.dataset.packagePath === selectedPreview.path;
     el.classList.toggle("selected", isSelected);
   });
 }
@@ -776,6 +787,7 @@ document.getElementById("prop-auto-crop")?.addEventListener("click", async () =>
 // The matrix is the CLI's --audio-map: one cell per (input channel, output lane)
 // holding that route's gain in dB, empty where the route is left out.
 let audioMapShape = null;
+let audioMapDrawn = Promise.resolve();
 
 async function renderAudioMap() {
   const container = document.getElementById("prop-audio-map");
@@ -807,6 +819,14 @@ async function renderAudioMap() {
   container.querySelectorAll("input[data-input]").forEach((cell) => {
     cell.addEventListener("click", () => { if (!cell.value) cell.value = "0"; });
   });
+}
+
+// the typed gains as they stand, a bad one included, for the project file
+function audioMapSpec() {
+  const entries = [...document.querySelectorAll("#prop-audio-map input[data-input]")]
+    .filter((cell) => cell.value.trim())
+    .map((cell) => `${cell.dataset.input}:${cell.dataset.output}@${cell.value.trim()}`);
+  return entries.length ? entries.join(",") : null;
 }
 
 // Serialise the matrix into the CLI's spec. A bad gain throws so the build stops
@@ -954,8 +974,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   const outputEl = document.getElementById("prop-output");
   let output = outputEl?.value;
   if (!output || outputEl?.dataset.autoFilled) {
-    const docs = await documentDir();
-    output = await join(docs, title);
+    output = await join(await defaultOutputFolder(), title);
     if (outputEl) {
       outputEl.value = output;
       outputEl.dataset.autoFilled = "1";
@@ -973,6 +992,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   setStatus("");
 
   currentJobId = null;
+  let projectRecordPath = null;
   const unlisten = await listen("pipeline-progress", (event) => {
     const p = event.payload;
     if (p.job_id !== currentJobId) return;
@@ -984,7 +1004,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       setStatus("Build complete");
       setTitleProgress(-1);
       notifyBuildComplete(true, title);
-      addRecentProject(output, title);
+      if (projectRecordPath) addRecentProject(projectRecordPath, title);
       showPostBuildActions(output);
       endBuild();
       unlisten();
@@ -1027,6 +1047,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     output = result.outputDir;
     currentJobId = result.jobId;
     setStatus("Building IMP...");
+    projectRecordPath = await saveProjectBesidePackage(output);
   } catch (e) {
     stageEl.textContent = "Failed";
     setStatus("Error: " + e);
@@ -1045,8 +1066,9 @@ function finishedOutputDir() {
   return document.getElementById("post-build-actions")?.dataset.output;
 }
 
-function recentTitleFor(path) {
-  return getRecentProjects().find((r) => r.path === path)?.title;
+function recentTitleFor(packagePath) {
+  const projectPath = projectPathBeside(packagePath);
+  return getRecentProjects().find((r) => r.path === projectPath)?.title;
 }
 
 function showPostBuildActions(outputDir) {
@@ -1266,7 +1288,6 @@ document.getElementById("sup-create")?.addEventListener("click", async () => {
   const cmd = Command.sidecar("imfwizard", args);
   const result = await cmd.execute();
   box.textContent = result.code === 0 ? "✓ Supplemental IMP created\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
-  if (result.code === 0) addRecentProject(output, title);
 });
 
 // === Metadata ===
@@ -1397,18 +1418,59 @@ refreshDiskSpace();
 setInterval(refreshDiskSpace, DISK_REFRESH_MS);
 
 // === Title sync ===
+function setProjectTitle(title) {
+  const titleElement = document.getElementById("prop-title");
+  titleElement.value = title;
+  titleElement.dispatchEvent(new Event("input"));
+}
+
 document.getElementById("prop-title")?.addEventListener("input", (e) => {
   const title = e.target.value.trim();
   document.getElementById("project-name").textContent = title || "Untitled IMP";
   project.title = title;
 });
 
-// === Recent Projects ===
-async function retitleRecentProject(dir) {
+// === Projects ===
+function buildPanel() {
+  return { elementById: (id) => document.getElementById(id), project };
+}
+
+function serializeBuildPanel() {
+  return serializeForm({ ...buildPanel(), audioMap: audioMapSpec() });
+}
+
+async function restoreBuildPanel(saved) {
+  const { form, notRestored } = restoreFormState(saved, buildPanelDefaults, buildPanel());
+  nextAssetId = Math.max(0, ...project.assets.map((asset) => asset.id)) + 1;
+  nextCplId = Math.max(0, ...project.compositions.map((composition) => composition.id)) + 1;
+  delete document.getElementById("prop-output").dataset.autoFilled;
+  document.getElementById("project-name").textContent = project.title || "Untitled IMP";
+
+  renderCplTabs();
+  // a null shape matches no sound path, so the matrix is drawn again
+  audioMapShape = null;
+  renderSegments();
+  renderAssets();
+  updateStatusStats();
+  clearPreviewSelection();
+  refreshDiskSpace();
+
+  await audioMapDrawn;
+  let unroutedCells = 0;
+  for (const { input, output, gain } of audioMapCells(form.audioMap)) {
+    const cell = document.querySelector(`#prop-audio-map input[data-input="${input}"][data-output="${output}"]`);
+    if (cell) cell.value = gain;
+    else unroutedCells += 1;
+  }
+  if (unroutedCells) notRestored.push(`${unroutedCells} audio map routes`);
+  return notRestored;
+}
+
+async function retitleRecentPackage(packagePath, projectPath) {
   const title = await askForText({
     title: "Retitle IMP",
     label: "New content title",
-    value: dir.split(/[/\\]/).pop(),
+    value: packagePath.split(/[/\\]/).pop(),
   });
   if (!title?.trim()) return;
   const ok = await tauriConfirm(
@@ -1418,77 +1480,39 @@ async function retitleRecentProject(dir) {
   if (!ok) return;
   let newPath;
   try {
-    newPath = await invoke("retitle_imp", { path: dir, title });
+    newPath = await invoke("retitle_imp", { path: packagePath, title });
   } catch (e) {
     tauriMessage(String(e), { title: "Retitle failed", kind: "error" });
     return;
   }
-  removeRecentProject(dir);
-  addRecentProject(newPath, title.trim());
   setStatus(`Retitled to ${title.trim()}`);
+  // keeps the project file beside a renamed package folder
+  if (newPath === packagePath) addRecentProject(projectPath, title.trim());
+  else await moveProjectFile(projectPath, projectPathBeside(newPath), title.trim());
 }
 
-async function deleteRecentProject(dir) {
-  const ok = await tauriConfirm(`Delete ${dir} and everything in it?`, {
+async function deleteRecentPackage(packagePath) {
+  const ok = await tauriConfirm(`Delete ${packagePath} and everything in it?`, {
     title: "Delete IMP",
     kind: "warning",
   });
   if (!ok) return;
   try {
-    await invoke("delete_imp", { path: dir });
+    await invoke("delete_imp", { path: packagePath });
   } catch (e) {
     tauriMessage(String(e), { title: "Delete failed", kind: "error" });
+    renderRecentProjects();
     return;
   }
-  removeRecentProject(dir);
-  setStatus(`Deleted ${dir}`);
+  setStatus(`Deleted ${packagePath}`);
+  renderRecentProjects();
   refreshDiskSpace();
 }
-
-initRecentProjects({
-  section: document.getElementById("recent-projects"),
-  list: document.getElementById("recent-list"),
-  header: document.getElementById("recent-header"),
-  toggle: document.getElementById("recent-toggle"),
-  onOpen: (path) => openImp(path),
-  onQueue: (path) => addToPlaylist(path, recentTitleFor(path)),
-  onRetitle: retitleRecentProject,
-  onDelete: deleteRecentProject,
-  afterRender: applyPreviewSelection,
-  setStatus,
-});
 
 // === Desktop Notifications ===
 if ("Notification" in window && Notification.permission === "default") {
   Notification.requestPermission();
 }
-
-// === Confirmation Dialogs ===
-document.getElementById("btn-new-project")?.addEventListener("click", async () => {
-  if (project.assets.length > 0) {
-    if (!(await tauriConfirm("Clear current project and start new? Unsaved changes will be lost."))) return;
-  }
-  project.title = "";
-  project.assets = [];
-  project.compositions = [
-    { id: 1, name: "Main", contentKind: "feature", segments: [{ id: 1, picture: null, sound: null, subtitle: null }] }
-  ];
-  project.activeComposition = 0;
-  nextCplId = 2;
-  nextAssetId = 1;
-  const titleEl = document.getElementById("prop-title");
-  if (titleEl) titleEl.value = "";
-  document.getElementById("prop-output") && (document.getElementById("prop-output").value = "");
-  document.getElementById("project-name").textContent = "Untitled IMP";
-  clearPreviewSelection();
-  switchView("project");
-  renderAssets();
-  renderCplTabs();
-  renderSegments();
-  updateStatusStats();
-  setStatus("New project — enter a title to get started");
-  if (titleEl) { titleEl.focus(); titleEl.select(); }
-});
 
 // === Status Bar Stats ===
 function updateStatusStats() {
@@ -1586,7 +1610,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
 
 // === Progress in Title Bar ===
 function setTitleProgress(percent, stage) {
-  document.title = titleForProgress(percent, stage);
+  setWindowTitleStatus(titleStatusForProgress(percent, stage));
 }
 
 // === Asset Filter ===
@@ -1622,7 +1646,26 @@ async function probeVideo(path) {
 // === Init ===
 renderAssets();
 renderSegments();
-renderRecentProjects();
+const buildPanelDefaults = serializeBuildPanel();
+initProjects({
+  wizard: "imfwizard",
+  applicationName: "IMF Wizard",
+  packageNoun: "IMP",
+  outputFields: OUTPUT_FIELDS,
+  textFields: TEXT_FIELDS,
+  defaults: buildPanelDefaults,
+  defaultProjectFolder: defaultOutputFolder,
+  setProjectTitle,
+  setOutputFolder: placePackageInProjectFolder,
+  serialize: serializeBuildPanel,
+  restore: restoreBuildPanel,
+  projectTitle: (form) => form.title?.trim(),
+  onQueue: addToPlaylist,
+  onRetitle: retitleRecentPackage,
+  onDelete: deleteRecentPackage,
+  afterRecentRender: applyPreviewSelection,
+  setStatus,
+});
 updateStatusStats();
 initPreview();
 watchPreviewShown(path => { previewShownPath = path; updateToolbarState(); });
