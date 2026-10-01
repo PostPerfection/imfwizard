@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { documentDir, join } from "@tauri-apps/api/path";
+import { join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
@@ -19,6 +19,7 @@ import { notifyBuildComplete } from "./build-notification.js";
 import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
 import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
+import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
 
 // === Browse wrapper ===
 const LAST_BROWSE_DIR_KEY = "imfwizard-last-browse-dir";
@@ -566,7 +567,7 @@ document.getElementById("prop-browse-burn-subtitle-font")?.addEventListener("cli
 
 // === Output directory ===
 async function defaultOutputFolder() {
-  return getPrefs().outputDir || documentDir();
+  return getPrefs().outputDir || await documentsOrHomeDir();
 }
 
 function setOutputFolder(folder) {
@@ -1398,7 +1399,7 @@ function formatBytes(bytes) {
 async function refreshDiskSpace() {
   const el = document.getElementById("status-disk");
   if (!el) return;
-  const path = document.getElementById("prop-output")?.value || await documentDir();
+  const path = document.getElementById("prop-output")?.value || await documentsOrHomeDir();
   let space;
   try {
     space = await invoke("disk_space", { path });
