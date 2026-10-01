@@ -1,0 +1,63 @@
+{
+  "wizard": "imfwizard",
+  "version": 1,
+  "saved": "2026-09-30T09:00:00.000Z",
+  "form": {
+    "title": "Film",
+    "issuer": "IMF Wizard",
+    "deliveryPreset": "netflix",
+    "contentKind": "feature",
+    "framerate": "24000/1001",
+    "sourceColourspace": "rec709",
+    "hdr": "",
+    "bandwidth": "250",
+    "qualityPsnr": "",
+    "stillLength": "",
+    "burnSubtitle": "",
+    "burnSubtitleFont": "",
+    "burnFontSize": "",
+    "burnOutlineWidth": "",
+    "burnLineHeight": "",
+    "burnMargin": "",
+    "burnColour": "",
+    "burnEffectColour": "",
+    "burnFadeUp": "",
+    "burnFadeDown": "",
+    "burnEffect": "",
+    "cropLeft": "0",
+    "cropRight": "0",
+    "cropTop": "0",
+    "cropBottom": "0",
+    "fillCrop": false,
+    "deinterlace": true,
+    "denoise": false,
+    "rotate": "",
+    "flip": "",
+    "raster": "3840x2160",
+    "channels": "5.1",
+    "audioDelayMs": "0",
+    "trimStart": "",
+    "trimEnd": "",
+    "outputDir": "/home/user/IMF/Film",
+    "audioMap": "1:L,2:R@-3",
+    "project": {
+      "title": "Film",
+      "assets": [
+        { "id": 1, "type": "video", "path": "/media/film.mov", "name": "film.mov", "meta": "3840×2160 24000/1001" },
+        { "id": 2, "type": "audio", "path": "/media/mix.wav", "name": "mix.wav", "meta": "" },
+        { "id": 3, "type": "subtitle", "path": "/media/subs.ttml", "name": "subs.ttml", "meta": "" }
+      ],
+      "compositions": [
+        {
+          "id": 1,
+          "name": "Main",
+          "contentKind": "feature",
+          "segments": [
+            { "id": 1, "picture": 1, "sound": 2, "subtitle": 3 }
+          ]
+        }
+      ],
+      "activeComposition": 0
+    }
+  }
+}

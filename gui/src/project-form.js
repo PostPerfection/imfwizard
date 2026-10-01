@@ -1,6 +1,11 @@
 const VALUE = "value";
 const CHECKED = "checked";
 
+export const PROJECT_FILE_VERSION = 1;
+
+// a rename or a meaning change gets a step and a version bump, a new field with a default does not
+export const PROJECT_FILE_MIGRATIONS = {};
+
 // [form key, control id, control property], keyed like the submit_job payload
 export const FORM_CONTROLS = [
   ["title", "prop-title", VALUE],

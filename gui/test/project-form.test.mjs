@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { register } from 'node:module';
 import test from 'node:test';
 
 import {
   FORM_CONTROLS,
   OUTPUT_FIELDS,
   TEXT_FIELDS,
+  PROJECT_FILE_VERSION,
+  PROJECT_FILE_MIGRATIONS,
   serializeForm,
   restoreFormState,
   audioMapCells,
 } from '../src/project-form.js';
+
+register('../../extern/guikit/test/tauri-plugins-hooks.mjs', import.meta.url);
+
+const { readProjectFile } = await import('../../extern/guikit/src/project.js');
 
 // the threshold only drives Auto-crop
 const CONTROLS_NOT_SAVED = ['prop-auto-crop-threshold'];
@@ -102,6 +109,27 @@ test('a field missing from the file takes the panel default', () => {
   assert.equal(reopened.controls.get('prop-denoise').checked, true);
   assert.deepEqual(reopened.project.assets, []);
   assert.deepEqual(reopened.project.compositions, []);
+});
+
+test('a version 1 project file opens and restores its saved fields', () => {
+  const text = readFileSync(new URL('./fixtures/Film-version-1.imfwizard', import.meta.url), 'utf8');
+  const { form, version } = readProjectFile(text, 'imfwizard', PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS);
+  const reopened = emptyPanel(() => '');
+
+  const { notRestored } = restoreFormState(form, serialized(emptyPanel(() => ''), null), reopened);
+
+  assert.equal(version, 1);
+  assert.deepEqual(notRestored, []);
+  assert.equal(reopened.controls.get('prop-title').value, 'Film');
+  assert.equal(reopened.controls.get('prop-preset').value, 'netflix');
+  assert.equal(reopened.controls.get('prop-framerate').value, '24000/1001');
+  assert.equal(reopened.controls.get('prop-raster').value, '3840x2160');
+  assert.equal(reopened.controls.get('prop-deinterlace').checked, true);
+  assert.equal(reopened.controls.get('prop-output').value, '/home/user/IMF/Film');
+  assert.equal(form.audioMap, '1:L,2:R@-3');
+  const [picture, sound, subtitle] = reopened.project.assets;
+  assert.equal(picture.path, '/media/film.mov');
+  assert.deepEqual(reopened.project.compositions[0].segments, [{ id: 1, picture, sound, subtitle }]);
 });
 
 function selectOffering(label, values, value) {

@@ -17,7 +17,7 @@ import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleStatusForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
 import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
-import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS } from "./project-form.js";
+import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 
 // === Browse wrapper ===
@@ -594,7 +594,6 @@ document.getElementById("prop-output")?.addEventListener("input", (event) => {
 // === Open existing IMP ===
 async function openImp(dir) {
   const name = dir.split(/[/\\]/).pop();
-  document.getElementById("project-name").textContent = name;
   project.title = name;
   document.getElementById("prop-title").value = name;
   setStatus(`Opened: ${dir}`);
@@ -1426,7 +1425,6 @@ function setProjectTitle(title) {
 
 document.getElementById("prop-title")?.addEventListener("input", (e) => {
   const title = e.target.value.trim();
-  document.getElementById("project-name").textContent = title || "Untitled IMP";
   project.title = title;
 });
 
@@ -1444,7 +1442,6 @@ async function restoreBuildPanel(saved) {
   nextAssetId = Math.max(0, ...project.assets.map((asset) => asset.id)) + 1;
   nextCplId = Math.max(0, ...project.compositions.map((composition) => composition.id)) + 1;
   delete document.getElementById("prop-output").dataset.autoFilled;
-  document.getElementById("project-name").textContent = project.title || "Untitled IMP";
 
   renderCplTabs();
   // a null shape matches no sound path, so the matrix is drawn again
@@ -1649,6 +1646,8 @@ renderSegments();
 const buildPanelDefaults = serializeBuildPanel();
 initProjects({
   wizard: "imfwizard",
+  projectFileVersion: PROJECT_FILE_VERSION,
+  projectFileMigrations: PROJECT_FILE_MIGRATIONS,
   applicationName: "IMF Wizard",
   packageNoun: "IMP",
   outputFields: OUTPUT_FIELDS,
