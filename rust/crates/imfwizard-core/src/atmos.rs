@@ -53,76 +53,11 @@ pub struct AtmosImportResult {
     pub error: String,
 }
 
-/// The form types an ADM master arrives in: plain RIFF, and the two 64-bit forms
-/// BS.2088 defines, whose sizes live in a `ds64` chunk.
-const WAVE_FORM_TYPES: [&[u8; 4]; 3] = [b"RIFF", b"RF64", b"BW64"];
-
 /// What a 32-bit RIFF size field holds when the real size is in the `ds64` chunk.
 const SIZE_IS_IN_DS64: u32 = 0xFFFF_FFFF;
 
-/// Form type, size and `WAVE` together.
-const RIFF_HEADER_BYTES: u64 = 12;
-
 /// A chunk's FourCC and its 32-bit size.
 const CHUNK_HEADER_BYTES: u64 = 8;
-
-/// riffSize, dataSize and sampleCount, then the table length.
-const DS64_FIXED_BYTES: usize = 28;
-
-/// A FourCC and a 64-bit size.
-const DS64_TABLE_ENTRY_BYTES: usize = 12;
-
-/// The 64-bit sizes a `ds64` chunk carries (ITU-R BS.2088): the data chunk's, plus
-/// one table entry for every other chunk whose 32-bit size field is 0xFFFFFFFF.
-struct Ds64Sizes {
-    data_size: u64,
-    table: Vec<([u8; 4], u64)>,
-}
-
-impl Ds64Sizes {
-    fn parse(payload: &[u8]) -> Result<Self, String> {
-        if payload.len() < DS64_FIXED_BYTES {
-            return Err(format!(
-                "ds64 chunk is {} bytes, too short to hold the 64-bit sizes",
-                payload.len()
-            ));
-        }
-        let data_size = u64::from_le_bytes(payload[8..16].try_into().unwrap());
-        let entries = u32::from_le_bytes(payload[24..28].try_into().unwrap()) as usize;
-        let wanted = DS64_FIXED_BYTES + entries * DS64_TABLE_ENTRY_BYTES;
-        if payload.len() < wanted {
-            return Err(format!(
-                "ds64 chunk declares {entries} sizes but is only {} bytes",
-                payload.len()
-            ));
-        }
-        let table = payload[DS64_FIXED_BYTES..wanted]
-            .as_chunks::<DS64_TABLE_ENTRY_BYTES>()
-            .0
-            .iter()
-            .map(|entry| {
-                (
-                    entry[..4].try_into().unwrap(),
-                    u64::from_le_bytes(entry[4..].try_into().unwrap()),
-                )
-            })
-            .collect();
-        Ok(Self { data_size, table })
-    }
-
-    fn size_of(&self, chunk_id: &[u8; 4]) -> Option<u64> {
-        if chunk_id == b"data" {
-            return Some(self.data_size);
-        }
-        self.table
-            .iter()
-            .find_map(|(id, size)| (id == chunk_id).then_some(*size))
-    }
-}
-
-fn chunk_name(chunk_id: &[u8; 4]) -> String {
-    String::from_utf8_lossy(chunk_id).into_owned()
-}
 
 /// Extract the "axml" chunk from a BWF file.
 ///
@@ -131,81 +66,18 @@ fn chunk_name(chunk_id: &[u8; 4]) -> String {
 pub fn extract_axml_chunk(path: &Path) -> Result<String, String> {
     let mut file =
         File::open(path).map_err(|e| format!("Cannot open BWF {}: {e}", path.display()))?;
-    let file_length = file
-        .metadata()
-        .map_err(|e| format!("Cannot read BWF size: {e}"))?
-        .len();
-
-    let mut header = [0u8; RIFF_HEADER_BYTES as usize];
-    file.read_exact(&mut header)
-        .map_err(|e| format!("Read error: {e}"))?;
-    let form_type: [u8; 4] = header[..4].try_into().unwrap();
-    if !WAVE_FORM_TYPES.contains(&&form_type) {
-        return Err(format!(
-            "Not a RIFF, RF64 or BW64 file: form type is {}",
-            chunk_name(&form_type)
-        ));
-    }
-    if &header[8..12] != b"WAVE" {
-        return Err("Not a WAVE file".into());
-    }
-
-    let mut ds64: Option<Ds64Sizes> = None;
-    let mut position = RIFF_HEADER_BYTES;
-    while position + CHUNK_HEADER_BYTES <= file_length {
-        let mut chunk_header = [0u8; CHUNK_HEADER_BYTES as usize];
-        file.read_exact(&mut chunk_header)
-            .map_err(|e| format!("Read error: {e}"))?;
-        position += CHUNK_HEADER_BYTES;
-        let chunk_id: [u8; 4] = chunk_header[..4].try_into().unwrap();
-        let declared_size = u32::from_le_bytes(chunk_header[4..].try_into().unwrap());
-
-        let chunk_size = match declared_size {
-            SIZE_IS_IN_DS64 => {
-                let sizes = ds64.as_ref().ok_or_else(|| {
-                    format!(
-                        "{} chunk takes its size from a ds64 chunk this file does not have",
-                        chunk_name(&chunk_id)
-                    )
-                })?;
-                sizes.size_of(&chunk_id).ok_or_else(|| {
-                    format!(
-                        "ds64 chunk carries no size for the {} chunk",
-                        chunk_name(&chunk_id)
-                    )
-                })?
-            }
-            size => size as u64,
-        };
-        if position
-            .checked_add(chunk_size)
-            .is_none_or(|end| end > file_length)
-        {
-            return Err(format!(
-                "{} chunk claims {chunk_size} bytes at offset {position}, past the end of the {file_length} byte file",
-                chunk_name(&chunk_id)
-            ));
-        }
-
-        if &chunk_id == b"axml" {
-            let mut xml_buf = vec![0u8; chunk_size as usize];
-            file.read_exact(&mut xml_buf)
-                .map_err(|e| format!("Failed to read axml chunk: {e}"))?;
-            return Ok(String::from_utf8_lossy(&xml_buf).to_string());
-        }
-        if &chunk_id == b"ds64" {
-            let mut payload = vec![0u8; chunk_size as usize];
-            file.read_exact(&mut payload)
-                .map_err(|e| format!("Failed to read ds64 chunk: {e}"))?;
-            ds64 = Some(Ds64Sizes::parse(&payload)?);
-        }
-
-        position += chunk_size + chunk_size % 2;
-        file.seek(SeekFrom::Start(position))
-            .map_err(|e| format!("Seek error: {e}"))?;
-    }
-
-    Err("No axml chunk found in BWF file".into())
+    let chunks = postkit::wav_io::read_chunks(&mut file)
+        .map_err(|e| format!("Cannot read BWF {}: {e}", path.display()))?;
+    let axml = chunks
+        .iter()
+        .find(|chunk| &chunk.id == b"axml")
+        .ok_or("No axml chunk found in BWF file")?;
+    let mut xml_buf = vec![0u8; axml.size as usize];
+    file.seek(SeekFrom::Start(axml.body_offset()))
+        .map_err(|e| format!("Seek error: {e}"))?;
+    file.read_exact(&mut xml_buf)
+        .map_err(|e| format!("Failed to read axml chunk: {e}"))?;
+    Ok(String::from_utf8_lossy(&xml_buf).to_string())
 }
 
 fn local_name(qname: QName) -> String {
@@ -392,6 +264,8 @@ pub fn import_atmos(
             "0:a",
             "-c:a",
             "pcm_s24le",
+            "-rf64",
+            "auto",
             &combined.to_string_lossy(),
         ])
         .output();

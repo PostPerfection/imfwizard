@@ -245,7 +245,7 @@ fn sound_depth(spec: &hound::WavSpec) -> String {
 /// Which bits to lose is the mastering engineer's call, so the conversion is
 /// theirs to run.
 pub fn check_sound_depth(input: &Path) -> Result<(), String> {
-    let spec = hound::WavReader::open(input)
+    let spec = postkit::wav_io::WavReader::open(input)
         .map_err(|error| format!("cannot read {}: {error}", input.display()))?
         .spec();
     if spec.sample_format == hound::SampleFormat::Int && spec.bits_per_sample <= APP2E_SOUND_BITS {
@@ -265,7 +265,7 @@ pub fn check_sound_depth(input: &Path) -> Result<(), String> {
 /// lies. Every sample is shifted up whole, so no bit of the master is lost.
 pub fn widen_sound_depth(input: &Path, output: &Path) -> Result<Option<u16>, String> {
     check_sound_depth(input)?;
-    let mut reader = hound::WavReader::open(input)
+    let mut reader = postkit::wav_io::WavReader::open(input)
         .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
     let spec = reader.spec();
     if spec.bits_per_sample == APP2E_SOUND_BITS {
@@ -291,11 +291,11 @@ pub fn widen_sound_depth(input: &Path, output: &Path) -> Result<Option<u16>, Str
 }
 
 fn audio_facts(path: &Path) -> Result<AudioFacts, String> {
-    let reader =
-        hound::WavReader::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let reader = postkit::wav_io::WavReader::open(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     Ok(AudioFacts {
         path: path.to_path_buf(),
-        sample_frames: reader.duration() as u64,
+        sample_frames: reader.duration(),
         sample_rate: reader.spec().sample_rate,
     })
 }

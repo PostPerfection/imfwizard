@@ -441,6 +441,7 @@ fn demux_sound(media: &Path, output: &Path) -> Result<(), String> {
         .arg("-y")
         .args(["-i".as_ref(), media.as_os_str()])
         .args(["-vn", "-acodec", "pcm_s24le", "-ar", "48000"])
+        .args(["-rf64", "auto"])
         .arg(output)
         .output()
         .map_err(|e| format!("cannot run ffmpeg: {e}"))?;

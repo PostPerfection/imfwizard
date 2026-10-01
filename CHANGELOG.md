@@ -15,6 +15,7 @@
 - **An encode threads setting**: `--threads N` and the desktop *Encode threads* field, saved as `encodeThreads`, set how many threads the encoder runs and size the accelerator plugin's host threads to the same count. 0 or an empty field runs one per available CPU, and the desktop job log prints the count on an `Encode threads:` line.
 
 ### Fixed
+- **A master of any length packages its sound**: the audio steps read and wrote plain RIFF WAV, which stops at 4 GiB, so a long multichannel master failed or was refused. Every WAV is now read through postkit's `wav_io`, which takes RIFF, RF64 and BW64, and every ffmpeg command writing one passes `-rf64 auto`. The Atmos ADM chunk reader uses the same code.
 - **The Settings default output directory is used**: a build with an empty Output directory went to `Documents/<title>` whatever Settings said, and now goes to `<default output directory>/<title>`, or `Documents/<title>` when that setting is empty.
 - **The desktop job log is written beside the package**: `imfwizard.log` sat inside the IMP folder where validators read it as a file the ASSETMAP does not list, and the log for a package at `<output>` is now `<output>.log` in the folder above it.
 - **A frame directory given to `compare`, `lut`, `aces`, `slate` or `prores` needs `--fps-num` and `--fps-den`**: the five commands played every frame directory at 24 fps with no flag and no message, and now refuse one without the flags and refuse the flags for a file or IMP input.

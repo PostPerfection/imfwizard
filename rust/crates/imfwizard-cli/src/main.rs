@@ -2487,6 +2487,7 @@ fn run() {
                                     .arg("pcm_s24le")
                                     .arg("-ar")
                                     .arg("48000")
+                                    .args(["-rf64", "auto"])
                                     .arg(&wav_out)
                                     .output();
                                 match demux {

@@ -226,3 +226,63 @@ fn a_32_bit_integer_master_is_refused_before_the_encode() {
         "the refusal came after the encode had started"
     );
 }
+
+/// An RF64 master, the form ffmpeg writes once a WAV passes 4 GiB, reads and
+/// widens like a RIFF one, and the wrap carries every sample.
+#[test]
+fn an_rf64_master_is_widened_and_packaged() {
+    let work = TempDir::new().unwrap();
+    let sound = work.path().join("rf64.wav");
+    run_ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        &format!("sine=frequency=997:sample_rate={SAMPLE_RATE}:duration=1"),
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_s16le",
+        "-rf64",
+        "always",
+        &sound.to_string_lossy(),
+    ]);
+
+    let (imp, mut command) = create(work.path(), &sound);
+    command
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMP validation PASSED"));
+
+    let samples_per_frame = (SAMPLE_RATE / FRAMES_PER_SECOND) as usize;
+    let master: Vec<i32> = postkit::wav_io::WavReader::open(&sound)
+        .unwrap()
+        .into_samples::<i32>()
+        .take(samples_per_frame * 2)
+        .map(Result::unwrap)
+        .collect();
+    assert!(master.iter().any(|&s| s != 0), "the tone is silent");
+
+    let audio = only_file_starting_with(&imp, "AUDIO_");
+    let mut reader = asdcplib::as02::pcm::MxfReader::new();
+    reader
+        .open_read(
+            &audio.to_string_lossy(),
+            asdcplib::Rational::new(FRAMES_PER_SECOND as i32, 1),
+        )
+        .expect("the sound MXF opens");
+    let mut essence = vec![0u8; samples_per_frame * 2 * 3];
+    let read = reader.read_frame(0, &mut essence, None, None).unwrap();
+    assert_eq!(read, essence.len());
+    let wrapped: Vec<i32> = essence
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|b| i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8)
+        .collect();
+    let scale = 1 << (APP2E_SOUND_BITS - 16);
+    assert_eq!(
+        wrapped,
+        master.iter().map(|m| m * scale).collect::<Vec<_>>(),
+        "the first edit unit lost samples"
+    );
+}

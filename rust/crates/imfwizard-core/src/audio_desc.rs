@@ -64,6 +64,8 @@ pub fn mix_audio_description(
             "[out]",
             "-c:a",
             "pcm_s24le",
+            "-rf64",
+            "auto",
         ])
         .arg(output)
         .output()
