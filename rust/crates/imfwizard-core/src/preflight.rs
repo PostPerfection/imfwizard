@@ -129,8 +129,15 @@ pub fn check_before_encode(plan: &CreatePlan) -> Result<(), String> {
         ));
     }
     if let Some(picture) = &plan.picture {
-        if plan.still_frames.is_none() && detect_input_type(picture) == InputType::Unknown {
+        let input_type = detect_input_type(picture);
+        if plan.still_frames.is_none() && input_type == InputType::Unknown {
             return Err(unclassified_picture_refusal(picture));
+        }
+        if input_type == InputType::PictureMxf {
+            return Err(format!(
+                "{} is a JPEG 2000 picture MXF, which IMF Wizard cannot import yet",
+                picture.display()
+            ));
         }
         crate::source_colourspace::reject_on_precompressed_picture(picture, &plan.source_colour)?;
         crate::source_picture::reject_on_precompressed_picture(picture, &plan.picture_options)?;
@@ -324,6 +331,28 @@ mod tests {
         let error = check_before_encode(&plan).unwrap_err();
 
         assert!(error.contains("tif, tiff, dpx, exr, bmp"), "{error}");
+    }
+
+    #[test]
+    fn a_jpeg_2000_picture_mxf_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let picture = crate::mxf_wrap::wrapped_picture(dir.path(), None, 1).path;
+
+        let plan = CreatePlan {
+            picture: Some(picture.clone()),
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        };
+        let error = check_before_encode(&plan).unwrap_err();
+
+        assert_eq!(
+            error,
+            format!(
+                "{} is a JPEG 2000 picture MXF, which IMF Wizard cannot import yet",
+                picture.display()
+            )
+        );
     }
 
     /// A LUT whose output is Rec.709 RGB is exactly what the descriptor declares,

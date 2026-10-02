@@ -391,6 +391,19 @@ pub fn create_imp(opts: &ImpOptions) -> ImpResult {
             ..Default::default()
         };
     }
+    match postkit::mxf_wrap::remove_part_written_mxfs(&opts.output_dir) {
+        Ok(removed) => {
+            for path in removed {
+                tracing::info!("removed {}, left by an earlier run", path.display());
+            }
+        }
+        Err(e) => {
+            return ImpResult {
+                error: format!("Failed to remove part-written MXFs from the output directory: {e}"),
+                ..Default::default()
+            };
+        }
+    }
 
     let mut all_tracks: Vec<crate::MxfTrackFile> = Vec::new();
     let mut cpls: Vec<CplEntry> = Vec::new();
@@ -657,6 +670,37 @@ mod tests {
         let result = create_imp(&opts);
         assert!(!result.success);
         assert!(result.error.contains("J2K input directory is required"));
+    }
+
+    #[test]
+    fn create_removes_part_written_mxfs_left_by_an_earlier_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let j2k_dir = dir.path().join("j2k");
+        std::fs::create_dir_all(&j2k_dir).unwrap();
+        std::fs::write(j2k_dir.join("0001.j2c"), synthetic_j2k()).unwrap();
+        let out = dir.path().join("imp");
+        std::fs::create_dir_all(&out).unwrap();
+        let part_written = out.join("VIDEO_00000000-0000-0000-0000-000000000001.mxf.part");
+        std::fs::write(&part_written, b"unfinished").unwrap();
+
+        let result = create_imp(&ImpOptions {
+            output_dir: out,
+            compositions: vec![Composition {
+                title: "Rerun".into(),
+                content_kind: "feature".into(),
+                j2k_dir: Some(j2k_dir),
+                ..Default::default()
+            }],
+            fps_num: 24,
+            fps_den: 1,
+            ..Default::default()
+        });
+        assert!(result.success, "create failed: {}", result.error);
+        assert!(
+            !part_written.exists(),
+            "{} survived",
+            part_written.display()
+        );
     }
 
     #[test]

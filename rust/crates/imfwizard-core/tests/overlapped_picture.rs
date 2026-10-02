@@ -16,6 +16,8 @@ const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
 const FRAMES: u64 = 4;
 const FPS: u32 = 24;
+const PART_WRITTEN_PICTURE: &str = "VIDEO_00000000-0000-0000-0000-000000000001.mxf.part";
+const FINISHED_PICTURE: &str = "VIDEO_00000000-0000-0000-0000-000000000002.mxf";
 
 /// The IMF Rsiz this raster and rate compose, which is what `create` encodes at.
 fn imf_rsiz() -> u16 {
@@ -210,4 +212,46 @@ fn a_video_create_wraps_its_picture_during_the_encode() {
         track.size,
         "the track file size is not the file on disk"
     );
+}
+
+#[test]
+fn a_picture_wrap_removes_part_written_mxfs_left_by_an_earlier_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("clip.mp4");
+    make_clip(&video);
+    let imp_dir = dir.path().join("imp");
+    std::fs::create_dir_all(&imp_dir).unwrap();
+    let part_written = imp_dir.join(PART_WRITTEN_PICTURE);
+    let finished = imp_dir.join(FINISHED_PICTURE);
+    std::fs::write(&part_written, b"unfinished").unwrap();
+    std::fs::write(&finished, b"finished").unwrap();
+
+    encode_and_wrap_picture(
+        &video,
+        &dir.path().join("enc"),
+        &postkit::pipeline::EncodeRunOptions {
+            fps: postkit::encode::FrameRate::whole(FPS),
+            source_colour: postkit::encode::SourceColour::KeepRgb,
+            rsiz: imf_rsiz(),
+            ..Default::default()
+        },
+        PictureWrapTarget {
+            imp_dir: imp_dir.clone(),
+            fps_num: FPS,
+            fps_den: 1,
+            colour: imfwizard_core::mxf_wrap::picture_colour(None),
+        },
+        &Arc::new(AtomicBool::new(false)),
+        &Arc::new(AtomicBool::new(false)),
+        |_| {},
+        |_| {},
+    )
+    .expect("overlapped encode and wrap");
+
+    assert!(
+        !part_written.exists(),
+        "{} survived",
+        part_written.display()
+    );
+    assert!(finished.is_file(), "{} was removed", finished.display());
 }

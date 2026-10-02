@@ -2287,7 +2287,8 @@ fn run() {
                     postkit::encode::InputType::Unknown => fail(
                         imfwizard_core::preflight::unclassified_picture_refusal(&video_path),
                     ),
-                    postkit::encode::InputType::J2kSequence => {
+                    postkit::encode::InputType::J2kSequence
+                    | postkit::encode::InputType::PictureMxf => {
                         (Some(video_path), None, named_audio())
                     }
                     postkit::encode::InputType::Video

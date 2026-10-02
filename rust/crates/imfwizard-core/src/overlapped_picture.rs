@@ -62,6 +62,15 @@ pub fn encode_and_wrap_picture(
 ) -> Result<(postkit::pipeline::EncodeResult, crate::MxfTrackFile), String> {
     std::fs::create_dir_all(&target.imp_dir)
         .map_err(|e| format!("cannot create {}: {e}", target.imp_dir.display()))?;
+    let removed = postkit::mxf_wrap::remove_part_written_mxfs(&target.imp_dir).map_err(|e| {
+        format!(
+            "cannot remove part-written MXFs from {}: {e}",
+            target.imp_dir.display()
+        )
+    })?;
+    for path in removed {
+        tracing::info!("removed {}, left by an earlier run", path.display());
+    }
     let asset_uuid = uuid::Uuid::new_v4();
     let (encode, track) = postkit::pipeline::run_encode_and_wrap_picture(
         video,
