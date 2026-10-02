@@ -20,6 +20,9 @@ time = { version = "0.3", features = ["formatting"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[build-dependencies]
+postkit-ffmpeg-link-search = { path = "../../../extern/postkit/ffmpeg-link-search" }
+
 [dev-dependencies]
 # the App 2E test reads the picture MXF `create` wrote back off disk
 asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "c8c24cc2d3ed4d22460b744e55b0b840ed98cbfa" }

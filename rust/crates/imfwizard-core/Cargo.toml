@@ -24,3 +24,6 @@ time = { version = "0.3", features = ["formatting"] }
 tracing.workspace = true
 uuid.workspace = true
 x509-parser = "0.16"
+
+[build-dependencies]
+postkit-ffmpeg-link-search = { path = "../../../extern/postkit/ffmpeg-link-search" }

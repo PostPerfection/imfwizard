@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+postkit-ffmpeg-link-search = { path = "../../extern/postkit/ffmpeg-link-search" }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "unstable"] }

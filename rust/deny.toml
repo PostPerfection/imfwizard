@@ -22,6 +22,7 @@ allow = [
     "OpenSSL",
     "CC0-1.0",  # notify
     "MPL-2.0",  # option-ext
+    "WTFPL",  # ffmpeg-next, ffmpeg-sys-next
 ]
 
 [[licenses.clarify]]

@@ -71,6 +71,10 @@ jobs:
           # the libxml2 tools feature installs xmllint.exe here
           echo "C:/vcpkg/installed/x64-windows/tools/libxml2" >> $GITHUB_PATH
 
+      - uses: PostPerfection/ffmpeg-mpv-builds@v1.0.0
+        with:
+          release: v1.0.0
+
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -293,6 +297,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb xdotool webkit2gtk-driver
 
+      - uses: PostPerfection/ffmpeg-mpv-builds@v1.0.0
+        with:
+          release: v1.0.0
+
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -315,11 +323,6 @@ jobs:
         uses: PostPerfection/setup-grok@v1.1.3
         with:
           grok-ref: v20.4.14
-
-      - uses: PostPerfection/setup-libmpv@v1
-        with:
-          mpv-release: 20260828
-          mpv-archive: mpv-dev-x86_64-20260828-git-182fa6ca49.7z
 
       - name: Build frontend
         working-directory: gui

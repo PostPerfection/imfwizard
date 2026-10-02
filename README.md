@@ -157,6 +157,8 @@ The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint fro
 
 ### Install from source
 
+Every build, the CLI included, links the FFmpeg 8.1.3 LGPL libraries, and the desktop app also links libmpv. Both come from a [PostPerfection/ffmpeg-mpv-builds](https://github.com/PostPerfection/ffmpeg-mpv-builds/releases/tag/v1.0.0) release, v1.0.0 in CI. Unpack the archive for your platform, here to `/path/to/ffmpeg-mpv`. On Linux and macOS put its `lib/pkgconfig` first on `PKG_CONFIG_PATH`, on Windows set `FFMPEG_DIR` to it and `MPV_LIB_DIR` to its `lib`. On Ubuntu 24.04 install the packages its `ubuntu-24.04-runtime-packages.txt` lists. On a machine with a distro FFmpeg also set `FFMPEG_DIR` to it on Linux and macOS: the build scripts put `$FFMPEG_DIR/lib` first on the link path, ahead of `/usr/lib64`.
+
 Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
 
 ```bash
@@ -165,15 +167,15 @@ cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$
 cmake --build grok/build --parallel
 cmake --install grok/build
 
-export PKG_CONFIG_PATH="$HOME/bin/grok/lib64/pkgconfig:$HOME/bin/grok/lib/pkgconfig:$PKG_CONFIG_PATH"
-export LD_LIBRARY_PATH="$HOME/bin/grok/lib64:$HOME/bin/grok/lib:$LD_LIBRARY_PATH"
+export PKG_CONFIG_PATH="/path/to/ffmpeg-mpv/lib/pkgconfig:$HOME/bin/grok/lib64/pkgconfig:$HOME/bin/grok/lib/pkgconfig:$PKG_CONFIG_PATH"
+export LD_LIBRARY_PATH="/path/to/ffmpeg-mpv/lib:$HOME/bin/grok/lib64:$HOME/bin/grok/lib:$LD_LIBRARY_PATH"
 ```
 
 #### Linux (Ubuntu/Debian)
 
 ```bash
 sudo apt-get install -y build-essential cmake pkg-config libssl-dev libxerces-c-dev libasound2-dev libclang-dev
-# For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libmpv-dev patchelf
+# For GUI: also install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
 git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
 cd imfwizard/rust
@@ -185,8 +187,9 @@ cargo build --release
 
 ```bash
 sudo dnf install gcc-c++ cmake pkgconf-pkg-config libxml2-devel openssl-devel xerces-c-devel alsa-lib-devel clang-devel
-# For GUI: also install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel mpv-devel patchelf
+# For GUI: also install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel patchelf
 # ffmpeg comes from RPM Fusion
+export FFMPEG_DIR=/path/to/ffmpeg-mpv
 
 git clone --recurse-submodules https://github.com/PostPerfection/imfwizard.git
 cd imfwizard/rust
@@ -200,7 +203,8 @@ cargo build --release
 brew install pkg-config libxml2 openssl@3 xerces-c
 
 export OPENSSL_DIR=$(brew --prefix openssl@3)
-export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig:$PKG_CONFIG_PATH"
+export PKG_CONFIG_PATH="/path/to/ffmpeg-mpv/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix xerces-c)/lib/pkgconfig:$PKG_CONFIG_PATH"
+export DYLD_LIBRARY_PATH="/path/to/ffmpeg-mpv/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 
 cd rust
 cargo build --release
@@ -214,6 +218,9 @@ vcpkg install libxml2 openssl xerces-c --triplet x64-windows
 
 $env:VCPKG_ROOT = "$env:VCPKG_INSTALLATION_ROOT"
 $env:CMAKE_TOOLCHAIN_FILE = "$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+$env:FFMPEG_DIR = "C:\path\to\ffmpeg-mpv"
+$env:MPV_LIB_DIR = "C:\path\to\ffmpeg-mpv\lib"
+$env:PATH = "C:\path\to\ffmpeg-mpv\bin;$env:PATH"
 
 cd rust
 cargo build --release

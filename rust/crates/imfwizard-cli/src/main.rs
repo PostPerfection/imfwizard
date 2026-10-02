@@ -312,7 +312,7 @@ struct PictureArguments {
     #[arg(long)]
     deinterlace: bool,
 
-    /// Run the source through a denoiser (hqdn3d) at its defaults.
+    /// Run the source through a denoiser at its defaults.
     #[arg(long)]
     denoise: bool,
 

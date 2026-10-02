@@ -478,17 +478,17 @@ fn deinterlace_takes_the_combing_out_of_the_packaged_frame() {
 }
 
 /// Noise the source carries, on the noise filter's 0 to 100 strength scale.
-/// hqdn3d at its defaults is a grain filter: at a strength of 40 it takes only
-/// 3 percent off, so a heavier source would measure nothing.
+/// atadenoise at its defaults only averages samples within 2 percent of full
+/// scale of each other, so a heavier source keeps most of its noise.
 const NOISE_SIGMA: u32 = 5;
 const NOISE_SEED: u32 = 1;
 
-/// Pixel-to-pixel difference the noisy flat frame packages at, and what hqdn3d
-/// brings it down to. Measured on the decoded picture track file: 39 codes of
-/// 4095 noisy, 12.5 denoised. The same clip without the noise packages at 0.0,
+/// Pixel-to-pixel difference the noisy flat frame packages at, and what atadenoise
+/// brings it down to. Measured on the decoded picture track file: 31.1 codes of
+/// 4095 noisy, 24.4 denoised. The same clip without the noise packages at 0.0,
 /// so both numbers are the source's noise and none of them is the encode's.
 const NOISY_PIXEL_DIFFERENCE: f64 = 30.0;
-const DENOISED_PIXEL_DIFFERENCE: f64 = 18.0;
+const DENOISED_PIXEL_DIFFERENCE: f64 = 27.0;
 
 #[test]
 fn denoise_takes_the_grain_out_of_the_packaged_frame() {
@@ -506,7 +506,7 @@ fn denoise_takes_the_grain_out_of_the_packaged_frame() {
         "yuv444p",
     );
 
-    // hqdn3d's temporal pass needs frames behind it, so measure the last one
+    // atadenoise averages the last frame with the three behind it
     let last = DENOISE_FRAMES - 1;
     let noisy =
         packaged_frame(&create(dir.path(), "noisy", &clip, &[]), last).pixel_to_pixel_difference();
