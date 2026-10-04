@@ -76,6 +76,8 @@
           <span id="project-name" class="project-name">Untitled</span>
         </div>
         <div class="toolbar-right">
+          <button id="btn-recent-projects" class="toolbar-btn" title="Recent projects" aria-expanded="false" disabled>Recent</button>
+          <div id="recent-list" class="recent-list" hidden></div>
           <button id="btn-new-project" class="toolbar-btn" title="New project">New</button>
           <button id="btn-project-open" class="toolbar-btn" title="Open project">Open</button>
           <button id="btn-project-save" class="toolbar-btn" title="Save project">Save</button>
@@ -96,13 +98,6 @@
           <div class="workspace">
             <!-- Left: Asset browser + segments -->
             <div class="workspace-main">
-              <section id="recent-projects" class="panel recent-panel collapsed" hidden>
-                <div id="recent-header" class="panel-header recent-header" title="Show or hide recent projects">
-                  <h2>Recent Projects</h2>
-                  <button id="recent-toggle" class="recent-toggle" aria-expanded="false">▶</button>
-                </div>
-                <div id="recent-list" class="recent-list"></div>
-              </section>
               <section class="panel assets-panel">
                 <div class="panel-header">
                   <h2>Assets</h2>
@@ -472,6 +467,10 @@
             </div>
             <div class="prop-field">
               <span id="val-path" class="path-display">No IMP selected</span>
+            </div>
+            <div class="checkbox-group">
+              <label><input type="checkbox" id="val-xsd"> SMPTE schemas (XSD)</label>
+              <label id="val-photon-label"><input type="checkbox" id="val-photon"> Netflix Photon</label>
             </div>
             <div id="val-results" class="results-box"></div>
           </section>

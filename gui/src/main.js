@@ -20,6 +20,9 @@ import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectF
 import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
+import { initAssetStripResize } from "../../extern/guikit/src/asset-strip-resize.js";
+
+initAssetStripResize("imfwizard");
 
 // === Browse wrapper ===
 const LAST_BROWSE_DIR_KEY = "imfwizard-last-browse-dir";
@@ -1113,13 +1116,25 @@ document.getElementById("val-browse")?.addEventListener("click", async () => {
   if (dir) { document.getElementById("val-path").textContent = dir; document.getElementById("val-run").disabled = false; }
 });
 
+let bundledPhotonDirectory = null;
+invoke("bundled_photon_directory").then(
+  directory => { bundledPhotonDirectory = directory; },
+  reason => {
+    document.getElementById("val-photon").disabled = true;
+    document.getElementById("val-photon-label").title = reason;
+  },
+);
+
 async function runValidation() {
   const dir = document.getElementById("val-path").textContent;
   if (!dir || dir.startsWith("No ")) return;
   const box = document.getElementById("val-results");
   box.classList.add("visible");
   box.textContent = "Validating...";
-  const cmd = Command.sidecar("imfwizard", ["validate", dir]);
+  const args = ["validate", dir];
+  if (document.getElementById("val-xsd").checked) args.push("--xsd");
+  if (document.getElementById("val-photon").checked) args.push("--photon", "--photon-jar", bundledPhotonDirectory);
+  const cmd = Command.sidecar("imfwizard", args);
   const result = await cmd.execute();
   box.textContent = result.code === 0
     ? "✓ IMP validation PASSED\n\n" + result.stdout

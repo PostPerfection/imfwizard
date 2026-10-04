@@ -42,6 +42,7 @@
       "icons/icon.ico"
     ],
     "externalBin": ["imfwizard"],
+    "resources": ["photon/*"],
     "fileAssociations": [
       {
         "ext": ["imfwizard"],

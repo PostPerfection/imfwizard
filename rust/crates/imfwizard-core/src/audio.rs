@@ -12,6 +12,24 @@ pub struct AudioAsset {
     pub layout: super::channel_map::ChannelLayout,
 }
 
+pub fn demux_source_audio(
+    video: &std::path::Path,
+    wav_out: &std::path::Path,
+) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
+        .arg(video)
+        .arg("-vn")
+        .arg("-acodec")
+        .arg("pcm_s24le")
+        .arg("-ar")
+        .arg("48000")
+        .args(["-rf64", "auto"])
+        .arg(wav_out)
+        .output()
+}
+
 /// Probe audio file metadata via ffprobe.
 pub fn probe_audio(path: &std::path::Path) -> Result<AudioAsset, String> {
     let out = std::process::Command::new("ffprobe")

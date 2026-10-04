@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
@@ -967,6 +967,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         let probe_started = Instant::now();
         let probed = imfwizard_core::probe::probe_video(&video_path);
         let input_type = postkit::encode::detect_input_type(&video_path);
+        let source_is_video = matches!(input_type, postkit::encode::InputType::Video);
         // a J2K directory reaches the wrapper with no decode at all, so it has
         // no picture to plan; submit_job already refused any processing on one
         let picture = match input_type {
@@ -1251,23 +1252,22 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             log_to(&log_file, breakdown);
         }
 
+        let sound_files = composition_sound_files(ci, source_is_video, &enc_dir, |line| {
+            log_to(&log_file, line)
+        })?;
         // the map runs before the delay, the trim and the MCA labels, so the
         // labelled layout describes the file that is actually packaged
         let audio_map_started = Instant::now();
         let audio_files: Vec<PathBuf> = match &job.audio_map {
-            Some(spec) => ci
-                .audio_path
+            Some(spec) => sound_files
                 .iter()
                 .map(|wav| {
-                    imfwizard_core::audio_map::map_audio_file(
-                        spec,
-                        &PathBuf::from(wav),
-                        &enc_dir,
-                        |line| log_to(&log_file, line),
-                    )
+                    imfwizard_core::audio_map::map_audio_file(spec, wav, &enc_dir, |line| {
+                        log_to(&log_file, line)
+                    })
                 })
                 .collect::<Result<Vec<_>, String>>()?,
-            None => ci.audio_path.iter().map(PathBuf::from).collect(),
+            None => sound_files,
         };
         if job.audio_map.is_some() {
             log_to(
@@ -1441,11 +1441,37 @@ fn emit_progress(
     );
 }
 
+fn composition_sound_files(
+    composition: &CompositionInput,
+    source_is_video: bool,
+    scratch_directory: &Path,
+    log: impl Fn(&str),
+) -> Result<Vec<PathBuf>, String> {
+    if let Some(named) = &composition.audio_path {
+        return Ok(vec![PathBuf::from(named)]);
+    }
+    if !source_is_video {
+        return Ok(Vec::new());
+    }
+    log("[AUDIO] No sound file named: extracting the source's own audio");
+    std::fs::create_dir_all(scratch_directory)
+        .map_err(|e| format!("cannot create {}: {e}", scratch_directory.display()))?;
+    let wav = scratch_directory.join(imfwizard_core::intermediates::DEMUXED_AUDIO_NAME);
+    let demuxed =
+        imfwizard_core::audio::demux_source_audio(Path::new(&composition.video_path), &wav);
+    if !demuxed.is_ok_and(|run| run.status.success()) {
+        log("[AUDIO] No sound came out of the source");
+        return Ok(Vec::new());
+    }
+    log("[AUDIO] Using the source's own audio");
+    Ok(vec![wav])
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_threads_status, format_encode_breakdown, format_stage_timing, verification_log,
-        verify_package, CompositionInput, SourceSettings,
+        composition_sound_files, encode_threads_status, format_encode_breakdown,
+        format_stage_timing, verification_log, verify_package, CompositionInput, SourceSettings,
     };
     use std::path::{Path, PathBuf};
     use std::time::Duration;
@@ -1553,6 +1579,70 @@ mod tests {
 
     // the panel carries one preset for the job, so what each source adds to it is
     // the part that has to be settled per composition
+    #[test]
+    fn the_sources_own_sound_is_used_when_no_sound_file_is_named() {
+        let directory = scratch_directory("own-sound");
+        let picture = directory.join("with-sound.mkv");
+        let picture_source = format!("color=c=gray:s={CLIP_WIDTH}x{CLIP_HEIGHT}:r={FPS}");
+        run_ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            &picture_source,
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "1",
+            "-ac",
+            "2",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            &picture.to_string_lossy(),
+        ]);
+        let scratch = directory.join("enc_0");
+
+        let sound =
+            composition_sound_files(&composition(&picture), true, &scratch, |_| {}).unwrap();
+
+        assert_eq!(
+            sound,
+            vec![scratch.join(imfwizard_core::intermediates::DEMUXED_AUDIO_NAME)]
+        );
+        assert_eq!(postkit::wav_io::channel_count(&sound[0]).unwrap(), 2);
+    }
+
+    #[test]
+    fn a_source_without_sound_gives_no_sound_file() {
+        let directory = scratch_directory("no-sound");
+        let picture = clip(&directory, "silent", None);
+
+        let sound = composition_sound_files(
+            &composition(&picture),
+            true,
+            &directory.join("enc_0"),
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(sound.is_empty(), "{sound:?}");
+    }
+
+    #[test]
+    fn a_named_sound_file_is_used_instead_of_the_sources_own() {
+        let directory = scratch_directory("named-sound");
+        let mut named = composition(&directory.join("picture.mkv"));
+        named.audio_path = Some("/sound/mix.wav".to_string());
+
+        let sound =
+            composition_sound_files(&named, true, &directory.join("enc_0"), |_| {}).unwrap();
+
+        assert_eq!(sound, vec![PathBuf::from("/sound/mix.wav")]);
+    }
+
     #[test]
     fn each_composition_settles_its_own_hdr_against_its_own_source() {
         let directory = scratch_directory("hdr-per-composition");

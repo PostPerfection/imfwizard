@@ -440,6 +440,11 @@ jobs:
           fi
           cp -L "$GROK_LIB/$library" "gui/src-tauri/$library"
 
+      # tauri.conf.json ships this folder as a resource
+      - name: Stage Photon jars
+        shell: bash
+        run: bash scripts/fetch_photon.sh gui/src-tauri/photon
+
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:

@@ -21,6 +21,7 @@ gui/src-tauri/imfwizard-*
 gui/src-tauri/grokj2k.dll
 gui/src-tauri/libgrokj2k.so.1
 gui/src-tauri/libgrokj2k.1.dylib
+gui/src-tauri/photon/
 
 # Test DCP downloads (large files)
 tests/dcps/isdcf/*.zip

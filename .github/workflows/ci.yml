@@ -341,6 +341,10 @@ jobs:
           TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
           cp target/release/imfwizard ../gui/src-tauri/imfwizard-${TRIPLE}
 
+      # tauri.conf.json ships this folder as a resource
+      - name: Stage Photon jars
+        run: bash scripts/fetch_photon.sh gui/src-tauri/photon
+
       - name: Test Tauri backend
         working-directory: gui/src-tauri
         run: cargo test

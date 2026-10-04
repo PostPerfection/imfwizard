@@ -65,6 +65,11 @@ for entry in "${artifacts[@]}"; do
   mv "$destination/$jar.tmp" "$destination/$jar"
 done
 
+if ! command -v java >/dev/null 2>&1; then
+  echo "$destination"
+  exit 0
+fi
+
 # java is a native process under git bash and cannot read an MSYS path
 classpath="$destination/*"
 if command -v cygpath >/dev/null 2>&1; then

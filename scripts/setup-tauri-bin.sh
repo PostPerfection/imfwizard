@@ -22,3 +22,6 @@ if [[ "$(uname)" == Linux ]]; then
     patchelf --set-rpath '$ORIGIN/../lib/imfwizard' "${BIN_DIR}/imfwizard-${TARGET_TRIPLE}"
 fi
 echo "Installed: ${BIN_DIR}/imfwizard-${TARGET_TRIPLE}"
+
+# tauri.conf.json ships this folder as a resource
+"${ROOT}/scripts/fetch_photon.sh" "${BIN_DIR}/photon"

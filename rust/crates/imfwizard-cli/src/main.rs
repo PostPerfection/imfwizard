@@ -2479,18 +2479,10 @@ fn run() {
                             (None, false) => {
                                 let wav_out =
                                     output.join(imfwizard_core::intermediates::DEMUXED_AUDIO_NAME);
-                                let demux = std::process::Command::new("ffmpeg")
-                                    .arg("-y")
-                                    .arg("-i")
-                                    .arg(&video_path)
-                                    .arg("-vn")
-                                    .arg("-acodec")
-                                    .arg("pcm_s24le")
-                                    .arg("-ar")
-                                    .arg("48000")
-                                    .args(["-rf64", "auto"])
-                                    .arg(&wav_out)
-                                    .output();
+                                let demux = imfwizard_core::audio::demux_source_audio(
+                                    &video_path,
+                                    &wav_out,
+                                );
                                 match demux {
                                     Ok(run) if run.status.success() => {
                                         tracing::info!("Demuxed audio: {}", wav_out.display());
