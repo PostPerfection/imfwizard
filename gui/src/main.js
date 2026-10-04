@@ -1113,17 +1113,13 @@ document.getElementById("post-build-reveal")?.addEventListener("click", () => {
 // === Validate ===
 document.getElementById("val-browse")?.addEventListener("click", async () => {
   const dir = await open({ directory: true });
-  if (dir) { document.getElementById("val-path").textContent = dir; document.getElementById("val-run").disabled = false; }
+  if (!dir) return;
+  document.getElementById("val-path").textContent = dir;
+  document.getElementById("val-run").disabled = false;
+  const box = document.getElementById("val-results");
+  box.textContent = "";
+  box.classList.remove("visible");
 });
-
-let bundledPhotonDirectory = null;
-invoke("bundled_photon_directory").then(
-  directory => { bundledPhotonDirectory = directory; },
-  reason => {
-    document.getElementById("val-photon").disabled = true;
-    document.getElementById("val-photon-label").title = reason;
-  },
-);
 
 async function runValidation() {
   const dir = document.getElementById("val-path").textContent;
@@ -1131,15 +1127,15 @@ async function runValidation() {
   const box = document.getElementById("val-results");
   box.classList.add("visible");
   box.textContent = "Validating...";
-  const args = ["validate", dir];
-  if (document.getElementById("val-xsd").checked) args.push("--xsd");
-  if (document.getElementById("val-photon").checked) args.push("--photon", "--photon-jar", bundledPhotonDirectory);
-  const cmd = Command.sidecar("imfwizard", args);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0
-    ? "✓ IMP validation PASSED\n\n" + result.stdout
-    : "✗ Validation failed\n\n" + (result.stderr || result.stdout);
-  setStatus(result.code === 0 ? "Validation passed" : "Validation failed");
+  const result = await invoke("validate_imp", { path: dir });
+  const findings = [
+    ...result.errors.map(error => `error: ${error}`),
+    ...result.warnings.map(warning => `warning: ${warning}`),
+    ...result.infos,
+  ];
+  const verdict = result.valid ? "✓ IMP validation PASSED" : "✗ Validation failed";
+  box.textContent = [verdict, "", ...findings].join("\n");
+  setStatus(result.valid ? "Validation passed" : "Validation failed");
 }
 
 document.getElementById("val-run")?.addEventListener("click", runValidation);

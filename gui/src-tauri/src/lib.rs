@@ -34,21 +34,6 @@ fn component_versions(
     )
 }
 
-const BUNDLED_PHOTON_DIRECTORY: &str = "photon";
-
-#[tauri::command]
-async fn bundled_photon_directory(app: tauri::AppHandle) -> Result<String, String> {
-    imfwizard_core::photon::find_java().ok_or("Photon needs Java, install a JRE to use it")?;
-    let directory = app
-        .path()
-        .resolve(
-            BUNDLED_PHOTON_DIRECTORY,
-            tauri::path::BaseDirectory::Resource,
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(directory.to_string_lossy().into_owned())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     postkit::grok_encoder::set_packaged_gpu_plugin_path("imfwizard");
@@ -88,7 +73,7 @@ pub fn run() {
             guikit::preview::preview_set_subtitle_visibility,
             guikit::gpu::set_gpu,
             component_versions,
-            bundled_photon_directory,
+            pipeline::validate_imp,
             guikit::launch_project::take_launch_project_path,
             preferences::load_preferences,
             preferences::save_preferences,

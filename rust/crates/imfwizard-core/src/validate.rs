@@ -32,6 +32,43 @@ pub fn validate_imp_with_photon(imp_dir: &Path, photon: Option<&Path>) -> Valida
     validate_imp_with_options(imp_dir, options)
 }
 
+const XSD_SKIPPED_WITHOUT_XMLLINT: &str = "XSD: SKIPPED, xmllint is not installed";
+const PHOTON_RAN: &str = "Photon: checked";
+
+pub fn validate_imp_with_schemas(imp_dir: &Path, photon: Option<&Path>) -> ValidationResult {
+    let mut result = validate_imp_with_photon(imp_dir, photon);
+    let photon_path = crate::photon::photon_path(photon);
+    if dcpdoctor_core::photon::ensure_photon(photon_path.as_deref()).is_ok() {
+        result.infos.push(PHOTON_RAN.to_string());
+    }
+    if !crate::tools::has_xmllint() {
+        result.infos.push(XSD_SKIPPED_WITHOUT_XMLLINT.to_string());
+        return result;
+    }
+    match crate::xsd_validate::validate_imp_schemas(imp_dir, None) {
+        Ok(report) => {
+            for checked in &report.checked {
+                if checked.valid {
+                    result.infos.push(format!("XSD {}: PASS", checked.file));
+                    continue;
+                }
+                result.valid = false;
+                result.errors.extend(
+                    checked
+                        .errors
+                        .iter()
+                        .map(|error| format!("XSD {}: {error}", checked.file)),
+                );
+            }
+        }
+        Err(error) => {
+            result.valid = false;
+            result.errors.push(format!("XSD validation error: {error}"));
+        }
+    }
+    result
+}
+
 /// Validate an IMP for the QC report, which reads the picture essence itself.
 ///
 /// The frame-by-frame checks are the expensive part of a verify, so the report
@@ -232,6 +269,42 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("No MXF essence files")),
             "the picture track file is missing: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a_created_imp_passes_the_schema_check() {
+        let work = tempfile::tempdir().unwrap();
+        let imp = create_good_imp(work.path());
+        let result = validate_imp_with_schemas(&imp, None);
+
+        assert!(result.valid, "errors: {:?}", result.errors);
+        assert!(
+            result
+                .infos
+                .iter()
+                .any(|info| info.starts_with("XSD CPL_") && info.ends_with(": PASS")),
+            "the CPL was not checked against its schema: {:?}",
+            result.infos
+        );
+    }
+
+    #[test]
+    fn a_cpl_that_breaks_its_schema_is_rejected() {
+        let work = tempfile::tempdir().unwrap();
+        let imp = edited_imp(work.path(), CPL_PREFIX, |xml| {
+            replace_once(xml, "<SegmentList>", "<SegmentList><Unknown/>")
+        });
+        let result = validate_imp_with_schemas(&imp, None);
+
+        assert!(!result.valid, "the package validated clean: {result:?}");
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.starts_with("XSD CPL_")),
+            "no schema error names the CPL: {:?}",
+            result.errors
         );
     }
 

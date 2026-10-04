@@ -109,7 +109,7 @@ pub fn parse_photon_output(text: &str) -> PhotonResult {
     result
 }
 
-pub fn find_java() -> Option<PathBuf> {
+fn find_java() -> Option<PathBuf> {
     if let Ok(home) = std::env::var("JAVA_HOME") {
         let p = PathBuf::from(home).join("bin").join("java");
         if p.is_file() {

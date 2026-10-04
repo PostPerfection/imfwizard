@@ -823,15 +823,38 @@ fn format_encode_breakdown(
     measured.then(|| format!("[TIMING] {stage} breakdown: {}", progress.phase_breakdown()))
 }
 
-// the same validation `imfwizard validate` runs, over the package the build just
+const BUNDLED_PHOTON_DIRECTORY: &str = "photon";
+
+fn bundled_photon_directory(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .resolve(
+            BUNDLED_PHOTON_DIRECTORY,
+            tauri::path::BaseDirectory::Resource,
+        )
+        .ok()
+}
+
+#[tauri::command]
+pub async fn validate_imp(
+    app: AppHandle,
+    path: String,
+) -> imfwizard_core::validate::ValidationResult {
+    imfwizard_core::validate::validate_imp_with_schemas(
+        Path::new(&path),
+        bundled_photon_directory(&app).as_deref(),
+    )
+}
+
+// the validation the Validate view runs, over the package the build just
 // wrote. None when the verify preference is off.
 fn verify_package(
     imp_dir: &std::path::Path,
     preferences: &imfwizard_core::preferences::Preferences,
+    photon: Option<&Path>,
 ) -> Option<imfwizard_core::validate::ValidationResult> {
     preferences
         .verify_after_build
-        .then(|| imfwizard_core::validate::validate_imp_with_photon(imp_dir, None))
+        .then(|| imfwizard_core::validate::validate_imp_with_schemas(imp_dir, photon))
 }
 
 // the `[VERIFY]` lines the job log carries, findings and all
@@ -856,6 +879,12 @@ fn verification_log(
             .warnings
             .iter()
             .map(|warning| format!("[VERIFY]   warning: {warning}")),
+    );
+    lines.extend(
+        validation
+            .infos
+            .iter()
+            .map(|info| format!("[VERIFY]   info: {info}")),
     );
     lines
 }
@@ -1383,7 +1412,11 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     );
     let verify_started = Instant::now();
     let preferences = imfwizard_core::preferences::load_preferences().unwrap_or_default();
-    let validation = verify_package(output, &preferences);
+    let validation = verify_package(
+        output,
+        &preferences,
+        bundled_photon_directory(app).as_deref(),
+    );
     for line in verification_log(validation.as_ref()) {
         log_to(&log_file, &line);
     }
@@ -1889,12 +1922,12 @@ mod tests {
     fn the_build_validates_the_package_unless_the_preference_is_off() {
         let imp = created_package("verify-stage");
 
-        let ran = verify_package(&imp, &preferences(true)).expect("the verify stage ran");
+        let ran = verify_package(&imp, &preferences(true), None).expect("the verify stage ran");
         assert!(ran.valid, "the built package did not validate: {ran:?}");
         assert_eq!(verification_log(Some(&ran))[0], "[VERIFY] PASSED");
 
         assert!(
-            verify_package(&imp, &preferences(false)).is_none(),
+            verify_package(&imp, &preferences(false), None).is_none(),
             "the verify stage ran with the preference off"
         );
         assert_eq!(
@@ -1917,7 +1950,7 @@ mod tests {
             .expect("the package holds a CPL");
         std::fs::remove_file(&cpl).unwrap();
 
-        let broken = verify_package(&imp, &preferences(true)).expect("the verify stage ran");
+        let broken = verify_package(&imp, &preferences(true), None).expect("the verify stage ran");
         assert!(!broken.valid);
         let log = verification_log(Some(&broken));
         assert_eq!(log[0], "[VERIFY] FAILED");
