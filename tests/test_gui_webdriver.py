@@ -910,7 +910,7 @@ def test_the_timeline_lists_one_segment_and_plays_the_imp_to_the_end(
     # cover if it were the webview's prompt
     window.press("ctrl+1")
     wait_for_view(session, "view-project")
-    window.click("#recent-header")
+    window.click("#btn-recent-projects")
     window.click(".recent-retitle")
     wait_until(
         "the retitle dialog never opened",
