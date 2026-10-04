@@ -241,6 +241,16 @@ cargo build --release
 
 The desktop app needs libmpv: the .deb and .rpm pull it in, the AppImage carries it, on macOS run `brew install mpv`. It plays sources that are not JPEG 2000.
 
+The desktop installers carry Photon 5.0.1 and its dependencies, the unmodified jars `scripts/fetch_photon.sh` downloads from Maven Central. The app runs Photon in the Validate view and after a build when a JRE is installed. Their licences:
+
+| Jars | Licence |
+|------|---------|
+| Photon | Apache-2.0 |
+| regxmllib | BSD-2-Clause |
+| slf4j-api, slf4j-simple | MIT |
+| jakarta.xml.bind-api, jakarta.activation-api, jaxb-runtime, jaxb-core, txw2, istack-commons-runtime, angus-activation | Eclipse Distribution License 1.0 |
+| jakarta.annotation-api | EPL-2.0 or GPL-2.0 with Classpath Exception |
+
 Use `imfwizard doctor` to check which tools are installed and which are missing.
 
 ### Docker

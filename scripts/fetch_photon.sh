@@ -32,7 +32,6 @@ artifacts=(
   "org/glassfish/jaxb/txw2/4.0.5/txw2-4.0.5.jar 917355bc451481f30d043b24d123110517966af34383901773882810dca480e5"
   "com/sun/istack/istack-commons-runtime/4.1.2/istack-commons-runtime-4.1.2.jar 7fd6792361f4dd00f8c56af4a20cecc0066deea4a8f3dec38348af23fc2296ee"
   "org/eclipse/angus/angus-activation/2.0.2/angus-activation-2.0.2.jar 6dd3bcffc22bce83b07376a0e2e094e4964a3195d4118fb43e380ef35436cc1e"
-  "com/github/spotbugs/spotbugs-annotations/4.9.4/spotbugs-annotations-4.9.4.jar 85973144dd267fbeb15721cf99febb75c662c18e01b1a794cd6b4860a810f90b"
 )
 
 sha256() {

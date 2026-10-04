@@ -825,6 +825,7 @@ fn format_encode_breakdown(
 
 const BUNDLED_PHOTON_DIRECTORY: &str = "photon";
 
+// java cannot read the \\?\ path tauri resolves on Windows
 fn bundled_photon_directory(app: &AppHandle) -> Option<PathBuf> {
     app.path()
         .resolve(
@@ -832,6 +833,7 @@ fn bundled_photon_directory(app: &AppHandle) -> Option<PathBuf> {
             tauri::path::BaseDirectory::Resource,
         )
         .ok()
+        .map(|directory| dunce::simplified(&directory).to_path_buf())
 }
 
 #[tauri::command]
