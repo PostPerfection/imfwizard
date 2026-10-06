@@ -8,6 +8,7 @@ import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, pr
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
+import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
@@ -942,11 +943,15 @@ function cropPixels(id, label) {
 }
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {
-  // a second build would queue behind the first and encode all over again
-  if (buildInFlight) return;
-
   let title = document.getElementById("prop-title")?.value?.trim();
   if (!title) { tauriMessage("Enter a content title in Properties"); return; }
+  // builds are tracked by the Properties title, result.title can differ
+  const buildTitle = title;
+  if (buildsInFlight.buildInFlight(buildTitle)) {
+    tauriMessage(`A build titled "${buildTitle}" is already queued or running. A different title queues another build.`);
+    return;
+  }
+  const anotherBuildInFlight = buildsInFlight.anyBuildInFlight();
 
   // one composition per CPL tab; each becomes a separate CPL in the IMP
   const multi = project.compositions.length > 1;
@@ -988,17 +993,20 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   const progressBar = document.getElementById("progress-bar");
   const stageEl = document.getElementById("progress-stage");
   const statsEl = document.getElementById("progress-stats");
-  progressSection.style.display = "flex";
-  progressBar.value = 0;
-  stageEl.textContent = "Queued...";
-  statsEl.textContent = "";
-  setStatus("");
+  if (!anotherBuildInFlight) {
+    progressSection.style.display = "flex";
+    progressBar.value = 0;
+    stageEl.textContent = "Queued...";
+    statsEl.textContent = "";
+    setStatus("");
+  }
 
-  currentJobId = null;
   let projectRecordPath = null;
+  let jobId = null;
   const unlisten = await listen("pipeline-progress", (event) => {
     const p = event.payload;
-    if (p.job_id !== currentJobId) return;
+    if (p.job_id !== jobId) return;
+    currentJobId = p.job_id;
     progressBar.value = p.percent;
     stageEl.textContent = stageLabel(p.stage);
     setTitleProgress(p.percent, p.stage);
@@ -1009,26 +1017,26 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       notifyBuildComplete(true, title);
       if (projectRecordPath) addRecentProject(projectRecordPath, title);
       showPostBuildActions(output);
-      endBuild();
+      endBuild(buildTitle);
       unlisten();
     } else if (p.stage === "cancelled") {
       setStatus("Cancelled");
       stageEl.textContent = "Cancelled";
       setTitleProgress(-1);
-      endBuild();
+      endBuild(buildTitle);
       unlisten();
     } else if (p.stage === "error") {
       setStatus("Build failed: " + p.message);
       setTitleProgress(-1);
       notifyBuildComplete(false, title);
       tauriMessage(p.message, { title: "Build failed", kind: "error" });
-      endBuild();
+      endBuild(buildTitle);
       unlisten();
     }
   });
 
   try {
-    beginBuild();
+    beginBuild(buildTitle);
     const submit = (hintsAccepted) => invoke("submit_job", {
       title, outputDir: output, compositions: comps, sourceSettings, hintsAccepted,
       framerate: document.getElementById("prop-framerate")?.value || "24/1",
@@ -1038,9 +1046,11 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     let result = await submit(!getPrefs().showHintsBeforeBuild);
     if (result.jobId === null) {
       if (!await askToBuildAnyway(result.hints)) {
-        progressSection.style.display = "none";
-        setStatus("Build cancelled");
-        endBuild();
+        if (!anotherBuildInFlight) {
+          progressSection.style.display = "none";
+          setStatus("Build cancelled");
+        }
+        endBuild(buildTitle);
         unlisten();
         return;
       }
@@ -1048,14 +1058,21 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
     }
     title = result.title;
     output = result.outputDir;
-    currentJobId = result.jobId;
-    setStatus("Building IMP...");
+    jobId = result.jobId;
+    if (anotherBuildInFlight) {
+      setStatus(`Queued "${buildTitle}" behind the running build`);
+    } else {
+      currentJobId = jobId;
+      setStatus("Building IMP...");
+    }
     projectRecordPath = await saveProjectBesidePackage(output);
   } catch (e) {
-    stageEl.textContent = "Failed";
-    setStatus("Error: " + e);
+    if (!anotherBuildInFlight) {
+      stageEl.textContent = "Failed";
+      setStatus("Error: " + e);
+    }
     tauriMessage(String(e), { title: "Build failed", kind: "error" });
-    endBuild();
+    endBuild(buildTitle);
     unlisten();
   }
 });
@@ -1542,27 +1559,26 @@ function updateStatusStats() {
 }
 
 // === Toolbar Button State ===
-let buildInFlight = false;
-
-function beginBuild() {
-  buildInFlight = true;
+function beginBuild(title) {
+  buildsInFlight.beginBuild(title);
   hidePostBuildActions();
   updateToolbarState();
 }
 
-function endBuild() {
-  buildInFlight = false;
+function endBuild(title) {
+  buildsInFlight.endBuild(title);
   updateToolbarState();
   refreshDiskSpace();
 }
 
 function updateToolbarState() {
   const hasVideo = project.segments.some(s => s.picture);
-  const hasTitle = !!(document.getElementById("prop-title")?.value?.trim());
+  const title = document.getElementById("prop-title")?.value?.trim();
+  const hasTitle = !!title;
   const buildBtn = document.getElementById("btn-build");
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
-  if (buildBtn) buildBtn.disabled = buildInFlight || !(hasVideo && hasTitle);
+  if (buildBtn) buildBtn.disabled = !(hasVideo && hasTitle) || buildsInFlight.buildInFlight(title);
   if (previewBtn) previewBtn.disabled = !previewButtonEnabled(previewTarget(previewTargetInput()), previewShownPath);
   if (supBtn) supBtn.disabled = !hasTitle;
 }

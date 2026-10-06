@@ -609,7 +609,16 @@ pub async fn audio_map_shape(audio_path: String) -> Result<AudioMapShape, String
 
 #[tauri::command]
 pub async fn cancel_job(app: AppHandle, job_id: u64) -> Result<(), String> {
-    app.state::<JobQueue>().cancel(job_id);
+    let queue = app.state::<JobQueue>();
+    let cancelled = queue.cancel(job_id);
+    // a queued job leaves the queue here and the worker never reports it
+    let left_the_queue = cancelled
+        && queue
+            .get(job_id)
+            .is_some_and(|job| job.state == postkit::job_queue::JobState::Cancelled);
+    if left_the_queue {
+        emit_progress(&app, job_id, "cancelled", "", 0, 0, 0.0, 0.0, 0.0);
+    }
     Ok(())
 }
 
