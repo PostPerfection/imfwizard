@@ -587,7 +587,7 @@ def test_saving_the_gpu_setting_reports_the_missing_plugin_and_stays_off(window,
     window.press("ctrl+7")
     wait_for_view(session, "view-settings")
 
-    window.click("#set-gpu-enable")
+    window.click("#set-gpu")
     window.click("#settings-form button[type='submit']")
     status = wait_until(
         "the status never mentioned the GPU",
@@ -596,7 +596,7 @@ def test_saving_the_gpu_setting_reports_the_missing_plugin_and_stays_off(window,
         STATUS_TIMEOUT_SECONDS,
     )
     assert GPU_UNAVAILABLE_PREFIX in status
-    assert session.property("#set-gpu-enable", "checked") is False
+    assert session.property("#set-gpu", "checked") is False
 
     preferences_file = tmp_path / XDG_DIRECTORIES["XDG_CONFIG_HOME"] / "imfwizard/preferences.json"
     wait_until(

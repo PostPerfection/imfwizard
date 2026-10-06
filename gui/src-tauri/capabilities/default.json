@@ -44,6 +44,7 @@
     "dialog:allow-message",
     "notification:default",
     "core:window:allow-destroy",
+    "core:window:allow-set-fullscreen",
     {
       "identifier": "fs:allow-read-file",
       "allow": [

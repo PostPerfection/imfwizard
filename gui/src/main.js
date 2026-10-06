@@ -21,6 +21,7 @@ import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectF
 import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
+import { initGpuSettings, fillGpuSettings, gpuSettingsFromForm, uncheckGpu, applyGpuSetting } from "../../extern/guikit/src/gpu-settings.js";
 import { initAssetStripResize } from "../../extern/guikit/src/asset-strip-resize.js";
 import { setDragLabel } from "../../extern/guikit/src/drag-label.js";
 
@@ -52,14 +53,9 @@ document.querySelectorAll(".sidebar-btn[data-view]").forEach((btn) => {
   });
 });
 
-// === Theme toggle ===
-document.getElementById("set-gpu-license-show")?.addEventListener("click", (event) => {
-  const license = document.getElementById("set-gpu-license");
-  const hidden = license.type === "password";
-  license.type = hidden ? "text" : "password";
-  event.currentTarget.textContent = hidden ? "Hide" : "Show";
-});
+initGpuSettings();
 
+// === Theme toggle ===
 function applyTheme(theme) {
   const light = theme === "light";
   document.body.classList.toggle("light", light);
@@ -179,12 +175,7 @@ async function initializePreferences() {
   loadSettings();
   const preferences = getPrefs();
   applyTheme(preferences.theme);
-  await applyGpuSetting(
-    preferences.gpu,
-    preferences.gpuLicense,
-    preferences.gpuRegistrationUrl,
-    preferences.encodeThreads,
-  );
+  await applyGpuPreference(preferences);
   await loadComponentVersions(invoke);
 }
 
@@ -196,8 +187,6 @@ function loadSettings() {
     "set-colourspace": prefs.colourspace,
     "set-signing-cert": prefs.signingCert, "set-signing-key": prefs.signingKey,
     "set-output-dir": prefs.outputDir,
-    "set-gpu-license": prefs.gpuLicense,
-    "set-gpu-registration-url": prefs.gpuRegistrationUrl,
     "set-encode-threads": prefs.encodeThreads || "",
   };
   for (const [id, val] of Object.entries(map)) {
@@ -210,33 +199,20 @@ function loadSettings() {
   if (detectPictureFindings) detectPictureFindings.checked = prefs.detectPictureFindings;
   const verifyAfterBuild = document.getElementById("set-verify-after-build");
   if (verifyAfterBuild) verifyAfterBuild.checked = prefs.verifyAfterBuild;
-  const gpu = document.getElementById("set-gpu-enable");
-  if (gpu) gpu.checked = prefs.gpu;
+  fillGpuSettings(prefs);
 }
 
-// grok routes every compress and decompress in the process
-async function applyGpuSetting(enabled, license, registrationUrl, encodeThreads) {
-  try {
-    const active = await invoke("set_gpu", {
-      enabled,
-      license: license || null,
-      registrationUrl: registrationUrl || null,
-      encodeThreads,
-    });
-    if (enabled && !active) throw new Error("Grok did not enable the GPU");
-    return true;
-  } catch (error) {
-    setStatus(`GPU encoding unavailable: ${error}`);
-    const gpu = document.getElementById("set-gpu-enable");
-    if (gpu) gpu.checked = false;
-    await savePrefs({ ...getPrefs(), gpu: false });
-    return false;
-  }
+async function applyGpuPreference(prefs) {
+  const gpuFailure = await applyGpuSetting(prefs, prefs.encodeThreads);
+  if (!gpuFailure) return true;
+  setStatus(`GPU encoding unavailable: ${gpuFailure}`);
+  uncheckGpu();
+  await savePrefs({ ...getPrefs(), gpu: false });
+  return false;
 }
 
 document.getElementById("settings-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const gpu = !!document.getElementById("set-gpu-enable")?.checked;
   const prefs = {
     ...getPrefs(),
     profile: document.getElementById("set-profile")?.value,
@@ -250,18 +226,11 @@ document.getElementById("settings-form")?.addEventListener("submit", async (e) =
     showHintsBeforeBuild: !!document.getElementById("set-show-hints")?.checked,
     detectPictureFindings: !!document.getElementById("set-detect-picture-findings")?.checked,
     verifyAfterBuild: !!document.getElementById("set-verify-after-build")?.checked,
-    gpu,
-    gpuLicense: document.getElementById("set-gpu-license")?.value.trim() || "",
-    gpuRegistrationUrl: document.getElementById("set-gpu-registration-url")?.value.trim() || "",
+    ...gpuSettingsFromForm(),
     encodeThreads:
       parseInt(document.getElementById("set-encode-threads")?.value) || AUTOMATIC_ENCODE_THREADS,
   };
-  if (!await applyGpuSetting(
-    prefs.gpu,
-    prefs.gpuLicense,
-    prefs.gpuRegistrationUrl,
-    prefs.encodeThreads,
-  )) return;
+  if (!await applyGpuPreference(prefs)) return;
   if (!await savePrefs(prefs)) return;
   setStatus("Settings saved");
 });
