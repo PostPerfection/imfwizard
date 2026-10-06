@@ -29,6 +29,7 @@ dunce = "1"
 postkit = { path = "../../extern/postkit" }
 imfwizard-core = { path = "../../rust/crates/imfwizard-core" }
 guikit = { path = "../../extern/guikit/rust" }
+guikit-startup = { path = "../../extern/guikit/startup" }
 
 [dev-dependencies]
 # the Dolby Vision fixture takes the level 6 block that carries MaxCLL and MaxFALL
