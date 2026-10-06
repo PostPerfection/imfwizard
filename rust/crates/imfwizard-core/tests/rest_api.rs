@@ -19,14 +19,22 @@ const BLOCKING_TIFF_FRAMES: usize = 48;
 const BLOCKING_CLIP_FRAMES: usize = 360;
 const JOB_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const JOBS_FILE_NAME: &str = "rest-jobs.jsonl";
 
 // a server per test, so pausing one queue cannot reach another
-fn serve() -> SocketAddr {
+fn serve() -> (SocketAddr, TempDir) {
+    let jobs_directory = TempDir::new().unwrap();
+    let address = serve_on(&jobs_directory.path().join(JOBS_FILE_NAME));
+    (address, jobs_directory)
+}
+
+fn serve_on(jobs_file: &Path) -> SocketAddr {
     let config = ApiConfig {
         host: "127.0.0.1".into(),
         port: 0,
         api_key: Some(API_KEY.into()),
         encode_threads: imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS,
+        jobs_file: jobs_file.to_path_buf(),
     };
     let (server, listener) = bind_server(&config).unwrap();
     let address = listener.local_addr().unwrap();
@@ -289,7 +297,7 @@ fn counted_frames(path: &Path) -> u32 {
 /// so ffmpeg (which these tests just ran) must come back available.
 #[test]
 fn tools_reports_the_dependencies_the_doctor_probes() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let answer = request(address, "GET", "/api/v1/tools", Some(API_KEY));
     assert_eq!(answer.status, 200, "{}", answer.body);
 
@@ -318,7 +326,7 @@ fn tools_reports_the_dependencies_the_doctor_probes() {
 /// `/profiles` serves the delivery presets themselves, values and all.
 #[test]
 fn profiles_serves_every_delivery_preset_with_its_values() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let answer = request(address, "GET", "/api/v1/profiles", Some(API_KEY));
     assert_eq!(answer.status, 200, "{}", answer.body);
 
@@ -347,7 +355,7 @@ fn profiles_serves_every_delivery_preset_with_its_values() {
 /// `/encode` runs the App 2E encoder, so the job leaves one codestream a frame.
 #[test]
 fn an_encode_job_writes_a_codestream_for_every_frame() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let frames = tiff_sequence(directory.path(), FRAMES);
     let output = directory.path().join("encoded");
@@ -370,7 +378,7 @@ fn an_encode_job_writes_a_codestream_for_every_frame() {
 
 #[test]
 fn a_running_encode_that_is_cancelled_stops_encoding() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let frames = tiff_sequence(directory.path(), BLOCKING_TIFF_FRAMES);
     let output = directory.path().join("encoded");
@@ -395,7 +403,7 @@ fn a_running_encode_that_is_cancelled_stops_encoding() {
 /// `/transcode` runs ffmpeg, so the job leaves a file the prober can read back.
 #[test]
 fn a_transcode_job_writes_a_playable_file() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let clip = testsrc_clip(directory.path());
     let output = directory.path().join("transcoded.mkv");
@@ -412,7 +420,7 @@ fn a_transcode_job_writes_a_playable_file() {
 
 #[test]
 fn a_running_transcode_that_is_cancelled_leaves_no_output() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let clip = blocking_clip(directory.path());
     let output = directory.path().join("transcoded.mkv");
@@ -431,7 +439,7 @@ fn a_running_transcode_that_is_cancelled_leaves_no_output() {
 /// A transcode ffmpeg cannot run fails the job in ffmpeg's own words.
 #[test]
 fn a_transcode_job_on_a_file_ffmpeg_cannot_read_fails() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let broken = directory.path().join("broken.mp4");
     std::fs::write(&broken, b"not a container").unwrap();
@@ -445,7 +453,7 @@ fn a_transcode_job_on_a_file_ffmpeg_cannot_read_fails() {
     );
     let job = wait_for_job(address, id);
     assert_eq!(job["state"], "Failed", "{job}");
-    let error = job["error"].as_str().unwrap_or_default();
+    let error = job["message"].as_str().unwrap_or_default();
     assert!(
         error.contains("broken.mp4"),
         "the error must name the input, got {error:?}"
@@ -454,7 +462,7 @@ fn a_transcode_job_on_a_file_ffmpeg_cannot_read_fails() {
 
 #[test]
 fn health_answers_without_a_key() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let answer = request(address, "GET", "/api/v1/health", None);
     assert_eq!(answer.status, 200, "{}", answer.body);
     assert_eq!(answer.json()["status"], "ok");
@@ -462,7 +470,7 @@ fn health_answers_without_a_key() {
 
 #[test]
 fn every_other_path_needs_the_key_in_a_header() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     assert_eq!(
         request(address, "GET", "/api/v1/jobs", None).status,
         401,
@@ -491,7 +499,7 @@ fn every_other_path_needs_the_key_in_a_header() {
 
 #[test]
 fn a_validate_job_on_a_missing_directory_fails_naming_it() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let missing = directory.path().join("no_such_imp");
     let id = submit(
@@ -504,7 +512,7 @@ fn a_validate_job_on_a_missing_directory_fails_naming_it() {
 
     let job = wait_for_job(address, id);
     assert_eq!(job["state"], "Failed", "{job}");
-    let error = job["error"].as_str().unwrap_or_default();
+    let error = job["message"].as_str().unwrap_or_default();
     assert!(
         error.contains(&missing.to_string_lossy().to_string()),
         "the error must name the directory, got {error:?}"
@@ -512,8 +520,44 @@ fn a_validate_job_on_a_missing_directory_fails_naming_it() {
 }
 
 #[test]
+fn a_restarted_server_lists_the_jobs_the_last_one_finished() {
+    let jobs_directory = TempDir::new().unwrap();
+    let jobs_file = jobs_directory.path().join(JOBS_FILE_NAME);
+    let missing = jobs_directory.path().join("no_such_imp");
+
+    let first = serve_on(&jobs_file);
+    let id = submit(
+        first,
+        "/api/v1/validate",
+        &missing,
+        Path::new(""),
+        "missing",
+    );
+    let failed = wait_for_job(first, id);
+    assert_eq!(failed["state"], "Failed", "{failed}");
+
+    let second = serve_on(&jobs_file);
+    let answer = request(second, "GET", "/api/v1/jobs", Some(API_KEY));
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    let jobs = answer.json();
+    let jobs = jobs.as_array().expect("an array of jobs");
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    assert_eq!(jobs[0]["id"], id);
+    assert_eq!(jobs[0]["title"], "missing");
+    assert_eq!(jobs[0]["state"], "Failed");
+    assert_eq!(jobs[0]["message"], failed["message"]);
+    assert!(
+        jobs[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&*missing.to_string_lossy())),
+        "the restored job must keep its error: {}",
+        jobs[0]
+    );
+}
+
+#[test]
 fn a_created_imp_validates_through_the_api() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let frames = codestream_directory(directory.path());
     let imp = directory.path().join("imp");
@@ -529,7 +573,7 @@ fn a_created_imp_validates_through_the_api() {
 
 #[test]
 fn pause_refuses_a_submission_and_resume_takes_it() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let missing = directory.path().join("no_such_imp");
     let body = serde_json::json!({ "input": missing.to_string_lossy() }).to_string();
@@ -551,7 +595,7 @@ fn pause_refuses_a_submission_and_resume_takes_it() {
 
 #[test]
 fn a_job_waiting_behind_another_can_be_cancelled() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let frames = blocking_codestream_directory(directory.path());
 
@@ -624,7 +668,7 @@ fn a_job_waiting_behind_another_can_be_cancelled() {
 
 #[test]
 fn a_running_job_that_is_cancelled_stays_cancelled() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let frames = blocking_codestream_directory(directory.path());
     let imp = directory.path().join("imp");
@@ -667,7 +711,7 @@ fn a_running_job_that_is_cancelled_stays_cancelled() {
 
 #[test]
 fn metrics_count_what_the_job_list_holds() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let directory = TempDir::new().unwrap();
     let missing = directory.path().join("no_such_imp");
 
@@ -703,7 +747,7 @@ fn metrics_count_what_the_job_list_holds() {
 
 #[test]
 fn an_unknown_path_is_a_404() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let answer = request(address, "GET", "/api/v1/jobsXYZ", Some(API_KEY));
     assert_eq!(
         answer.status, 404,
@@ -713,7 +757,7 @@ fn an_unknown_path_is_a_404() {
 
 #[test]
 fn an_unknown_field_is_refused_by_name() {
-    let address = serve();
+    let (address, _jobs_directory) = serve();
     let body = r#"{"input":"/tmp/imp","imp_dir":"/tmp/other"}"#;
     let answer = request_with_body(address, "POST", "/api/v1/validate", body, Some(API_KEY));
     assert_eq!(answer.status, 400, "{}", answer.body);

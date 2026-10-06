@@ -81,7 +81,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Slate generation**, prepend a black text slate as an image sequence
 
 ### Integration & Extensibility
-- **REST API server** (`serve`), HTTP interface under `/api/v1`: `create`, `validate`, `encode`, `transcode`, `jobs`, `profiles`, `tools`, `pause`, `resume` (in-memory queue with a background worker; jobs live for the server process only)
+- **REST API server** (`serve`), HTTP interface under `/api/v1`: `create`, `validate`, `encode`, `transcode`, `jobs`, `profiles`, `tools`, `pause`, `resume`, with a background worker and a queue kept in `rest-jobs.jsonl` across restarts
 - **EDL/FCP XML import**, `conform` parses CMX 3600 EDL and Final Cut Pro 7 XML timelines
 - **Dependency management (`doctor`)**, check external tool dependencies with version detection and JSON output
 
@@ -731,7 +731,7 @@ imfwizard serve --bind 0.0.0.0:9090 --api-key "my-secret"
 
 Every job submission takes the same JSON object. `input` and `output` are
 paths on the server, `title` is the ContentTitle a `create` job writes into its
-CPL and the description the other job types carry. Any other field is a 400
+CPL and the title the job list shows for every job type. Any other field is a 400
 naming it, and a body that is not a JSON object is a 400 too:
 
 ```bash
@@ -742,15 +742,20 @@ curl -X POST http://localhost:9090/api/v1/create \
 # {"id":1,"status":"queued"}
 
 curl -H "X-Api-Key: my-secret" http://localhost:9090/api/v1/jobs/1
-# {"id":1,"job_type":"Create","state":"Running","progress":0.0, ...}
+# {"id":1,"title":"My Feature","state":"Running","percent":0.0,"message":""}
 ```
 
 A `create` job takes a directory of JPEG 2000 codestreams as its `input`, a
 `validate` job takes an IMP directory, and `encode` and `transcode` take the
 file or frame directory their CLI commands take. These four are the only job
-types the server has a route for. The queue's `Qc` and `Copy` job types fail
-with an error when one runs, and the CLI has no `qc` or `copy` command. Write
-a QC report with `imfwizard report` (alias `qc-report`).
+types the server has a route for. Write a QC report with `imfwizard report`
+(alias `qc-report`).
+
+The server's queue is written to `~/.config/imfwizard/rest-jobs.jsonl`, one
+JSON line per job on submit and on every state change, and read back when
+`serve` starts. A restart keeps the queued jobs, and a job that was running is
+listed failed with "the program stopped while this job was running".
+`$IMFWIZARD_REST_JOBS_FILE` points a second server at another file.
 
 `--api-key` is required on every endpoint but `/api/v1/health` and `/health`,
 in `X-Api-Key` or `Authorization: Bearer`, `/metrics` included. Without the flag

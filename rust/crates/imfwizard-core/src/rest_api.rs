@@ -1,7 +1,8 @@
 /// REST API for IMF Wizard.
 ///
 /// Provides HTTP endpoints for IMP creation, validation, encoding,
-/// transcoding, and job management via the integrated job queue.
+/// transcoding, and job management through a queue that keeps its jobs in a
+/// jobs file across restarts.
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -10,8 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use postkit::rest_api::{Request, RestServer, RouteResponse};
 
-use crate::executor::ExecutorQueue;
-use crate::job_queue::{Job, JobState, JobType};
+use postkit::job_queue::JobState;
+
+use crate::executor::{JobType, RestJob, RestJobQueue};
 use crate::tools;
 
 /// API server configuration.
@@ -21,6 +23,7 @@ pub struct ApiConfig {
     pub port: u16,
     pub api_key: Option<String>,
     pub encode_threads: u32,
+    pub jobs_file: PathBuf,
 }
 
 impl Default for ApiConfig {
@@ -30,9 +33,16 @@ impl Default for ApiConfig {
             port: 8081,
             api_key: None,
             encode_threads: crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            jobs_file: postkit::job_queue::jobs_path(
+                JOBS_FILE_VARIABLE,
+                crate::store::data_dir().join(JOBS_FILE_NAME),
+            ),
         }
     }
 }
+
+const JOBS_FILE_VARIABLE: &str = "IMFWIZARD_REST_JOBS_FILE";
+const JOBS_FILE_NAME: &str = "rest-jobs.jsonl";
 
 // the only paths an API key is not required on
 const HEALTH_PATHS: [&str; 2] = ["/api/v1/health", "/health"];
@@ -98,11 +108,16 @@ fn build_server(config: &ApiConfig) -> RestServer {
         server.require_api_key(key, &HEALTH_PATHS);
     }
 
-    let queue = ExecutorQueue::default();
+    let queue = Arc::new(RestJobQueue::new(config.jobs_file.clone()));
+    let skipped = queue.load_jobs_file();
+    if skipped > 0 {
+        tracing::warn!(
+            "skipped {skipped} unreadable lines in {}",
+            config.jobs_file.display()
+        );
+    }
     let paused = Arc::new(AtomicBool::new(false));
 
-    // Background worker runs submitted jobs. The queue is in-memory, so jobs
-    // live only for the lifetime of this server process.
     let _worker_stop = crate::executor::spawn_worker(&queue, config.encode_threads);
 
     for path in HEALTH_PATHS {
@@ -152,7 +167,7 @@ fn build_server(config: &ApiConfig) -> RestServer {
         Box::new(move |_request| {
             (
                 200,
-                serde_json::to_string(&jobs.list()).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&jobs.snapshot()).unwrap_or_else(|_| "[]".into()),
             )
         }),
     );
@@ -234,8 +249,8 @@ fn build_server(config: &ApiConfig) -> RestServer {
     server
 }
 
-fn metrics(queue: &ExecutorQueue) -> String {
-    let jobs = queue.list();
+fn metrics(queue: &RestJobQueue) -> String {
+    let jobs = queue.snapshot();
     let count = |state: JobState| jobs.iter().filter(|job| job.state == state).count();
     let queued = count(JobState::Queued);
     let running = count(JobState::Running);
@@ -254,7 +269,7 @@ fn metrics(queue: &ExecutorQueue) -> String {
 fn submit_job(
     request: &Request,
     job_type: JobType,
-    queue: &ExecutorQueue,
+    queue: &RestJobQueue,
     paused: &AtomicBool,
 ) -> (u16, String) {
     if paused.load(Ordering::Relaxed) {
@@ -271,12 +286,13 @@ fn submit_job(
         }
     };
 
-    let id = queue.submit(Job {
+    let id = queue.reserve_job_id();
+    queue.submit(RestJob {
+        id,
         job_type,
-        description: parsed.title,
+        title: parsed.title,
         input: PathBuf::from(&parsed.input),
         output: PathBuf::from(&parsed.output),
-        ..Default::default()
     });
     (202, format!(r#"{{"id":{id},"status":"queued"}}"#))
 }

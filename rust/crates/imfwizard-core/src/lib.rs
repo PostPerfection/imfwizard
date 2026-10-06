@@ -44,7 +44,6 @@ pub mod subtitle_preview;
 
 // Infrastructure
 pub mod executor;
-pub mod job_queue;
 pub mod preferences;
 pub mod rest_api;
 pub mod store;

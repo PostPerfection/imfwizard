@@ -1,5 +1,5 @@
-//! Where imfwizard keeps its own files: the preferences and the GUI job queue
-//! sit in one folder per platform.
+//! Where imfwizard keeps its own files: the preferences, the GUI job queue and
+//! the REST server's job queue sit in one folder per platform.
 
 use std::path::PathBuf;
 

@@ -3389,6 +3389,7 @@ fn run() {
                 port,
                 api_key,
                 encode_threads,
+                ..Default::default()
             };
             if let Err(e) = imfwizard_core::rest_api::start_server(&config) {
                 eprintln!("Error: {e}");
