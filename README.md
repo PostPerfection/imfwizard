@@ -722,6 +722,7 @@ imfwizard serve --bind 0.0.0.0:9090 --api-key "my-secret"
 #   GET  /api/v1/jobs         , list all jobs
 #   GET  /api/v1/jobs/<id>    , job status
 #   DELETE /api/v1/jobs/<id>  , cancel job
+#   POST /api/v1/jobs/<id>/move , run a queued job next, or before another with {"before": <id>}
 #   GET  /api/v1/profiles     , list delivery presets
 #   GET  /api/v1/tools        , dependency check
 #   POST /api/v1/pause        , refuse new submissions
@@ -754,8 +755,10 @@ types the server has a route for. Write a QC report with `imfwizard report`
 The server's queue is written to `~/.config/imfwizard/rest-jobs.jsonl`, one
 JSON line per job on submit and on every state change, and read back when
 `serve` starts. A restart keeps the queued jobs, and a job that was running is
-listed failed with "the program stopped while this job was running".
-`$IMFWIZARD_REST_JOBS_FILE` points a second server at another file.
+listed failed with "the program stopped while this job was running". A
+running job never moves, and the order set with `POST /api/v1/jobs/<id>/move`
+survives a restart. `$IMFWIZARD_REST_JOBS_FILE` points a second server at
+another file.
 
 `--api-key` is required on every endpoint but `/api/v1/health` and `/health`,
 in `X-Api-Key` or `Authorization: Bearer`, `/metrics` included. Without the flag

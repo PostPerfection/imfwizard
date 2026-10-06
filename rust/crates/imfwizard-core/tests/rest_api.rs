@@ -666,6 +666,103 @@ fn a_job_waiting_behind_another_can_be_cancelled() {
     );
 }
 
+fn move_job(address: SocketAddr, id: u64, body: &str) -> Answer {
+    request_with_body(
+        address,
+        "POST",
+        &format!("/api/v1/jobs/{id}/move"),
+        body,
+        Some(API_KEY),
+    )
+}
+
+fn listed_ids(address: SocketAddr) -> Vec<u64> {
+    let answer = request(address, "GET", "/api/v1/jobs", Some(API_KEY));
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    answer
+        .json()
+        .as_array()
+        .expect("an array of jobs")
+        .iter()
+        .map(|job| job["id"].as_u64().expect("a job id"))
+        .collect()
+}
+
+#[test]
+fn a_waiting_job_can_be_moved_ahead_of_another() {
+    let (address, _jobs_directory) = serve();
+    let directory = TempDir::new().unwrap();
+    let frames = blocking_codestream_directory(directory.path());
+    let missing = directory.path().join("no_such_imp");
+
+    let blocking = submit(
+        address,
+        "/api/v1/create",
+        &frames,
+        &directory.path().join("imp"),
+        "Blocking",
+    );
+    let first = submit(
+        address,
+        "/api/v1/validate",
+        &missing,
+        Path::new(""),
+        "first",
+    );
+    let second = submit(
+        address,
+        "/api/v1/validate",
+        &missing,
+        Path::new(""),
+        "second",
+    );
+    // still queued, the blocking job would move like the others
+    wait_until_running(address, blocking);
+
+    let moved = move_job(
+        address,
+        second,
+        &serde_json::json!({ "before": first }).to_string(),
+    );
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert_eq!(moved.json()["moved"], true);
+    assert_eq!(listed_ids(address), vec![blocking, second, first]);
+
+    let to_front = move_job(address, second, "");
+    assert_eq!(to_front.status, 200, "{}", to_front.body);
+    assert_eq!(listed_ids(address), vec![blocking, second, first]);
+
+    assert_eq!(
+        move_job(address, second, r#"{"before":999999}"#).status,
+        404,
+        "a job cannot move before one that is not queued"
+    );
+    assert_eq!(
+        move_job(address, blocking, "").status,
+        404,
+        "a running job cannot move"
+    );
+
+    let unknown = move_job(address, second, r#"{"nope":1}"#);
+    assert_eq!(unknown.status, 400, "{}", unknown.body);
+    let error = unknown.json()["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("nope"),
+        "the error must name the field, got {error:?}"
+    );
+    assert_eq!(
+        request_with_body(address, "POST", "/api/v1/jobs/x/move", "", Some(API_KEY)).status,
+        400
+    );
+
+    for id in [blocking, second, first] {
+        wait_for_job(address, id);
+    }
+}
+
 #[test]
 fn a_running_job_that_is_cancelled_stays_cancelled() {
     let (address, _jobs_directory) = serve();

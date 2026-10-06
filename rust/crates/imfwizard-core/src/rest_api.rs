@@ -3,6 +3,7 @@
 /// Provides HTTP endpoints for IMP creation, validation, encoding,
 /// transcoding, and job management through a queue that keeps its jobs in a
 /// jobs file across restarts.
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -62,6 +63,12 @@ struct JobRequest {
     title: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MoveRequest {
+    before: Option<u64>,
+}
+
 /// Bind the API without serving it, so a caller can read the address it got
 /// when the port was 0. The background worker is already running.
 pub fn bind_server(config: &ApiConfig) -> Result<(RestServer, TcpListener), String> {
@@ -75,19 +82,20 @@ pub fn bind_server(config: &ApiConfig) -> Result<(RestServer, TcpListener), Stri
 /// Start the REST API server.
 ///
 /// Endpoints:
-/// - `GET  /api/v1/health`      — health check
-/// - `POST /api/v1/create`      — submit IMP creation job
-/// - `POST /api/v1/validate`    — submit validation job
-/// - `POST /api/v1/encode`      — submit encoding job
-/// - `POST /api/v1/transcode`   — submit transcode job
-/// - `GET  /api/v1/jobs`        — list all jobs
-/// - `GET  /api/v1/jobs/<id>`   — job status
-/// - `DELETE /api/v1/jobs/<id>` — cancel job
-/// - `GET  /api/v1/profiles`    — list delivery presets
-/// - `GET  /api/v1/tools`       — dependency check
-/// - `POST /api/v1/pause`       — refuse new submissions
-/// - `POST /api/v1/resume`      — accept submissions again
-/// - `GET  /metrics`            — Prometheus metrics
+/// - `GET  /api/v1/health`          , health check
+/// - `POST /api/v1/create`          , submit IMP creation job
+/// - `POST /api/v1/validate`        , submit validation job
+/// - `POST /api/v1/encode`          , submit encoding job
+/// - `POST /api/v1/transcode`       , submit transcode job
+/// - `GET  /api/v1/jobs`            , list all jobs
+/// - `GET  /api/v1/jobs/<id>`       , job status
+/// - `DELETE /api/v1/jobs/<id>`     , cancel job
+/// - `POST /api/v1/jobs/<id>/move`  , run a queued job next, or before `before`
+/// - `GET  /api/v1/profiles`        , list delivery presets
+/// - `GET  /api/v1/tools`           , dependency check
+/// - `POST /api/v1/pause`           , refuse new submissions
+/// - `POST /api/v1/resume`          , accept submissions again
+/// - `GET  /metrics`                , Prometheus metrics
 pub fn start_server(config: &ApiConfig) -> Result<(), String> {
     let (server, listener) = bind_server(config)?;
     tracing::info!(
@@ -208,6 +216,30 @@ fn build_server(config: &ApiConfig) -> RestServer {
         }),
     );
 
+    let jobs = queue.clone();
+    server.route_with_parameter_and_suffix(
+        "POST",
+        "/api/v1/jobs/",
+        "/move",
+        Box::new(move |request, id| {
+            let Ok(id) = id.parse::<u64>() else {
+                return (400, r#"{"error":"invalid job id"}"#.into());
+            };
+            let before = if request.body.is_empty() {
+                None
+            } else {
+                match parse_body::<MoveRequest>(&request.body) {
+                    Ok(parsed) => parsed.before,
+                    Err(refused) => return refused,
+                }
+            };
+            if jobs.move_before(id, before) {
+                return (200, r#"{"moved":true}"#.into());
+            }
+            (404, r#"{"error":"job not found or not queued"}"#.into())
+        }),
+    );
+
     for (path, job_type) in [
         ("/api/v1/create", JobType::Create),
         ("/api/v1/validate", JobType::Validate),
@@ -276,14 +308,9 @@ fn submit_job(
         return (503, r#"{"error":"queue is paused"}"#.into());
     }
 
-    let parsed: JobRequest = match serde_json::from_str(&request.body) {
+    let parsed: JobRequest = match parse_body(&request.body) {
         Ok(parsed) => parsed,
-        Err(e) => {
-            return (
-                400,
-                serde_json::json!({ "error": e.to_string() }).to_string(),
-            );
-        }
+        Err(refused) => return refused,
     };
 
     let id = queue.reserve_job_id();
@@ -295,4 +322,16 @@ fn submit_job(
         output: PathBuf::from(&parsed.output),
     });
     (202, format!(r#"{{"id":{id},"status":"queued"}}"#))
+}
+
+// read as a map first, serde would otherwise fill a struct from a JSON array
+fn parse_body<T: DeserializeOwned>(body: &str) -> Result<T, (u16, String)> {
+    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(body)
+        .and_then(|object| serde_json::from_value(serde_json::Value::Object(object)))
+        .map_err(|e| {
+            (
+                400,
+                serde_json::json!({ "error": e.to_string() }).to_string(),
+            )
+        })
 }

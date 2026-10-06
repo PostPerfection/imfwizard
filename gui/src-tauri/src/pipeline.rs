@@ -613,6 +613,15 @@ pub async fn cancel_job(app: AppHandle, job_id: u64) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn move_job(
+    app: AppHandle,
+    job_id: u64,
+    before_job_id: Option<u64>,
+) -> Result<bool, String> {
+    Ok(app.state::<JobQueue>().move_before(job_id, before_job_id))
+}
+
 #[derive(Serialize)]
 pub struct DiskSpace {
     pub free_bytes: u64,

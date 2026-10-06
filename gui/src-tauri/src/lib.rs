@@ -82,6 +82,7 @@ pub fn run() {
             preferences::reset_preferences,
             pipeline::submit_job,
             pipeline::cancel_job,
+            pipeline::move_job,
             pipeline::pause_job,
             pipeline::resume_job,
             pipeline::list_jobs,
