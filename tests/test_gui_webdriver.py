@@ -545,7 +545,7 @@ def test_the_build_shows_hints_progress_and_the_post_build_actions(finished_buil
     )
 
     jobs = stored_jobs(finished_build.jobs_file)
-    assert [job["state"] for job in jobs] == ["Done"]
+    assert [job["state"] for job in jobs] == ["Completed"]
     assert jobs[0]["config"]["title"] == BUILD_TITLE
 
 
@@ -570,7 +570,7 @@ def test_the_queue_the_recent_list_and_the_theme_come_back_after_a_restart(finis
             lambda: [row for row in session.execute(JOBS_ROWS) if row["state"]],
             RESTART_TIMEOUT_SECONDS,
         )
-        assert [(row["title"], row["state"]) for row in rows] == [(BUILD_TITLE, "done")]
+        assert [(row["title"], row["state"]) for row in rows] == [(BUILD_TITLE, "completed")]
 
         window.press("ctrl+1")
         wait_for_view(session, "view-project")
