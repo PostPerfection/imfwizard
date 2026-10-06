@@ -478,7 +478,10 @@ function renderSegments() {
       const asset = project.assets.find(a => a.id === assetId);
       if (!asset) return;
       const seg = project.segments.find(s => s.id === parseInt(track.dataset.segId));
-      if (seg) { seg[track.dataset.track] = asset; renderSegments(); }
+      if (!seg || SEGMENT_SLOT_BY_ASSET_TYPE[asset.type] !== track.dataset.track) return;
+      seg[track.dataset.track] = asset;
+      renderSegments();
+      updateStatusStats();
     });
   });
 
