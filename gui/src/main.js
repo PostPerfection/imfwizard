@@ -359,15 +359,30 @@ document.getElementById("import-subtitle")?.addEventListener("click", async () =
   if (path) importAssetFromPath(path, 'subtitle');
 });
 
+const SEGMENT_SLOT_BY_ASSET_TYPE = { video: 'picture', audio: 'sound', subtitle: 'subtitle' };
+
+function placedAssetIds() {
+  return new Set(project.segments.flatMap(s => [s.picture, s.sound, s.subtitle]).filter(Boolean).map(a => a.id));
+}
+
+// the first segment takes the first asset of each type no segment holds yet
+function fillFirstSegmentFromUnplacedAssets() {
+  const seg = project.segments[0];
+  const placed = placedAssetIds();
+  for (const [type, slot] of Object.entries(SEGMENT_SLOT_BY_ASSET_TYPE)) {
+    if (seg[slot]) continue;
+    seg[slot] = project.assets.find(a => a.type === type && !placed.has(a.id)) ?? null;
+  }
+}
+
 function importAssetFromPath(path, type) {
   const name = path.split(/[/\\]/).pop();
   const asset = { id: nextAssetId++, type, path, name, meta: '' };
   project.assets.push(asset);
 
   const seg = project.segments[0];
-  if (type === 'video' && !seg.picture) seg.picture = asset;
-  else if (type === 'audio' && !seg.sound) seg.sound = asset;
-  else if (type === 'subtitle' && !seg.subtitle) seg.subtitle = asset;
+  const slot = SEGMENT_SLOT_BY_ASSET_TYPE[type];
+  if (slot && !seg[slot]) seg[slot] = asset;
 
   renderAssets();
   renderSegments();
@@ -1611,6 +1626,7 @@ async function removeAsset(assetId) {
     if (s.sound?.id === assetId) s.sound = null;
     if (s.subtitle?.id === assetId) s.subtitle = null;
   });
+  fillFirstSegmentFromUnplacedAssets();
   renderAssets();
   renderSegments();
   updateStatusStats();
