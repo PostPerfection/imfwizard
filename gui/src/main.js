@@ -7,6 +7,7 @@ import { join } from "@tauri-apps/api/path";
 import { initPreview, previewFile, previewDcp, stopPreview, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
+import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
@@ -258,7 +259,7 @@ document.getElementById("set-reset")?.addEventListener("click", async () => {
   }
 });
 
-initializePreferences();
+const preferencesLoaded = initializePreferences();
 
 // === Project State ===
 const project = {
@@ -1693,6 +1694,7 @@ initProjects({
 });
 updateStatusStats();
 initPreview();
+preferencesLoaded.then(() => initPlayerControlsPanel({ preferences: getPrefs(), save: (controls) => savePrefs({ ...getPrefs(), ...controls }) }));
 watchPreviewShown(path => { previewShownPath = path; updateToolbarState(); });
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
