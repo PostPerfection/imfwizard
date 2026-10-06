@@ -22,6 +22,7 @@ import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIE
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
 import { initAssetStripResize } from "../../extern/guikit/src/asset-strip-resize.js";
+import { setDragLabel } from "../../extern/guikit/src/drag-label.js";
 
 initAssetStripResize("imfwizard");
 
@@ -421,7 +422,10 @@ function renderAssets() {
     </div>
   `).join('');
   list.querySelectorAll('.asset-item').forEach(el => {
-    el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.assetId); });
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', el.dataset.assetId);
+      setDragLabel(e, el.querySelector('.asset-name').textContent);
+    });
     el.addEventListener('contextmenu', (e) => { showContextMenu(e, parseInt(el.dataset.assetId)); });
     el.addEventListener('click', () => {
       const asset = project.assets.find(a => a.id === parseInt(el.dataset.assetId));
