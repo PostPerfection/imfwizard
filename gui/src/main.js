@@ -4,7 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, stopPreview, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
@@ -700,12 +700,14 @@ function previewTargetInput() {
   };
 }
 
-document.getElementById("btn-preview")?.addEventListener("click", () => {
+function previewCurrentTarget() {
   const target = previewTarget(previewTargetInput());
   if (!target) return;
   if (target.kind === PREVIEW_KIND_SOURCE) previewProjectFile(target.path);
   else previewBuiltPackage(target.path);
-});
+}
+
+document.getElementById("btn-preview")?.addEventListener("click", previewCurrentTarget);
 
 // The preview shows what the build will do to the picture, so a file a
 // composition takes as its picture carries the crop and that segment's timed
@@ -1501,6 +1503,10 @@ async function restoreBuildPanel(saved) {
   renderAssets();
   updateStatusStats();
   clearPreviewSelection();
+  // the last project's film would otherwise stay loaded
+  const previewWasShowing = isPreviewVisible();
+  stopPreview();
+  if (previewWasShowing) previewCurrentTarget();
   refreshDiskSpace();
 
   await audioMapDrawn;

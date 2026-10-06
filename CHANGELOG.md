@@ -20,6 +20,7 @@
 - **An encode threads setting**: `--threads N` and the desktop *Encode threads* field, saved as `encodeThreads`, set how many threads the encoder runs and size the accelerator plugin's host threads to the same count. 0 or an empty field runs one per available CPU, and the desktop job log prints the count on an `Encode threads:` line.
 
 ### Fixed
+- **Opening a project replaces the film in the preview**: opening a project from Recent or Open left the last project's film loaded and paused. The preview now stops, and when its panel is showing it loads the new project the way the Preview button would.
 - **Dragging an asset shows its name, not the whole row**: the drag image was the full asset row and covered the segment tracks it was dropped on. It is now one line with the asset's name, cut in the middle past 40 characters.
 - **A dropped asset lands only on its own track**: dropping an audio or subtitle file on a segment's picture track made it the picture, and a drop on an empty track left Build greyed until something else refreshed the toolbar. A drop now takes only an asset of the track's type and refreshes the toolbar.
 - **Removing a segment's asset promotes the next one**: a video, sound or subtitle imported while segment 1 already held one of that type sat in the asset list unassigned, and removing the assigned asset left segment 1 empty, so Build stayed greyed until the asset was removed and imported again. Segment 1 now takes the first unassigned asset of that type when its slot is cleared.
