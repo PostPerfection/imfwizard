@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use postkit::encode::{InputType, detect_input_type};
 use postkit::picture_processing::{
-    Crop, DEFAULT_AUTO_CROP_THRESHOLD, Fit, PicturePlan, PictureProcessing, Rotation, detect_crop,
-    fill_crop, require_one_crop_decider,
+    Crop, DEFAULT_AUTO_CROP_THRESHOLD, Fit, PicturePlan, PictureProcessing, Placement, Rotation,
+    detect_crop, fill_crop, require_one_crop_decider,
 };
 
 /// Every raster App 2E allows, as `--raster` spells them.
@@ -144,6 +144,7 @@ pub fn resolve_picture(
             box_height: target_height,
             raster_width: target_width,
             raster_height: target_height,
+            placement: Placement::default(),
         });
     }
 
@@ -290,6 +291,7 @@ mod tests {
                 box_height: 1080,
                 raster_width: 1920,
                 raster_height: 1080,
+                placement: Placement::default(),
             })
         );
         assert_eq!(
