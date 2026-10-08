@@ -37,6 +37,8 @@ fn component_versions(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
+    guikit_startup::render_webkit_on_display_gpu();
+    #[cfg(target_os = "linux")]
     guikit_startup::prefer_shared_memory_webkit_frames_on_nvidia();
     postkit::grok_encoder::set_packaged_gpu_plugin_path("imfwizard");
 
