@@ -865,6 +865,7 @@ def test_the_timeline_lists_one_segment_and_plays_the_imp_to_the_end(
     assert len(segments) == 1, segments
 
     # opening a project clears the preview selection
+    window.click("#btn-project-menu")
     choose_in_dialog(window, "#btn-project-open", single_segment_imp.project_path)
     wait_until(
         "the opened project never reached the Recent list",
@@ -910,7 +911,7 @@ def test_the_timeline_lists_one_segment_and_plays_the_imp_to_the_end(
     # cover if it were the webview's prompt
     window.press("ctrl+1")
     wait_for_view(session, "view-project")
-    window.click("#btn-recent-projects")
+    window.click("#btn-project-menu")
     window.click(".recent-retitle")
     wait_until(
         "the retitle dialog never opened",
