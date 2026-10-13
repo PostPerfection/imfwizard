@@ -15,15 +15,15 @@
   </div>
 
   <!-- Pre-build hints -->
-  <div id="hints-dialog" class="hints-dialog" hidden>
+  <div id="hints-dialog" class="hints-dialog" hidden role="dialog">
     <div class="hints-panel">
       <h2>Before you build</h2>
       <p class="hints-lead">These will build, but they are worth a look first.</p>
       <ul id="hints-list" class="hints-list"></ul>
       <label class="hints-silence"><input type="checkbox" id="hints-silence"> Don't show hints again</label>
       <div class="hints-actions">
-        <button type="button" id="hints-back" class="btn-secondary">Go back</button>
-        <button type="button" id="hints-build" class="btn-primary">Build anyway</button>
+        <button type="button" id="hints-back" class="btn-secondary" data-dialog-cancel>Go back</button>
+        <button type="button" id="hints-build" class="btn-primary" data-dialog-default>Build anyway</button>
       </div>
     </div>
   </div>
@@ -76,12 +76,12 @@
           <span id="project-name" class="project-name">Untitled</span>
         </div>
         <div class="toolbar-right">
-          <button id="btn-project-menu" class="toolbar-btn" title="Project" aria-expanded="false">Project ▾</button>
-          <div id="project-menu" class="project-menu" hidden>
-            <button id="btn-new-project" class="project-menu-item" title="New project">New…</button>
-            <button id="btn-project-open" class="project-menu-item" title="Open project">Open…</button>
-            <button id="btn-project-save" class="project-menu-item" title="Save project">Save</button>
-            <button id="btn-project-save-as" class="project-menu-item" title="Save project as">Save As…</button>
+          <button id="btn-project-menu" class="toolbar-btn" title="Project" aria-expanded="false" data-key="p" aria-controls="project-menu" aria-haspopup="menu">Project ▾</button>
+          <div id="project-menu" class="project-menu" hidden role="menu">
+            <button id="btn-new-project" class="project-menu-item" title="New project" role="menuitem" data-key="n">New…</button>
+            <button id="btn-project-open" class="project-menu-item" title="Open project" role="menuitem" data-key="o">Open…</button>
+            <button id="btn-project-save" class="project-menu-item" title="Save project" role="menuitem" data-key="s">Save</button>
+            <button id="btn-project-save-as" class="project-menu-item" title="Save project as" role="menuitem" data-key="a">Save As…</button>
             <div id="recent-list" class="recent-list"></div>
           </div>
           <button id="btn-open-imp" class="toolbar-btn" title="Open IMP">Open IMP</button>
@@ -105,9 +105,9 @@
                   <h2>Assets</h2>
                   <div class="panel-actions">
                     <input id="asset-filter" type="text" class="asset-filter" placeholder="Filter assets…" title="Filter assets by name">
-                    <button id="import-video" class="btn-sm">+ Video</button>
-                    <button id="import-audio" class="btn-sm">+ Audio</button>
-                    <button id="import-subtitle" class="btn-sm">+ Subtitle</button>
+                    <button id="import-video" class="btn-sm" data-shared-action="add-video">+ Video</button>
+                    <button id="import-audio" class="btn-sm" data-shared-action="add-audio">+ Audio</button>
+                    <button id="import-subtitle" class="btn-sm" data-shared-action="add-subtitle">+ Subtitle</button>
                   </div>
                 </div>
                 <div id="asset-list" class="asset-list">
@@ -120,17 +120,17 @@
               <section class="panel compositions-panel">
                 <div class="panel-header">
                   <h2>Compositions (CPLs)</h2>
-                  <button id="add-cpl" class="btn-sm">+ CPL</button>
+                  <button id="add-cpl" class="btn-sm" data-shared-action="add-cpl">+ CPL</button>
                 </div>
                 <div id="cpl-tabs" class="cpl-tabs">
-                  <button class="cpl-tab active" data-cpl="0">Main</button>
+                  <button class="cpl-tab active" data-cpl="0" data-no-key>Main</button>
                 </div>
               </section>
 
               <section class="panel reels-panel">
                 <div class="panel-header">
                   <h2>Virtual Tracks</h2>
-                  <button id="add-segment" class="btn-sm">+ Segment</button>
+                  <button id="add-segment" class="btn-sm" data-key="g">+ Segment</button>
                 </div>
                 <div id="track-list" class="reel-list">
                   <div class="reel" data-segment="1">
@@ -158,7 +158,7 @@
             </div>
 
             <!-- Right: Properties panel -->
-            <aside class="properties-panel" id="properties">
+            <aside class="properties-panel" id="properties" data-submit="btn-build">
               <div class="panel-header">
                 <h2>Properties</h2>
               </div>
@@ -296,7 +296,7 @@
                     <label for="prop-auto-crop-threshold">Auto-crop black level (0 to 1)</label>
                     <div class="input-with-btn">
                       <input type="number" id="prop-auto-crop-threshold" value="0.1" min="0" max="1" step="0.01">
-                      <button id="prop-auto-crop" class="btn-sm">Auto-crop</button>
+                      <button id="prop-auto-crop" class="btn-sm" data-shared-action="auto-crop">Auto-crop</button>
                     </div>
                     <div class="field-hint" id="prop-picture-plan"></div>
                   </div>
@@ -392,8 +392,8 @@
             <div class="panel-header">
               <h2>Timeline</h2>
               <div class="panel-actions">
-                <button id="tl-zoom-in" class="btn-sm">+</button>
-                <button id="tl-zoom-out" class="btn-sm">−</button>
+                <button id="tl-zoom-in" class="btn-sm" data-no-key>+</button>
+                <button id="tl-zoom-out" class="btn-sm" data-no-key>−</button>
               </div>
             </div>
             <!-- Scrubber moved to global transport bar -->
@@ -416,7 +416,7 @@
             </div>
           </section>
           <!-- Supplement creation inline -->
-          <section class="panel" style="margin-top:16px;">
+          <section class="panel" style="margin-top:16px;" data-submit="sup-create">
             <div class="panel-header">
               <h2>Supplemental Version</h2>
             </div>
@@ -452,19 +452,19 @@
                 <button id="sup-browse-output" class="btn-sm">…</button>
               </div>
             </div>
-            <button id="sup-create" class="btn-primary" disabled>Create Supplement</button>
+            <button id="sup-create" class="btn-primary" disabled data-key="c">Create Supplement</button>
             <div id="sup-results" class="results-box"></div>
           </section>
         </div>
 
         <!-- VALIDATE VIEW -->
         <div class="view" id="view-validate">
-          <section class="panel">
+          <section class="panel" data-submit="val-run">
             <div class="panel-header">
               <h2>Validate IMP</h2>
               <div class="panel-actions">
-                <button id="val-browse" class="btn-sm">Select IMP…</button>
-                <button id="val-run" class="btn-sm primary" disabled>Validate</button>
+                <button id="val-browse" class="btn-sm" data-shared-action="select-package">Select IMP…</button>
+                <button id="val-run" class="btn-sm primary" disabled data-shared-action="validate">Validate</button>
               </div>
             </div>
             <div class="prop-field">
@@ -473,11 +473,11 @@
             <div id="val-results" class="results-box"></div>
           </section>
           <!-- Metadata editor -->
-          <section class="panel" style="margin-top:16px;">
+          <section class="panel" style="margin-top:16px;" data-submit="meta-save">
             <div class="panel-header">
               <h2>Metadata</h2>
               <div class="panel-actions">
-                <button id="meta-browse" class="btn-sm">Load IMP…</button>
+                <button id="meta-browse" class="btn-sm" data-key="l">Load IMP…</button>
               </div>
             </div>
             <div id="meta-fields" style="display:none;">
@@ -512,7 +512,7 @@
                   <input type="text" id="meta-locale" placeholder="en-US">
                 </div>
               </div>
-              <button id="meta-save" class="btn-primary" disabled>Save Metadata</button>
+              <button id="meta-save" class="btn-primary" disabled data-key="m">Save Metadata</button>
             </div>
           </section>
         </div>
@@ -520,7 +520,7 @@
         <!-- TOOLS VIEW -->
         <div class="view" id="view-tools">
           <div class="split-panels">
-            <section class="panel">
+            <section class="panel" data-submit="tc-start">
               <h2>Transcode</h2>
               <div class="prop-field">
                 <label>Input Video</label>
@@ -555,11 +555,11 @@
                   </select>
                 </div>
               </div>
-              <button id="tc-start" class="btn-primary" disabled>Transcode</button>
+              <button id="tc-start" class="btn-primary" disabled data-shared-action="transcode">Transcode</button>
               <div id="tc-results" class="results-box"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-submit="loud-measure">
               <h2>Loudness</h2>
               <div class="prop-field">
                 <label>Audio File</label>
@@ -568,11 +568,11 @@
                   <button id="loud-browse" class="btn-sm">…</button>
                 </div>
               </div>
-              <button id="loud-measure" class="btn-primary" disabled>Measure</button>
+              <button id="loud-measure" class="btn-primary" disabled data-shared-action="measure">Measure</button>
               <div id="loud-results" class="results-box"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-submit="bi-start">
               <h2>Burn-In Subtitles</h2>
               <div class="prop-field">
                 <label>Video</label>
@@ -595,11 +595,11 @@
                   <button id="bi-browse-output" class="btn-sm">…</button>
                 </div>
               </div>
-              <button id="bi-start" class="btn-primary" disabled>Burn In</button>
+              <button id="bi-start" class="btn-primary" disabled data-shared-action="burn-in">Burn In</button>
               <div id="bi-results" class="results-box"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-submit="an-analyze">
               <h2>Bitrate Analytics</h2>
               <div class="prop-field">
                 <label>J2K Directory or IMP</label>
@@ -608,7 +608,7 @@
                   <button id="an-browse" class="btn-sm">…</button>
                 </div>
               </div>
-              <button id="an-analyze" class="btn-primary" disabled>Analyze</button>
+              <button id="an-analyze" class="btn-primary" disabled data-key="a">Analyze</button>
               <div id="an-results" class="results-box"></div>
               <canvas id="an-chart" width="800" height="200" style="display:none;width:100%;margin-top:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);"></canvas>
             </section>
@@ -618,7 +618,7 @@
         <!-- DELIVER VIEW -->
         <div class="view" id="view-deliver">
           <div class="split-panels">
-            <section class="panel">
+            <section class="panel" data-submit="del-start">
               <h2>Batch Delivery</h2>
               <p class="field-hint">Create IMPs for multiple platforms in a single pass.</p>
               <div class="prop-field">
@@ -657,11 +657,11 @@
                   <label><input type="checkbox" value="archival"> Archival</label>
                 </div>
               </div>
-              <button id="del-start" class="btn-primary" disabled>Start Delivery</button>
+              <button id="del-start" class="btn-primary" disabled data-key="d">Start Delivery</button>
               <div id="del-results" class="results-box"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-submit="dcp-convert">
               <h2>Convert to DCP</h2>
               <p class="field-hint">Repackage an IMF package as a DCP for theatrical playback.</p>
               <div class="prop-field">
@@ -692,7 +692,7 @@
                   </select>
                 </div>
               </div>
-              <button id="dcp-convert" class="btn-primary" disabled>Convert to DCP</button>
+              <button id="dcp-convert" class="btn-primary" disabled data-key="c">Convert to DCP</button>
               <div id="dcp-results" class="results-box"></div>
             </section>
           </div>
@@ -704,7 +704,7 @@
             <div class="panel-header">
               <h2>Jobs</h2>
               <div class="panel-actions">
-                <button id="jobs-refresh" class="btn-sm">Refresh</button>
+                <button id="jobs-refresh" class="btn-sm" data-shared-action="refresh-jobs">Refresh</button>
                 <span id="jobs-status" class="status-badge">Ready</span>
               </div>
             </div>
@@ -723,7 +723,7 @@
             <div class="panel-header">
               <h2>Settings</h2>
             </div>
-            <form id="settings-form" class="settings-grid">
+            <form id="settings-form" class="settings-grid" data-submit="set-save">
               <fieldset>
                 <legend>General</legend>
                 <div class="prop-field">
@@ -778,7 +778,7 @@
                   <label for="set-gpu-license">Grok License</label>
                   <div class="input-with-btn">
                     <input type="password" id="set-gpu-license" autocomplete="off" spellcheck="false">
-                    <button type="button" id="set-gpu-license-show" class="btn-sm">Show</button>
+                    <button type="button" id="set-gpu-license-show" class="btn-sm" data-shared-action="show-gpu-license">Show</button>
                   </div>
                 </div>
                 <div class="prop-field">
@@ -809,8 +809,8 @@
                 <div id="component-versions">Loading...</div>
               </fieldset>
               <div class="form-actions">
-                <button type="submit" class="btn-primary">Save</button>
-                <button type="button" id="set-reset" class="btn-secondary">Reset</button>
+                <button type="submit" class="btn-primary" id="set-save" data-shared-action="save-settings">Save</button>
+                <button type="button" id="set-reset" class="btn-secondary" data-shared-action="reset-settings">Reset</button>
               </div>
             </form>
           </section>

@@ -4,16 +4,17 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, stopPreview, previewPlayPause, previewSeek, previewSeekAbsolute, previewFrameStepBack, previewFrameStepForward, PREVIEW_SEEK_SECONDS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
-import { initShortcuts, getBinding } from "../../extern/guikit/src/shortcuts.js";
+import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
+import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
-import { PROJECT_BUTTON_SHORTCUTS, THEME_BUTTON_SHORTCUT, BUTTON_SHORTCUTS, VIEW_SHORTCUTS } from "./shortcut-bindings.js";
+import { PROJECT_BUTTON_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
 import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleStatusForProgress } from "./build-progress.js";
@@ -83,43 +84,10 @@ function switchView(viewName) {
 
 const SHORTCUTS_KEY = "imfwizard-shortcuts";
 
-function clickAction({ id, label, binding, buttonId }, category) {
-  return { id, label, category, binding, handler: () => document.getElementById(buttonId)?.click() };
-}
-
-function viewAction(view, label, binding) {
-  return { id: `view-${view}`, label, category: "Views", binding, handler: () => switchView(view) };
-}
-
-function previewAction(id, label, binding, handler) {
-  return { id, label, category: "Preview", binding, when: isPreviewVisible, handler };
-}
-
-function refreshButtonTooltips() {
-  for (const { id, label, buttonId } of BUTTON_SHORTCUTS) {
-    const button = document.getElementById(buttonId);
-    if (!button) continue;
-    const binding = getBinding(id);
-    button.title = binding ? `${label} (${binding})` : label;
-  }
-}
-
 initShortcuts({
   storageKey: SHORTCUTS_KEY,
-  onChange: refreshButtonTooltips,
-  actions: [
-    ...PROJECT_BUTTON_SHORTCUTS.map((shortcut) => clickAction(shortcut, "Project")),
-    ...VIEW_SHORTCUTS.map(({ view, label, binding }) => viewAction(view, label, binding)),
-    previewAction("preview-play-pause", "Play / pause", "Space", previewPlayPause),
-    previewAction("preview-back", `Back ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowLeft", () => previewSeek(-PREVIEW_SEEK_SECONDS)),
-    previewAction("preview-forward", `Forward ${PREVIEW_SEEK_SECONDS} seconds`, "ArrowRight", () => previewSeek(PREVIEW_SEEK_SECONDS)),
-    previewAction("preview-frame-back", "Step back one frame", ",", previewFrameStepBack),
-    previewAction("preview-frame-forward", "Step forward one frame", ".", previewFrameStepForward),
-    previewAction("preview-start", "Go to start", "Home", () => previewSeekAbsolute(0)),
-    clickAction(THEME_BUTTON_SHORTCUT, "Appearance"),
-  ],
+  actions: [...PROJECT_BUTTON_SHORTCUTS, ...sidebarViewShortcuts(switchView), ...PREVIEW_SHORTCUTS, ...POST_BUILD_SHORTCUTS, THEME_SHORTCUT],
 });
-refreshButtonTooltips();
 
 // === Preferences ===
 const PREFS_KEY = "imfwizard-preferences";
