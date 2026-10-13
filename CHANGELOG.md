@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [1.5.0] - 2026-10-13
+
 ### Changed
 - **One Project menu in the toolbar**: the Recent, New, Open, Save and Save As buttons are now one Project button. Its menu holds New, Open, Save and Save As, with the recent projects under them. The keyboard shortcuts are unchanged.
 - **Build IMP is off once the IMP is built**: after a build finishes, the button reads IMP Built and stays disabled until a change to the project would give a different IMP, or the built folder is deleted. Opening the project again, from Recent or after a relaunch, keeps it off the same way.
