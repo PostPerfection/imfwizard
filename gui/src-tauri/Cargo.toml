@@ -43,3 +43,10 @@ postkit = { path = "../../extern/postkit" }
 # Optimize postkit in debug builds (color math is too slow unoptimized)
 [profile.dev.package.postkit]
 opt-level = 2
+
+# bindgen in the ffmpeg-sys-next build script overflows the stack on Windows when unoptimised
+[profile.dev.build-override]
+opt-level = 1
+
+[profile.release.build-override]
+opt-level = 1

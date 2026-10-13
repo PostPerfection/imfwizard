@@ -171,12 +171,14 @@ jobs:
             echo "::error::no libgrokj2k under grok-install/lib64 or grok-install/lib"
             exit 1
           fi
+          # the binary links libgrokj2k and FFmpeg at load time, so the archive carries them
           if [ "$RUNNER_OS" = Linux ]; then
-            cp -a "$grok_lib"/libgrokj2k* dist/lib/
+            scripts/bundle-linux-cli-libraries.sh "dist/${{ matrix.binary }}" dist/lib "$grok_lib" "$FFMPEG_MPV_DIR/lib"
             patchelf --set-rpath '$ORIGIN/lib' "dist/${{ matrix.binary }}"
           else
-            scripts/bundle-macos-cli-libraries.sh "dist/${{ matrix.binary }}" dist/lib "$grok_lib"
+            scripts/bundle-macos-cli-libraries.sh "dist/${{ matrix.binary }}" dist/lib "$grok_lib" "$FFMPEG_MPV_DIR/lib"
           fi
+          cp "$FFMPEG_MPV_DIR/THIRD-PARTY-LICENSES" dist/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
           tar -czf ${{ matrix.artifact }}.tar.gz -C dist .
 
       - name: Package (Windows)
@@ -186,7 +188,8 @@ jobs:
           Copy-Item "rust/target/release/${{ matrix.binary }}" "dist/"
           Copy-Item "rust/crates/imfwizard-core/schemas/README.md" "dist/SCHEMA-NOTICES.md"
           ./scripts/bundle-windows-cli-dlls.ps1 -Binary "dist/${{ matrix.binary }}" `
-            -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
+            -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin", "$env:FFMPEG_MPV_DIR/bin"
+          Copy-Item "$env:FFMPEG_MPV_DIR/THIRD-PARTY-LICENSES" "dist/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt"
           Compress-Archive -Path "dist/*" -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Test packaged CLI (Unix)
@@ -195,6 +198,21 @@ jobs:
         run: |
           mkdir cli-test
           tar -xzf ${{ matrix.artifact }}.tar.gz -C cli-test
+          if [ "$RUNNER_OS" = macOS ]
+          then
+            libavcodec=lib/libavcodec.62.dylib
+          else
+            libavcodec=lib/libavcodec.so.62
+          fi
+          for file in "$libavcodec" THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
+          do
+            if [ ! -f "cli-test/$file" ]
+            then
+              echo "the archive does not carry $file"
+              find cli-test -type f | sort
+              exit 1
+            fi
+          done
           if [ "$RUNNER_OS" = macOS ]
           then
             for file in "cli-test/${{ matrix.binary }}" cli-test/lib/*.dylib
@@ -208,8 +226,8 @@ jobs:
               fi
             done
           fi
-          # the archive has to find libgrokj2k on its own rpath
-          run="env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH cli-test/${{ matrix.binary }}"
+          # the archive has to find libgrokj2k and FFmpeg on its own rpath
+          run="env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH cli-test/${{ matrix.binary }}"
           $run --version | grep -F "${{ needs.version.outputs.project_version }}"
           $run --help >/dev/null
 
@@ -221,7 +239,10 @@ jobs:
           foreach ($runtime in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
             if (-not (Test-Path (Join-Path cli-test $runtime))) { throw "the archive does not carry $runtime" }
           }
-          # setup-grok puts grok-install/bin on PATH, which a user's machine does not have
+          foreach ($file in "avcodec-62.dll", "THIRD-PARTY-LICENSES-ffmpeg-mpv.txt") {
+            if (-not (Test-Path (Join-Path cli-test $file))) { throw "the archive does not carry $file" }
+          }
+          # setup-grok and ffmpeg-mpv-builds put their bin directories on PATH, which a user's machine does not have
           $env:PATH = @("$env:SystemRoot\System32", (Resolve-Path cli-test).Path) -join [IO.Path]::PathSeparator
           $version = "${{ needs.version.outputs.project_version }}"
           $output = & "cli-test/${{ matrix.binary }}" --version
@@ -273,8 +294,8 @@ jobs:
           OPENSSL_STATIC: "1"
         run: cargo build --release -p imfwizard-cli
 
-      # the deb carries libgrokj2k at /usr/lib/imfwizard, like the desktop deb and rpm
-      - name: Bundle libgrokj2k
+      # the deb carries libgrokj2k and FFmpeg at /usr/lib/imfwizard, like the desktop deb and rpm
+      - name: Bundle libgrokj2k and FFmpeg
         shell: bash
         run: |
           set -euo pipefail
@@ -291,7 +312,9 @@ jobs:
             echo "no libgrokj2k.so.1 under grok-install/lib64 or grok-install/lib"
             exit 1
           fi
-          cp -L "$GROK_LIB/libgrokj2k.so.1" rust/target/release/libgrokj2k.so.1
+          # Cargo.toml's [package.metadata.deb] assets name every library this copies
+          scripts/bundle-linux-cli-libraries.sh rust/target/release/imfwizard rust/target/release "$GROK_LIB" "$FFMPEG_MPV_DIR/lib"
+          cp "$FFMPEG_MPV_DIR/THIRD-PARTY-LICENSES" rust/target/release/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
           # strip run after patchelf can corrupt the binary, so cargo deb gets --no-strip
           strip rust/target/release/imfwizard
           patchelf --set-rpath /usr/lib/imfwizard rust/target/release/imfwizard
@@ -300,18 +323,23 @@ jobs:
         working-directory: rust
         run: cargo deb -p imfwizard-cli --no-build --no-strip
 
-      # setup-grok's LD_LIBRARY_PATH would find a libgrokj2k the package does not carry
+      # the LD_LIBRARY_PATH setup-grok and ffmpeg-mpv-builds export would find libraries the package does not carry
       - name: Test installed CLI
         shell: bash
         run: |
           set -euo pipefail
           package=$(realpath "$(find rust/target/debian -name '*.deb' -print -quit)")
           dpkg-deb -f "$package" Depends
+          dpkg-deb -c "$package"
+          dpkg-deb -c "$package" | grep -F ./usr/share/doc/imfwizard/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
           sudo apt-get install -y "$package"
           env -u LD_LIBRARY_PATH imfwizard --version | grep -F "${{ needs.version.outputs.project_version }}"
           env -u LD_LIBRARY_PATH imfwizard --help >/dev/null
           env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard
-          env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard | grep -F "libgrokj2k.so.1 => /usr/lib/imfwizard/libgrokj2k.so.1"
+          for library in libgrokj2k.so.1 libavcodec.so.62 libavfilter.so.11 libswscale.so.9
+          do
+            env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard | grep -F "$library => /usr/lib/imfwizard/$library"
+          done
           # the runner already has every library the package depends on, a clean image does not
           docker run --rm -v "$package:/tmp/imfwizard.deb:ro" ubuntu:24.04 bash -euo pipefail -c \
             'apt-get update && apt-get install -y --no-install-recommends /tmp/imfwizard.deb && imfwizard --version'
@@ -435,11 +463,15 @@ jobs:
           Copy-Item "target/release/imfwizard.exe" "../gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe"
 
       # tauri.windows.conf.json ships every dll staged here beside the installed exes
-      - name: Stage grok and VC++ runtime DLLs (Windows)
+      - name: Stage grok, FFmpeg, libmpv and VC++ runtime dlls (Windows)
         if: runner.os == 'Windows'
         run: |
-          ./scripts/bundle-windows-cli-dlls.ps1 -Binary "gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe" `
-            -SearchDirectories "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
+          $searchDirectories = "$env:GITHUB_WORKSPACE/grok-install/bin", "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin", "$env:FFMPEG_MPV_DIR/bin"
+          ./scripts/bundle-windows-cli-dlls.ps1 -Binary "gui/src-tauri/imfwizard-x86_64-pc-windows-msvc.exe" -SearchDirectories $searchDirectories
+          # libmpv is the one dll the gui imports that the sidecar does not
+          Copy-Item "$env:FFMPEG_MPV_DIR/bin/libmpv-2.dll" "gui/src-tauri/"
+          ./scripts/bundle-windows-cli-dlls.ps1 -Binary "gui/src-tauri/libmpv-2.dll" -SearchDirectories $searchDirectories
+          Copy-Item "$env:FFMPEG_MPV_DIR/THIRD-PARTY-LICENSES" "gui/src-tauri/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt"
 
       # the deb and rpm ship it through bundle.linux.*.files, the .app through bundle.macOS.frameworks
       - name: Stage grok library (Unix)
@@ -461,6 +493,27 @@ jobs:
           fi
           cp -L "$GROK_LIB/$library" "gui/src-tauri/$library"
 
+      # asdcplib links OpenSSL and Xerces-C as shared libraries whatever OPENSSL_STATIC says
+      - name: Stage Homebrew libraries (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TRIPLE=$(rustc -vV | grep host | awk '{print $2}')
+          staging="$GITHUB_WORKSPACE/gui/src-tauri/homebrew-libraries"
+          scripts/stage-macos-homebrew-libraries.sh "gui/src-tauri/imfwizard-${TRIPLE}" "$staging"
+          ls -la "$staging"
+          echo "STAGED_HOMEBREW_LIBRARIES=$staging" >> "$GITHUB_ENV"
+
+      # adds the FFmpeg and libmpv libraries and their licence file to the deb, rpm and .app, and the Homebrew libraries to the .app
+      - name: Generate the FFmpeg and libmpv bundle config (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ffmpeg-mpv-bundle-config.sh > "$RUNNER_TEMP/ffmpeg-mpv-bundle.json"
+          jq . "$RUNNER_TEMP/ffmpeg-mpv-bundle.json"
+
       # tauri.conf.json ships this folder as a resource
       - name: Stage Photon jars
         shell: bash
@@ -470,17 +523,21 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           OPENSSL_STATIC: "1"
+          # the bundle carries no Homebrew lcms2
+          LCMS2_STATIC: "1"
         with:
           projectPath: gui
-          args: --ci --bundles ${{ matrix.bundles }}
+          args: --ci --bundles ${{ matrix.bundles }} ${{ runner.os != 'Windows' && format('--config {0}/ffmpeg-mpv-bundle.json', runner.temp) || '' }}
 
-      # every check runs with the loader path setup-grok exported unset
-      - name: The packages run without a grok install (Linux)
+      # every check runs with the loader paths setup-grok and ffmpeg-mpv-builds exported unset
+      - name: The packages run without a grok or FFmpeg install (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           bundle=gui/src-tauri/target/release/bundle
+          bundled_libraries="libgrokj2k.so.1 libmpv.so.2 libavcodec.so.62"
+          licence=usr/share/doc/imfwizard/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
 
           check_binaries() {
             for binary in "$@"; do
@@ -495,34 +552,87 @@ jobs:
           ls -la "$bundle"/rpm "$bundle"/deb "$bundle"/appimage
           rpm=$(find "$bundle/rpm" -name '*.rpm' ! -name '*.sig' -print -quit)
           rpm -qpl "$rpm"
-          rpm_root=$(mktemp -d)
-          bsdtar -xf "$rpm" -C "$rpm_root"
-          if [ ! -f "$rpm_root/usr/lib/imfwizard/libgrokj2k.so.1" ]; then
-            echo "the rpm does not carry usr/lib/imfwizard/libgrokj2k.so.1"
-            find "$rpm_root" -type f | sort
+          rpm -qpR "$rpm"
+          if ! rpm -qpR "$rpm" | grep -qxF 'libass.so.9()(64bit)'
+          then
+            echo "the rpm does not require libass.so.9()(64bit)"
             exit 1
           fi
+          if rpm -qpR "$rpm" | grep -F mpv-libs
+          then
+            echo "the rpm still requires mpv-libs"
+            exit 1
+          fi
+          rpm_paths=$(rpm -qpl "$rpm")
+          for path in $(printf '/usr/lib/imfwizard/%s ' $bundled_libraries) "/$licence"
+          do
+            if ! echo "$rpm_paths" | grep -qxF "$path"
+            then
+              echo "rpm -qpl does not list $path"
+              exit 1
+            fi
+          done
+          rpm_root=$(mktemp -d)
+          bsdtar -xf "$rpm" -C "$rpm_root"
+          for path in $bundled_libraries
+          do
+            if [ ! -f "$rpm_root/usr/lib/imfwizard/$path" ]
+            then
+              echo "the rpm does not carry usr/lib/imfwizard/$path"
+              find "$rpm_root" -type f | sort
+              exit 1
+            fi
+          done
           check_binaries "$rpm_root/usr/bin/imfwizard" "$rpm_root/usr/bin/imfwizard-gui"
           env -u LD_LIBRARY_PATH "$rpm_root/usr/bin/imfwizard" --version
 
           appimage=$(realpath "$(find "$bundle/appimage" -name '*.AppImage' -print -quit)")
           appimage_root=$(mktemp -d)
           (cd "$appimage_root" && "$appimage" --appimage-extract >/dev/null)
-          if [ ! -f "$appimage_root/squashfs-root/usr/lib/libgrokj2k.so.1" ]; then
-            echo "the AppImage does not carry usr/lib/libgrokj2k.so.1"
-            ls "$appimage_root/squashfs-root/usr/lib"
-            exit 1
-          fi
+          for path in $bundled_libraries
+          do
+            if [ ! -f "$appimage_root/squashfs-root/usr/lib/$path" ]
+            then
+              echo "the AppImage does not carry usr/lib/$path"
+              ls "$appimage_root/squashfs-root/usr/lib"
+              exit 1
+            fi
+          done
           env -u LD_LIBRARY_PATH "$appimage_root/squashfs-root/usr/bin/imfwizard" --version
 
           deb=$(realpath "$(find "$bundle/deb" -name '*.deb' -print -quit)")
-          dpkg-deb -f "$deb" Depends | grep -F libmpv2
+          depends=$(dpkg-deb -f "$deb" Depends)
+          echo "$depends"
+          if echo "$depends" | grep -F libmpv2
+          then
+            echo "the deb still depends on libmpv2"
+            exit 1
+          fi
+          if ! echo "$depends" | grep -qF libass9
+          then
+            echo "the deb does not depend on libass9"
+            exit 1
+          fi
+          dpkg-deb -c "$deb"
+          deb_paths=$(dpkg-deb -c "$deb" | awk '{print $NF}' | sed 's|^\./||')
+          for path in $(printf 'usr/lib/imfwizard/%s ' $bundled_libraries) "$licence"
+          do
+            if ! echo "$deb_paths" | grep -qxF "$path"
+            then
+              echo "the deb does not carry $path"
+              exit 1
+            fi
+          done
           sudo apt-get install -y "$deb"
           check_binaries /usr/bin/imfwizard /usr/bin/imfwizard-gui
+          for library in libmpv.so.2 libavcodec.so.62
+          do
+            env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard-gui | grep -F "$library => /usr/bin/../lib/imfwizard/$library"
+          done
           env -u LD_LIBRARY_PATH imfwizard --version
 
       # the bundler rewrites no load command, a missed relink shows up as a runner path
-      - name: The app runs without a grok install (macOS)
+      - name: The app runs without a grok or FFmpeg install (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -533,15 +643,21 @@ jobs:
             echo "no .app under gui/src-tauri/target/release/bundle/macos"
             exit 1
           fi
-          if [ ! -f "$app/Contents/Frameworks/libgrokj2k.1.dylib" ]; then
-            echo "the app does not carry Contents/Frameworks/libgrokj2k.1.dylib"
-            find "$app" -type f | sort
-            exit 1
-          fi
-          for binary in "$app/Contents/MacOS/imfwizard" "$app/Contents/MacOS/imfwizard-gui"; do
+          for path in Frameworks/libgrokj2k.1.dylib Frameworks/libmpv.2.dylib Frameworks/libavcodec.62.dylib Resources/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
+          do
+            if [ ! -f "$app/Contents/$path" ]
+            then
+              echo "the app does not carry Contents/$path"
+              find "$app" -type f | sort
+              exit 1
+            fi
+          done
+          for binary in "$app/Contents/MacOS/imfwizard" "$app/Contents/MacOS/imfwizard-gui" "$app"/Contents/Frameworks/*.dylib
+          do
             otool -L "$binary"
-            if otool -L "$binary" | grep -q "/Users/runner"; then
-              echo "$binary loads a library from the build tree"
+            if otool -L "$binary" | grep -E "/Users/runner|/opt/homebrew|/usr/local"
+            then
+              echo "$binary loads a library from the build tree or Homebrew"
               exit 1
             fi
           done
@@ -561,7 +677,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          # this deb is already installed, by the no-grok-install checks above
+          # this deb is already installed, by the package checks above
           installer=$(realpath "$(find gui/src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)")
           package=$(dpkg-deb -f "$installer" Package)
           binary=$(dpkg -L "$package" | awk '/^\/usr\/bin\// {print; exit}')
@@ -628,6 +744,9 @@ jobs:
           foreach ($dll in Get-ChildItem gui/src-tauri/*.dll) {
             if (-not (Test-Path (Join-Path $installDirectory $dll.Name))) { throw "the installer does not carry $($dll.Name)" }
           }
+          foreach ($file in "libmpv-2.dll", "avcodec-62.dll", "THIRD-PARTY-LICENSES-ffmpeg-mpv.txt") {
+            if (-not (Test-Path (Join-Path $installDirectory $file))) { throw "the installer does not carry $file" }
+          }
           $runnerPath = $env:PATH
           $env:PATH = @("$env:SystemRoot\System32", $installDirectory) -join [IO.Path]::PathSeparator
           & (Join-Path $installDirectory "imfwizard.exe") --version
@@ -686,6 +805,9 @@ jobs:
           if ($installDirectory -eq "") { $installDirectory = Split-Path ($entry.DisplayIcon -replace ',\d+$', '').Trim('"') }
           foreach ($dll in Get-ChildItem gui/src-tauri/*.dll) {
             if (-not (Test-Path (Join-Path $installDirectory $dll.Name))) { throw "the msi does not carry $($dll.Name)" }
+          }
+          foreach ($file in "libmpv-2.dll", "avcodec-62.dll", "THIRD-PARTY-LICENSES-ffmpeg-mpv.txt") {
+            if (-not (Test-Path (Join-Path $installDirectory $file))) { throw "the msi does not carry $file" }
           }
           $runnerPath = $env:PATH
           $env:PATH = @("$env:SystemRoot\System32", $installDirectory) -join [IO.Path]::PathSeparator

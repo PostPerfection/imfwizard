@@ -88,8 +88,8 @@ if [[ -z "${GROK_LIBRARY_DIRECTORY:-}" ]]; then
 fi
 
 # these win over the host grok paths in the committed cargo [env] config
-export PKG_CONFIG_PATH="$GROK_LIBRARY_DIRECTORY/pkgconfig"
-export LD_LIBRARY_PATH="$GROK_LIBRARY_DIRECTORY"
+export PKG_CONFIG_PATH="$FFMPEG_MPV_DIR/lib/pkgconfig:$GROK_LIBRARY_DIRECTORY/pkgconfig"
+export LD_LIBRARY_PATH="$FFMPEG_MPV_DIR/lib:$GROK_LIBRARY_DIRECTORY"
 
 cd /wizard
 cargo build --release -p imfwizard-cli --manifest-path rust/Cargo.toml
@@ -106,13 +106,13 @@ fi
 cd gui
 pnpm install --frozen-lockfile --store-dir /cache/pnpm-store
 # --config replaces arrays instead of appending
-DEB_CONFIG="$(jq -c '{bundle: {linux: {deb: {
+DEB_CONFIG="$(../scripts/ffmpeg-mpv-bundle-config.sh "$FFMPEG_MPV_DIR" Linux | jq -c '{bundle: {linux: {deb: {
     depends: (.bundle.linux.deb.depends + ["libtiff6", "libcurl4t64"]),
-    files: {
+    files: (.bundle.linux.deb.files + {
         "/usr/lib/imfwizard/libgrokj2k.so.1": "libgrokj2k.so.1",
         "/usr/lib/imfwizard/libgrokj2k_plugin.so": "libgrokj2k_plugin.so"
-    }
-}}}}' src-tauri/tauri.linux.conf.json)"
+    })
+}}}}')"
 pnpm tauri build --bundles deb --config "$DEB_CONFIG"
 EOF
 

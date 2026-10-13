@@ -39,7 +39,7 @@ maintainer = "Post Perfection <dev@postperfection.com>"
 section = "video"
 priority = "optional"
 # $auto finds no package for the bundled libgrokj2k and drops every dependency
-depends = "libc6 (>= 2.39), libssl3t64 (>= 3.0.0), libstdc++6 (>= 13.1), zlib1g (>= 1:1.1.4)"
+depends = "libc6 (>= 2.39), libssl3t64 (>= 3.0.0), libstdc++6 (>= 13.1), zlib1g (>= 1:1.1.4), libdav1d7, libdrm2, libva2, libva-drm2, libzimg2"
 recommends = "ffmpeg, mpv"
 # the desktop package installs the same /usr/bin and /usr/lib files
 conflicts = "imf-wizard"
@@ -47,9 +47,17 @@ replaces = "imf-wizard"
 assets = [
     ["target/release/imfwizard", "usr/bin/", "755"],
     ["target/release/libgrokj2k.so.1", "usr/lib/imfwizard/", "644"],
+    # sonames of the ffmpeg-mpv-builds v1.0.0 release the workflows pin
+    ["target/release/libavcodec.so.62", "usr/lib/imfwizard/", "644"],
+    ["target/release/libavfilter.so.11", "usr/lib/imfwizard/", "644"],
+    ["target/release/libavformat.so.62", "usr/lib/imfwizard/", "644"],
+    ["target/release/libavutil.so.60", "usr/lib/imfwizard/", "644"],
+    ["target/release/libswresample.so.6", "usr/lib/imfwizard/", "644"],
+    ["target/release/libswscale.so.9", "usr/lib/imfwizard/", "644"],
     ["../../../README.md", "usr/share/doc/imfwizard/README.md", "644"],
     ["../../../CHANGELOG.md", "usr/share/doc/imfwizard/CHANGELOG.md", "644"],
     ["../imfwizard-core/schemas/README.md", "usr/share/doc/imfwizard/SCHEMA-NOTICES.md", "644"],
+    ["target/release/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt", "usr/share/doc/imfwizard/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt", "644"],
 ]
 extended-description = """\
 IMF Wizard creates valid IMF packages from video sources, image sequences, \

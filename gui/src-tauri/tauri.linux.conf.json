@@ -6,7 +6,6 @@
     "linux": {
       "deb": {
         "depends": [
-          "libmpv2",
           "ffmpeg",
           "xmlsec1",
           "libxml2-utils",
@@ -29,7 +28,6 @@
       },
       "rpm": {
         "depends": [
-          "mpv-libs",
           "ffmpeg",
           "xmlsec1",
           "libxml2",

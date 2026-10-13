@@ -6,6 +6,8 @@ ENTRYPOINT []
 ARG NODE_VERSION=24.21.0
 ARG NODE_SHA256=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
 ARG PNPM_VERSION=11.8.0
+ARG FFMPEG_MPV_RELEASE=v1.0.0
+ARG FFMPEG_MPV_ARCHIVE=ffmpeg-mpv-linux-x86_64.tar.xz
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -18,7 +20,6 @@ RUN apt-get update \
         libappindicator3-dev \
         librsvg2-dev \
         patchelf \
-        libmpv-dev \
         libtiff-dev \
         libcurl4-openssl-dev \
         libclang-dev \
@@ -31,6 +32,21 @@ RUN apt-get update \
         jq \
         rsync \
         xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV FFMPEG_MPV_DIR=/opt/ffmpeg-mpv
+
+RUN base="https://github.com/PostPerfection/ffmpeg-mpv-builds/releases/download/$FFMPEG_MPV_RELEASE" \
+    && mkdir -p /tmp/ffmpeg-mpv-download "$FFMPEG_MPV_DIR" \
+    && cd /tmp/ffmpeg-mpv-download \
+    && curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$base/SHA256SUMS" \
+    && curl -fsSL --retry 5 --retry-all-errors -o "$FFMPEG_MPV_ARCHIVE" "$base/$FFMPEG_MPV_ARCHIVE" \
+    && grep "  $FFMPEG_MPV_ARCHIVE\$" SHA256SUMS > expected.sha256 \
+    && sha256sum -c expected.sha256 \
+    && tar -C "$FFMPEG_MPV_DIR" --strip-components=1 -xJf "$FFMPEG_MPV_ARCHIVE" \
+    && rm -rf /tmp/ffmpeg-mpv-download \
+    && apt-get update \
+    && xargs apt-get install -y --no-install-recommends < "$FFMPEG_MPV_DIR/ubuntu-24.04-runtime-packages.txt" \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUSTUP_HOME=/usr/local/rustup \

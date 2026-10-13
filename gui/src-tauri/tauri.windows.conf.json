@@ -1,5 +1,5 @@
 {
   "bundle": {
-    "resources": ["*.dll", "photon/*"]
+    "resources": ["*.dll", "photon/*", "THIRD-PARTY-LICENSES-ffmpeg-mpv.txt"]
   }
 }
