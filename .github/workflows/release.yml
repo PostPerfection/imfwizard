@@ -21,6 +21,7 @@ jobs:
         shell: bash
         run: |
           workspace_version=$(awk '/^\[workspace.package\]/{found=1; next} /^\[/{found=0} found && /^version = / {gsub(/[" ]/, "", $3); print $3; exit}' rust/Cargo.toml)
+          desktop_crate_version=$(awk '/^\[package\]/{found=1; next} /^\[/{found=0} found && /^version = / {gsub(/[" ]/, "", $3); print $3; exit}' gui/src-tauri/Cargo.toml)
           desktop_version=$(jq -r .version gui/src-tauri/tauri.conf.json)
           frontend_version=$(jq -r .version gui/package.json)
 
@@ -29,7 +30,7 @@ jobs:
             release_version="${GITHUB_REF_NAME#v}"
           fi
 
-          for version in "$workspace_version" "$desktop_version" "$frontend_version"; do
+          for version in "$workspace_version" "$desktop_crate_version" "$desktop_version" "$frontend_version"; do
             if [ "$version" != "$release_version" ]; then
               echo "::error::Tag $GITHUB_REF_NAME does not match project version $version"
               exit 1
@@ -37,6 +38,26 @@ jobs:
           done
 
           echo "project_version=$workspace_version" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes="$RUNNER_TEMP/release-notes.md"
+          awk -v heading="## [$version]" 'index($0, heading) == 1 {found = 1; next} found && /^## / {exit} found {print}' CHANGELOG.md > "$notes"
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::CHANGELOG.md has no notes for $version"
+            exit 1
+          fi
+
+      - name: Upload release notes
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
 
   cli:
     needs: version
@@ -706,6 +727,7 @@ jobs:
             gui/src-tauri/target/release/bundle/dmg/*.dmg
             gui/src-tauri/target/release/bundle/msi/*.msi
             gui/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
 
   release:
     if: github.ref_type == 'tag'
@@ -723,7 +745,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: IMF Wizard ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: artifacts/release-notes/release-notes.md
           fail_on_unmatched_files: true
           files: |
             artifacts/**/*.tar.gz
