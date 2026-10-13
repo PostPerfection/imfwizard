@@ -12,6 +12,7 @@ import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from ".
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
 import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
+import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
 import { PROJECT_BUTTON_SHORTCUTS } from "./shortcut-bindings.js";
@@ -19,7 +20,7 @@ import { showHintsDialog } from "./hints-dialog.js";
 import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleStatusForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
-import { initProjects, saveProjectBesidePackage, existsInScope, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
+import { initProjects, saveProjectBesidePackage, existsInScope, packagePathBeside, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
 import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
@@ -997,6 +998,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       if (projectRecordPath) addRecentProject(projectRecordPath, title);
       showPostBuildActions(output);
       finishedBuild = { requestText, packagePath: output };
+      rememberFinishedBuild(FINISHED_BUILDS_KEY, output, requestText);
       endBuild(buildTitle);
       unlisten();
     } else if (p.stage === "cancelled") {
@@ -1441,7 +1443,7 @@ function serializeBuildPanel() {
   return serializeForm({ ...buildPanel(), audioMap: audioMapSpec() });
 }
 
-async function restoreBuildPanel(saved) {
+async function restoreBuildPanel(saved, projectPath) {
   const { form, notRestored } = restoreFormState(saved, buildPanelDefaults, buildPanel());
   nextAssetId = Math.max(0, ...project.assets.map((asset) => asset.id)) + 1;
   nextCplId = Math.max(0, ...project.compositions.map((composition) => composition.id)) + 1;
@@ -1468,6 +1470,10 @@ async function restoreBuildPanel(saved) {
     else unroutedCells += 1;
   }
   if (unroutedCells) notRestored.push(`${unroutedCells} audio map routes`);
+  const packagePath = projectPath ? packagePathBeside(projectPath) : null;
+  const builtRequestText = packagePath && finishedBuildRequest(FINISHED_BUILDS_KEY, packagePath);
+  finishedBuild = builtRequestText && (await existsInScope(packagePath)) ? { requestText: builtRequestText, packagePath } : null;
+  updateBuildButton();
   return notRestored;
 }
 
@@ -1553,6 +1559,7 @@ function endBuild(title) {
 const BUILD_BUTTON_TEXT = "Build IMP";
 const BUILT_BUTTON_TEXT = "IMP Built";
 const FINISHED_BUILD_CHECK_MILLISECONDS = 1000;
+const FINISHED_BUILDS_KEY = "imfwizard-finished-builds";
 let finishedBuild = null;
 
 function matchesFinishedBuild() {
@@ -1577,7 +1584,10 @@ function updateBuildButton() {
 
 // polled, since the form changes through many paths
 async function refreshFinishedBuild() {
-  if (finishedBuild && !(await existsInScope(finishedBuild.packagePath))) finishedBuild = null;
+  if (finishedBuild && !(await existsInScope(finishedBuild.packagePath))) {
+    forgetFinishedBuild(FINISHED_BUILDS_KEY, finishedBuild.packagePath);
+    finishedBuild = null;
+  }
   updateBuildButton();
 }
 
