@@ -18,7 +18,7 @@ import { showHintsDialog } from "./hints-dialog.js";
 import { askForText } from "../../extern/guikit/src/text-dialog.js";
 import { progressStatsText, stageLabel, titleStatusForProgress } from "./build-progress.js";
 import { notifyBuildComplete } from "./build-notification.js";
-import { initProjects, saveProjectBesidePackage, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
+import { initProjects, saveProjectBesidePackage, existsInScope, projectPathBeside, moveProjectFile, addRecentProject, getRecentProjects, renderRecentProjects, setWindowTitleStatus } from "../../extern/guikit/src/project.js";
 import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIELDS, PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS } from "./project-form.js";
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
@@ -936,20 +936,10 @@ function cropPixels(id, label) {
   return pixels;
 }
 
-document.getElementById("btn-build")?.addEventListener("click", async () => {
-  let title = document.getElementById("prop-title")?.value?.trim();
-  if (!title) { tauriMessage("Enter a content title in Properties"); return; }
-  // builds are tracked by the Properties title, result.title can differ
-  const buildTitle = title;
-  if (buildsInFlight.buildInFlight(buildTitle)) {
-    tauriMessage(`A build titled "${buildTitle}" is already queued or running. A different title queues another build.`);
-    return;
-  }
-  const anotherBuildInFlight = buildsInFlight.anyBuildInFlight();
-
-  // one composition per CPL tab; each becomes a separate CPL in the IMP
+// one composition per CPL tab, each becomes a separate CPL in the IMP
+function buildCompositions(title) {
   const multi = project.compositions.length > 1;
-  const comps = project.compositions
+  return project.compositions
     .map((c) => {
       const s = c.segments[0];
       if (!s?.picture) return null;
@@ -962,15 +952,33 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       };
     })
     .filter(Boolean);
-  if (!comps.length) { tauriMessage("Import a video asset first"); return; }
+}
 
-  let sourceSettings;
-  try {
-    sourceSettings = readSourceSettings();
-  } catch (e) {
-    tauriMessage(e.message, { title: "Build failed", kind: "error" });
+function currentJobRequest() {
+  const title = document.getElementById("prop-title")?.value?.trim() || "";
+  return {
+    title,
+    outputDir: document.getElementById("prop-output")?.value || "",
+    compositions: buildCompositions(title),
+    sourceSettings: readSourceSettings(),
+    framerate: document.getElementById("prop-framerate")?.value || "24/1",
+    bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
+    qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
+  };
+}
+
+document.getElementById("btn-build")?.addEventListener("click", async () => {
+  let title = document.getElementById("prop-title")?.value?.trim();
+  if (!title) { tauriMessage("Enter a content title in Properties"); return; }
+  // builds are tracked by the Properties title, result.title can differ
+  const buildTitle = title;
+  if (buildsInFlight.buildInFlight(buildTitle)) {
+    tauriMessage(`A build titled "${buildTitle}" is already queued or running. A different title queues another build.`);
     return;
   }
+  const anotherBuildInFlight = buildsInFlight.anyBuildInFlight();
+
+  if (!buildCompositions(title).length) { tauriMessage("Import a video asset first"); return; }
 
   // re-derive an auto-filled output folder so it follows the current title
   const outputEl = document.getElementById("prop-output");
@@ -982,6 +990,15 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       outputEl.dataset.autoFilled = "1";
     }
   }
+
+  let request;
+  try {
+    request = currentJobRequest();
+  } catch (e) {
+    tauriMessage(e.message, { title: "Build failed", kind: "error" });
+    return;
+  }
+  const requestText = JSON.stringify(request);
 
   const progressSection = document.getElementById("progress-section");
   const progressBar = document.getElementById("progress-bar");
@@ -1011,6 +1028,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
       notifyBuildComplete(true, title);
       if (projectRecordPath) addRecentProject(projectRecordPath, title);
       showPostBuildActions(output);
+      finishedBuild = { requestText, packagePath: output };
       endBuild(buildTitle);
       unlisten();
     } else if (p.stage === "cancelled") {
@@ -1031,12 +1049,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
 
   try {
     beginBuild(buildTitle);
-    const submit = (hintsAccepted) => invoke("submit_job", {
-      title, outputDir: output, compositions: comps, sourceSettings, hintsAccepted,
-      framerate: document.getElementById("prop-framerate")?.value || "24/1",
-      bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
-      qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
-    });
+    const submit = (hintsAccepted) => invoke("submit_job", { ...request, hintsAccepted });
     let result = await submit(!getPrefs().showHintsBeforeBuild);
     if (result.jobId === null) {
       if (!await askToBuildAnyway(result.hints)) {
@@ -1569,14 +1582,45 @@ function endBuild(title) {
   refreshDiskSpace();
 }
 
-function updateToolbarState() {
+const BUILD_BUTTON_TEXT = "Build IMP";
+const BUILT_BUTTON_TEXT = "IMP Built";
+const FINISHED_BUILD_CHECK_MILLISECONDS = 1000;
+let finishedBuild = null;
+
+function matchesFinishedBuild() {
+  if (!finishedBuild) return false;
+  try {
+    return JSON.stringify(currentJobRequest()) === finishedBuild.requestText;
+  } catch {
+    // a field the build would refuse cannot match the build that ran
+    return false;
+  }
+}
+
+function updateBuildButton() {
+  const buildBtn = document.getElementById("btn-build");
+  if (!buildBtn) return;
   const hasVideo = project.segments.some(s => s.picture);
   const title = document.getElementById("prop-title")?.value?.trim();
+  const alreadyBuilt = matchesFinishedBuild();
+  buildBtn.disabled = !(hasVideo && title) || buildsInFlight.buildInFlight(title) || alreadyBuilt;
+  buildBtn.textContent = alreadyBuilt ? BUILT_BUTTON_TEXT : BUILD_BUTTON_TEXT;
+}
+
+// polled, since the form changes through many paths
+async function refreshFinishedBuild() {
+  if (finishedBuild && !(await existsInScope(finishedBuild.packagePath))) finishedBuild = null;
+  updateBuildButton();
+}
+
+setInterval(refreshFinishedBuild, FINISHED_BUILD_CHECK_MILLISECONDS);
+
+function updateToolbarState() {
+  updateBuildButton();
+  const title = document.getElementById("prop-title")?.value?.trim();
   const hasTitle = !!title;
-  const buildBtn = document.getElementById("btn-build");
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
-  if (buildBtn) buildBtn.disabled = !(hasVideo && hasTitle) || buildsInFlight.buildInFlight(title);
   if (previewBtn) previewBtn.disabled = !previewButtonEnabled(previewTarget(previewTargetInput()), previewShownPath);
   if (supBtn) supBtn.disabled = !hasTitle;
 }
