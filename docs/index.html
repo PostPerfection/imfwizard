@@ -402,7 +402,7 @@
         <div class="download-card">
             <div class="os-icon">🍎</div>
             <h3>macOS</h3>
-            <p class="files"><code>.dmg</code>, Apple Silicon</p>
+            <p class="files"><code>.dmg</code>, Apple Silicon, not yet signed or notarised</p>
             <a href="https://github.com/PostPerfection/imfwizard/releases/latest" class="btn btn-primary">Download latest</a>
         </div>
         <div class="download-card">
@@ -413,7 +413,7 @@
         </div>
     </div>
 
-    <p class="download-note"><strong>Free and open source</strong> under the AGPL. No licence key, no seat limits, no subscription.</p>
+    <p class="download-note"><strong>Free and open source</strong> under the AGPL. No licence key, no seat limits, no subscription. Every package carries Grok and the FFmpeg libraries, and the desktop packages also carry libmpv.</p>
 
     <div class="cli-panel">
         <h3>Prefer the command line?</h3>
@@ -430,17 +430,17 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(167,139,250,0.15);">📦</div>
             <h3>Create IMF App 2E packages</h3>
-            <p>Turn a finished master, ProRes file, image sequence, or J2K frames into a standards-compliant IMF App 2E package. Illegal rasters and other refusals fail before the encode, not after an hour of JPEG 2000.</p>
+            <p>Turn a finished master, ProRes file, image sequence, or J2K frames into a standards-compliant IMF App 2E package. Illegal rasters and other refusals fail before the encode, not after an hour of JPEG 2000. The desktop app writes several compositions into one IMP.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">⚡</div>
             <h3>Delivery presets</h3>
-            <p>One choice sets the J2K bitrate cap for Netflix, HBO Max, cinema and broadcast. Check the finished package against a platform's raster, bit depth and audio rules with compliance. Or name a bitrate directly.</p>
+            <p>One choice sets the J2K bitrate cap for Netflix, HBO Max, DCI cinema and broadcast. The Disney+ and archival presets name no cap. Check the finished package against a platform's raster, bit depth and audio rules with compliance. Or name a bitrate directly.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⚙️</div>
             <h3>JPEG 2000 on every core</h3>
-            <p>Encode App 2E picture through Grok on all available CPU cores. The desktop app writes its job log beside the package folder. Grok's GPU accelerator plugin is a separate commercial product and is not in the released builds.</p>
+            <p>Encode App 2E picture through Grok on all available CPU cores, or set a thread count. Video sources decode inside the app through the FFmpeg libraries. The desktop app writes its job log beside the package folder. Grok's GPU accelerator plugin is a separate commercial product and is not in the released builds.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(34,211,238,0.15);">🧩</div>
@@ -450,7 +450,7 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">🎬</div>
             <h3>IMF to DCP</h3>
-            <p>Convert a single-composition IMP for theatrical delivery. Existing DCI-profile picture is rewrapped without an encode. App 2E picture is decoded from RGB, converted to cinema X'Y'Z', and re-encoded under a DCI profile.</p>
+            <p>Convert a single-composition IMP for theatrical delivery. Existing DCI-profile picture is rewrapped without an encode. App 2E picture is decoded from Rec.709 RGB, converted to cinema X'Y'Z', and re-encoded under a DCI profile. PQ, P3-D65 and BT.2020 picture is refused by name.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">✅</div>
@@ -467,6 +467,11 @@
             <h3>ProRes delivery master</h3>
             <p>Export an IMP's picture and sound as a ProRes 4444 movie, fitted into a named 2K or 4K container without changing the package.</p>
         </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🧵</div>
+            <h3>Conform a timeline</h3>
+            <p>Build an IMP whose CPL follows a CMX 3600 EDL or a Final Cut Pro 7 XML timeline, one resource per event, trimmed to the event's source range. Without an output folder it prints what the timeline says. Command line only.</p>
+        </div>
     </div>
 
     <h3 class="group-title">Subtitles and accessibility</h3>
@@ -474,12 +479,31 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">📝</div>
             <h3>TTML and IMSC subtitles</h3>
-            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS and MKS keep their styling and placement, FCPXML keeps italic, bold, underline and colour. Burn the same cues into the picture as it encodes when you need a burnt master.</p>
+            <p>Package TTML and IMSC timed text into your IMP, or convert SRT, SCC, ASS/SSA, FCPXML, and MKS captions to IMSC/TTML on the way in. ASS keeps its styling and alignment, and so does an ASS stream inside MKS. FCPXML keeps italic, bold, underline and colour. Burn SRT, ASS/SSA, SCC, FCPXML or MKS cues into the picture as it encodes when you need a burnt master.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,164,175,0.15);">🗣️</div>
             <h3>Audio description tracks</h3>
             <p>Mix an AD narration track against the main mix with automatic ducking, or package an AD or HI track with the MCA labels streamers expect. Map and mix source channels into named lanes before they are labelled.</p>
+        </div>
+    </div>
+
+    <h3 class="group-title">Work in the desktop app</h3>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(167,139,250,0.15);">🗂️</div>
+            <h3>Projects</h3>
+            <p>Save the whole Properties panel as a <code>.imfwizard</code> project and open it again from the Project menu, which lists recent projects. A source that moved is looked for beside the project file. Unsaved changes come back as a draft on the next launch.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(74,222,128,0.15);">⏭️</div>
+            <h3>Build queue</h3>
+            <p>Start a second build while one runs and it waits behind it. Queued builds move with Run next, Earlier and Later, and the queue survives a restart. Build IMP stays off once the IMP is built, until a change to the project would give a different one.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(34,211,238,0.15);">⌨️</div>
+            <h3>Keyboard shortcuts</h3>
+            <p>The main buttons in each view have an Alt+letter, underlined while Alt is held and named in the tooltip. Ctrl+K lists every shortcut, and clicking one rebinds it.</p>
         </div>
     </div>
 
@@ -495,6 +519,16 @@
             <h3>Play, inspect, queue</h3>
             <p>A finished build offers Play, Inspect (the Validate view, already running), and Reveal. Queue packages from Recent Projects or a finished build and they play one after another. Retitle a written IMP without re-wrapping essence.</p>
         </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(251,191,36,0.15);">🖥️</div>
+            <h3>Full screen and player controls</h3>
+            <p>Fill the screen with the picture. The controls hide three seconds after the pointer last moved during playback. The player controls panel sets picture, sound and subtitle options and has a level meter, one bar per source channel named by its MCA label.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(251,113,133,0.15);">🔲</div>
+            <h3>QC overlays</h3>
+            <p>Draw 90% and 95% safe areas, 1.85, 1.90 and 2.39 aspect masks, a centre cross, a thirds grid and the crop outline over the picture. Decode at full, half or quarter size, and turn subtitles on or off.</p>
+        </div>
     </div>
 
     <h3 class="group-title">HDR and immersive audio</h3>
@@ -507,22 +541,22 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🌈</div>
             <h3>HDR/WCG essence metadata</h3>
-            <p><code>create --hdr</code> takes pq-bt2020, pq-p3d65, or hlg-bt2020, the App 2E COLOR.6, COLOR.7, and COLOR.8 combinations, and <code>--mastering-display</code> adds an ST 2086 mastering display. The transfer, colour, and mastering values are written into the MXF and mirrored in the CPL. A master whose own transfer tag disagrees with the preset is refused, so is an HDR master given without a preset, and a Dolby Vision 8.1 RPU fills the MaxCLL and MaxFALL you did not pass.</p>
+            <p><code>create --hdr</code> takes pq-bt2020, pq-p3d65, or hlg-bt2020, the App 2E COLOR.6, COLOR.7, and COLOR.8 combinations, and <code>--mastering-display</code> adds an ST 2086 mastering display. The transfer, colour, and mastering values are written into the MXF and mirrored in the CPL. A PQ master under the HLG preset is refused, and the other way round. So is an HDR master given without a preset. A Dolby Vision 8.1 RPU in the master fills the MaxCLL and MaxFALL you did not pass.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🎥</div>
             <h3>Dolby Vision and HDR10+</h3>
-            <p>Side tools on an HEVC stream, not on the IMP. <code>dv-extract</code> and <code>dv-inject</code> move a Dolby Vision RPU with dovi_tool, <code>dv-convert</code> retargets profile 5 to 8.1 or to a profile 7 MEL, <code>hdr10plus-inject</code> writes HDR10+ metadata from JSON into the stream with hdr10plus_tool, <code>hdr10plus-extract</code> writes it back out to JSON, and <code>hdr10-inject</code> re-encodes through x265 with MaxCLL and MaxFALL.</p>
+            <p>Side tools on an HEVC stream, not on the IMP. <code>dv-extract</code> and <code>dv-inject</code> move a Dolby Vision RPU with dovi_tool, <code>dv-convert</code> retargets an extracted RPU from profile 5 to 8.1, or from 8.1 to a profile 7 MEL, <code>hdr10plus-inject</code> writes HDR10+ metadata from JSON into the stream with hdr10plus_tool, <code>hdr10plus-extract</code> writes it back out to JSON, and <code>hdr10-inject</code> re-encodes through x265 with MaxCLL and MaxFALL.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(253,186,116,0.15);">🎵</div>
             <h3>Dolby Atmos ADM import</h3>
-            <p>Import a Dolby Atmos ADM Broadcast Wave master: its channels are wrapped as multichannel AS-02 PCM and the ADM XML is written beside it, with no conversion to IAB. <code>create --atmos</code> wraps a directory of IA bitstream frame files, one per picture frame, as an ST 2067-201 IAB track in the IMP. The GUI does not offer it yet.</p>
+            <p>Import a Dolby Atmos ADM Broadcast Wave master: its channels are wrapped as multichannel AS-02 PCM and the ADM XML is written beside it, with no conversion to IAB. <code>create --atmos</code> wraps a directory of IA bitstream frame files, one per picture frame, as an ST 2067-201 IAB track in the IMP. The desktop app offers neither.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,191,36,0.15);">📊</div>
             <h3>Loudness measurement</h3>
-            <p>Measure integrated loudness and true peak (EBU R128) so you catch a level problem before the platform's QC does, or adjust a WAV to a target loudness with a clip-safe true-peak guard.</p>
+            <p>Measure integrated loudness and true peak (EBU R128) so you catch a level problem before the platform's QC does, or adjust a WAV to a target loudness. The adjustment is refused when the result would exceed the true-peak ceiling.</p>
         </div>
     </div>
 
@@ -531,17 +565,22 @@
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(129,140,248,0.15);">✅</div>
             <h3>Validation and QC reports</h3>
-            <p>Check package structure, signatures, and XML schemas, run Netflix Photon checks, and export a QC report as text, JSON, or HTML. The report reads the picture essence, including JPEG 2000 forensics and measured bitrate, with an optional complete scan for black and frozen runs.</p>
+            <p>Check package structure, signatures, and XML schemas, run Netflix Photon checks, and export a QC report as text, JSON, or HTML. The report reads the picture essence, including JPEG 2000 forensics and measured bitrate, with an optional complete scan for black and frozen runs. The same runs can be logged during the encode.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(251,113,133,0.15);">🔐</div>
             <h3>Signing</h3>
-            <p>Sign CPL, PKL, and ASSETMAP so recipients can verify the package is authentic and untampered.</p>
+            <p>Sign the CPL, PKL and ASSETMAP with XML-DSig, and check a signature against a trusted certificate with <code>verify-sig</code>.</p>
         </div>
         <div class="feature-card">
             <div class="feature-icon" style="background: rgba(74,222,128,0.15);">📂</div>
             <h3>Watch folders</h3>
             <p>Point it at an incoming folder and every master that lands there is built into its own IMP, with a matching .wav or .ttml beside it joining the build. Each master then moves to done or failed, and a webhook can carry the result on.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon" style="background: rgba(56,189,248,0.15);">🔍</div>
+            <h3>Compare and restore</h3>
+            <p>Score two IMPs, video files or frame folders against each other with PSNR and SSIM, or VMAF with an ffmpeg built with libvmaf. Unwrap an IMP into one J2K codestream per frame and one WAV per sound track.</p>
         </div>
     </div>
 </section>
@@ -587,7 +626,7 @@
 
 <section class="section" id="automation">
     <h2 class="section-title">Automate your delivery pipeline</h2>
-    <p class="section-subtitle">Drive every step from the command line, kick off builds from a watch folder, or wire IMF Wizard into a render farm over its REST API.</p>
+    <p class="section-subtitle">Drive every step from the command line, kick off builds from a watch folder, or wire IMF Wizard into a render farm over its REST API. The REST queue is kept on disk across restarts, and a queued job can be moved ahead of others.</p>
 
     <div class="code-block">
         <code>
@@ -623,12 +662,13 @@
             <div class="step-num">2</div>
             <h4>Build the CLI</h4>
             <p><code>cd imfwizard/rust && cargo build --release</code></p>
+            <p>Needs Grok and the FFmpeg libraries from PostPerfection/ffmpeg-mpv-builds on the pkg-config path. The README lists the steps.</p>
         </div>
         <div class="install-step">
             <div class="step-num">3</div>
             <h4>Run the desktop app</h4>
             <p><code>cd ../gui && pnpm install && ../scripts/setup-tauri-bin.sh && pnpm tauri dev</code></p>
-            <p>The script copies the CLI from step 2 into gui/src-tauri and needs patchelf on Linux.</p>
+            <p>The script copies the CLI from step 2 into gui/src-tauri and downloads the Photon jars. It needs patchelf on Linux.</p>
         </div>
         <div class="install-step">
             <div class="step-num">4</div>
