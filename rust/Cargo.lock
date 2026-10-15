@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "imfwizard-cli"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "asdcplib",
  "assert_cmd",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "imfwizard-core"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "asdcplib",
  "base64 0.22.1",
