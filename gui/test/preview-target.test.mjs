@@ -45,21 +45,27 @@ test('an empty project has nothing to open', () => {
 test('the button is on when the target differs from what the panel shows', () => {
   const target = { kind: PREVIEW_KIND_SOURCE, path: '/assets/first.mov' };
 
-  assert.equal(previewButtonEnabled(target, '/assets/other.mov'), true);
+  assert.equal(previewButtonEnabled(target, '/assets/other.mov', false), true);
 });
 
 test('the button is off when the target is already shown', () => {
   const target = { kind: PREVIEW_KIND_SOURCE, path: '/assets/first.mov' };
 
-  assert.equal(previewButtonEnabled(target, '/assets/first.mov'), false);
+  assert.equal(previewButtonEnabled(target, '/assets/first.mov', false), false);
 });
 
 test('the button comes back on once the panel shows nothing', () => {
   const target = { kind: PREVIEW_KIND_SOURCE, path: '/assets/first.mov' };
 
-  assert.equal(previewButtonEnabled(target, null), true);
+  assert.equal(previewButtonEnabled(target, null, false), true);
+});
+
+test('the button comes back on when playback reaches the end', () => {
+  const target = { kind: PREVIEW_KIND_SOURCE, path: '/assets/first.mov' };
+
+  assert.equal(previewButtonEnabled(target, '/assets/first.mov', true), true);
 });
 
 test('the button is off when there is nothing to open', () => {
-  assert.equal(previewButtonEnabled(null, null), false);
+  assert.equal(previewButtonEnabled(null, null, false), false);
 });

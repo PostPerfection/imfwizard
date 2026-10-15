@@ -10,6 +10,6 @@ export function previewTarget({ selectedPreview, firstPicturePath, openedPackage
   return null;
 }
 
-export function previewButtonEnabled(target, shownPath) {
-  return target !== null && target.path !== shownPath;
+export function previewButtonEnabled(target, shownPath, playbackEnded) {
+  return target !== null && (target.path !== shownPath || playbackEnded);
 }

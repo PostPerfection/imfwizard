@@ -603,6 +603,7 @@ let selectedPreview = null;
 
 // what the preview panel holds
 let previewShownPath = null;
+let previewPlaybackEnded = false;
 
 function selectPreview(kind, path) {
   selectedPreview = { kind, path };
@@ -1599,7 +1600,7 @@ function updateToolbarState() {
   const hasTitle = !!title;
   const previewBtn = document.getElementById("btn-preview");
   const supBtn = document.getElementById("btn-supplement");
-  if (previewBtn) previewBtn.disabled = !previewButtonEnabled(previewTarget(previewTargetInput()), previewShownPath);
+  if (previewBtn) previewBtn.disabled = !previewButtonEnabled(previewTarget(previewTargetInput()), previewShownPath, previewPlaybackEnded);
   if (supBtn) supBtn.disabled = !hasTitle;
 }
 
@@ -1717,7 +1718,7 @@ initProjects({
 updateStatusStats();
 initPreview();
 preferencesLoaded.then(() => initPlayerControlsPanel({ preferences: getPrefs(), save: (controls) => savePrefs({ ...getPrefs(), ...controls }) }));
-watchPreviewShown(path => { previewShownPath = path; updateToolbarState(); });
+watchPreviewShown((path, ended) => { previewShownPath = path; previewPlaybackEnded = ended; updateToolbarState(); });
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({
