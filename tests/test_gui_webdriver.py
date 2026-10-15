@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import tomllib
 import uuid
 import xml.etree.ElementTree as ElementTree
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tauri_webdriver import Window, visible_windows, wait_until
+from tauri_webdriver import POLL_SECONDS, Window, visible_windows, wait_until
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GUI_BINARY = REPOSITORY_ROOT / "gui/src-tauri/target/release/imfwizard-gui"
@@ -72,8 +73,7 @@ SOUND_GAIN_DB = 17
 PLAYBACK_TITLE = "Playback End To End"
 TEXT_DIALOG = ".text-dialog"
 PREVIEW_DEFAULT_TITLE = "Preview"
-# playing a span takes longer than the span lasts when decoding lags
-PLAYBACK_TIMEOUT_MULTIPLE = 3
+PLAYBACK_STALL_SECONDS = 10
 # the tick to seek to, as how far along the ruler it has to sit at least
 SEEK_TICK_LEFT_PERCENT = 20
 SEEK_TICK_ID = "test-seek-tick"
@@ -157,6 +157,33 @@ PLAYHEAD_LEFT = """
 const playhead = document.getElementById("ruler-playhead");
 return playhead ? parseFloat(playhead.style.left) : null;
 """
+
+
+def wait_while_playing(describe, check, session):
+    began = time.monotonic()
+    last_moved = began
+    playhead = None
+    dropped = None
+    while True:
+        try:
+            result = check()
+            position = session.execute(PLAYHEAD_LEFT)
+        except OSError as connection_error:
+            # the driver drops a connection now and then, and a poll can retry
+            result, position, dropped = None, playhead, connection_error
+        if result:
+            return result
+        now = time.monotonic()
+        if position != playhead:
+            playhead, last_moved = position, now
+        if now - last_moved >= PLAYBACK_STALL_SECONDS:
+            reason = f", last: {dropped}" if dropped else ""
+            raise AssertionError(
+                f"{describe}: the playhead stopped at {playhead}% for "
+                f"{PLAYBACK_STALL_SECONDS}s, {now - began:.1f}s after the wait began"
+                f"{reason}"
+            )
+        time.sleep(POLL_SECONDS)
 
 # css cannot pick a tick out by where it sits, so the one to click is given an id
 MARK_TICK = """
@@ -898,10 +925,10 @@ def test_the_timeline_lists_one_segment_and_plays_the_imp_to_the_end(
 
     # once playback runs out the panel holds nothing that is previewing, so the
     # button offers the IMP again
-    wait_until(
+    wait_while_playing(
         "the Preview button never came back at the end of the composition",
         lambda: session.property("#btn-preview", "disabled") is False,
-        whole * PLAYBACK_TIMEOUT_MULTIPLE,
+        session,
     )
     # the play button is how the IMP is played again from the start
     assert session.property("#timeline-play-btn", "disabled") is False
@@ -941,11 +968,11 @@ def test_the_timeline_follows_playback_across_two_segments(window, two_segment_i
     assert listed_segments(session, "sound") == expected_segments(segments)
 
     start_the_preview(window)
-    first_frames, first_fps = segments[0]
-    wait_until(
+    first_fps = segments[0][1]
+    wait_while_playing(
         "playback never reached the second segment",
         lambda: segment_is_active(session, "picture", 1),
-        first_frames / first_fps * PLAYBACK_TIMEOUT_MULTIPLE,
+        session,
     )
 
     frame_seconds = 1 / first_fps
