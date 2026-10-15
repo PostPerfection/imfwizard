@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **Signing a packaged CPL in place keeps its PKL correct**: `sign` without an output, or with the input as the output, now rewrites the Hash and Size of the signed document in every PKL in its directory that lists it, and the chunk Length in the ASSETMAP for the document and those PKLs when the ASSETMAP records one. A PKL that is already signed is refused before anything is written, with an error saying to sign the CPL before the PKL. Signing to another path leaves the package untouched.
+
 ## [1.5.1] - 2026-10-13
 
 ### Changed

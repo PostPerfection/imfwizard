@@ -6,7 +6,7 @@
 
 Interoperable Master Format (IMF) package creator, CLI tool and desktop GUI. Written in Rust.
 
-Version 1.4.0 writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
+IMF Wizard writes complete CPL, PKL, and ASSETMAP references, uses base64 package hashes, identifies App 2E, and rejects incompatible picture essence before packaging.
 
 ## Overview
 
@@ -144,7 +144,7 @@ Download from the [GitHub Releases](https://github.com/PostPerfection/imfwizard/
 
 The CLI binary carries everything but the Grok JPEG 2000 codec, which it links dynamically. Every archive ships that library: `grokj2k.dll` beside the exe in the Windows zip, `libgrokj2k` in `lib/` beside the binary in the Linux and macOS tarballs, where the binary's rpath finds it. Extract and run, no loader path to set.
 
-The desktop packages carry libgrokj2k too, in `/usr/lib/imfwizard`. The package manager pulls in the rest: libmpv for the preview player, ffmpeg for video import, xmlsec1 and xmllint for verification, curl for webhook notifications.
+The desktop packages carry libgrokj2k, libmpv and the FFmpeg libraries too, in `/usr/lib/imfwizard`. The package manager pulls in the rest: ffmpeg for video import, xmlsec1 and xmllint for verification, curl for webhook notifications.
 
 ```bash
 sudo apt install ./IMF.Wizard_*_amd64.deb     # Debian, Ubuntu
@@ -153,7 +153,7 @@ sudo dnf install ./IMF.Wizard-*.x86_64.rpm    # Fedora
 
 On Fedora, enable [RPM Fusion](https://rpmfusion.org/Configuration) first: ffmpeg comes from there. `dv-extract` and `dv-inject` need `dovi_tool` on the PATH, and `hdr10plus-extract` needs `hdr10plus_tool`, from their GitHub releases listed under runtime dependencies below.
 
-The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint from the PATH. For the `.dmg`, install libmpv with `brew install mpv`.
+The `.AppImage` carries libmpv as well, and runs ffmpeg, xmlsec1 and xmllint from the PATH. The `.dmg` and the `.msi` carry libmpv too.
 
 ### Install from source
 
@@ -162,7 +162,7 @@ Every build, the CLI included, links the FFmpeg 8.1.3 LGPL libraries, and the de
 Every build needs the [Grok](https://grok.rocks/) JPEG 2000 codec, since the picture encoder calls it in-process. Build and install it once, then put it on the pkg-config and loader paths:
 
 ```bash
-git clone --recurse-submodules --branch v20.4.15 https://github.com/GrokImageCompression/grok.git
+git clone --recurse-submodules --branch v20.4.16 https://github.com/GrokImageCompression/grok.git
 cmake -S grok -B grok/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/bin/grok"
 cmake --build grok/build --parallel
 cmake --install grok/build
@@ -239,7 +239,7 @@ cargo build --release
 | `ascp` | Aspera FASP high-speed transfer | [IBM Aspera](https://www.ibm.com/aspera) |
 | AWS CLI | S3 upload | [docs.aws.amazon.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 
-The desktop app needs libmpv: the .deb and .rpm pull it in, the AppImage carries it, on macOS run `brew install mpv`. It plays sources that are not JPEG 2000.
+The desktop app plays sources that are not JPEG 2000 through libmpv. Every desktop installer carries it, and a source build links the one in the ffmpeg-mpv archive.
 
 The desktop installers carry Photon 5.0.1 and its dependencies, the unmodified jars `scripts/fetch_photon.sh` downloads from Maven Central. The app runs Photon in the Validate view and after a build when a JRE is installed. Their licences:
 
@@ -303,7 +303,7 @@ The desktop GPU setting applies to encode and preview decode. Its job log, writt
 ./scripts/build-fedora-rpm.sh /path/to/grok/install /path/to/ffmpeg-mpv-linux-x86_64
 ```
 
-The RPM is written under `gui/src-tauri/target/release/bundle/rpm`. The plugin is built for one CUDA compute capability, and the file name carries it in the release field, for example `IMF-Wizard-1.4.0-1.sm75.x86_64.rpm` for a 2080 Ti. Remove an installed test build with `sudo dnf remove imf-wizard`.
+The RPM is written under `gui/src-tauri/target/release/bundle/rpm`. The plugin is built for one CUDA compute capability, and the file name carries it in the release field, for example `IMF-Wizard-<version>-1.sm75.x86_64.rpm` for a 2080 Ti. Remove an installed test build with `sudo dnf remove imf-wizard`.
 
 That rpm needs two more things on the target machine: the RPM Fusion NVIDIA driver, and a Grok licence entered under Settings. The CUDA runtime is linked into the plugin, so the CUDA toolkit and the NVIDIA Container Toolkit are not needed:
 
@@ -319,7 +319,7 @@ sudo reboot
 ./scripts/build-ubuntu-deb.sh /path/to/grok/source 86
 ```
 
-The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_1.4.0-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
+The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example `IMF-Wizard_<version>-sm86_amd64.deb` for an RTX 30 series card, and the script ends by installing it in a plain `ubuntu:24.04` container. Build caches stay in `~/.cache/postperfection/ubuntu24`. Like the rpm, the target machine needs the NVIDIA driver and a Grok licence entered under Settings.
 
 **GPU encoding on macOS.** A dmg with the Metal plugin is built on a Mac from a local Grok installation that carries it:
 
@@ -327,7 +327,7 @@ The deb is written under `gui/src-tauri/target/release/bundle/deb`, for example 
 ./scripts/build-macos-dmg.sh /path/to/grok/install /path/to/ffmpeg-mpv-macos-arm64
 ```
 
-The dmg is written under `gui/src-tauri/target/release/bundle/dmg`, and its name carries `metal`, for example `IMF-Wizard-1.4.0-metal_aarch64.dmg`. Enter a Grok licence under Settings to encode on the GPU.
+The dmg is written under `gui/src-tauri/target/release/bundle/dmg`, and its name carries `metal`, for example `IMF-Wizard-<version>-metal_aarch64.dmg`. Enter a Grok licence under Settings to encode on the GPU.
 
 ## Usage
 

@@ -278,3 +278,107 @@ fn a_signature_fails_against_another_signers_certificate() {
         xmlsec_tool::report(&documents.pkl, &rejected)
     );
 }
+
+// the <Asset> block that holds one id
+fn pkl_asset<'a>(pkl: &'a str, id: &str) -> &'a str {
+    let at = pkl.find(&format!("<Id>urn:uuid:{id}</Id>")).unwrap();
+    let start = pkl[..at].rfind("<Asset>").unwrap();
+    let end = at + pkl[at..].find("</Asset>").unwrap();
+    &pkl[start..end]
+}
+
+fn element<'a>(xml: &'a str, name: &str) -> &'a str {
+    let open = format!("<{name}>");
+    let start = xml.find(&open).unwrap() + open.len();
+    &xml[start..start + xml[start..].find('<').unwrap()]
+}
+
+fn base64_sha1(path: &Path) -> String {
+    use base64::Engine;
+    use sha1::Digest;
+    base64::engine::general_purpose::STANDARD
+        .encode(sha1::Sha1::digest(std::fs::read(path).unwrap()))
+}
+
+#[test]
+fn signing_a_packaged_cpl_in_place_updates_its_pkl_hash_and_size() {
+    let directory = tempfile::tempdir().unwrap();
+    let documents = write_imp(&directory.path().join("imp"));
+    let signer = signer_files(&directory.path().join("certificates"));
+    sign_in_place(&documents.cpl, &signer);
+
+    let pkl = std::fs::read_to_string(&documents.pkl).unwrap();
+    let asset = pkl_asset(&pkl, CPL_ID);
+    assert_eq!(element(asset, "Hash"), base64_sha1(&documents.cpl));
+    assert_eq!(
+        element(asset, "Size"),
+        std::fs::metadata(&documents.cpl).unwrap().len().to_string()
+    );
+}
+
+#[test]
+fn signing_a_packaged_cpl_in_place_updates_the_assetmap_chunk_lengths() {
+    let directory = tempfile::tempdir().unwrap();
+    let documents = write_imp(&directory.path().join("imp"));
+    let signer = signer_files(&directory.path().join("certificates"));
+    let assetmap = std::fs::read_to_string(&documents.assetmap).unwrap();
+    let with_lengths = assetmap.replace("</Path>", "</Path><Length>1</Length>");
+    std::fs::write(&documents.assetmap, &with_lengths).unwrap();
+
+    sign_in_place(&documents.cpl, &signer);
+
+    let assetmap = std::fs::read_to_string(&documents.assetmap).unwrap();
+    for (id, file) in [(CPL_ID, &documents.cpl), (PKL_ID, &documents.pkl)] {
+        assert_eq!(
+            element(pkl_asset(&assetmap, id), "Length"),
+            std::fs::metadata(file).unwrap().len().to_string(),
+            "the ASSETMAP Length of {}",
+            file.display()
+        );
+    }
+}
+
+#[test]
+fn signing_a_cpl_after_its_pkl_is_refused_before_anything_is_written() {
+    let directory = tempfile::tempdir().unwrap();
+    let documents = write_imp(&directory.path().join("imp"));
+    let signer = signer_files(&directory.path().join("certificates"));
+    sign_in_place(&documents.pkl, &signer);
+    let cpl_before = std::fs::read(&documents.cpl).unwrap();
+    let pkl_before = std::fs::read(&documents.pkl).unwrap();
+
+    let error = sign_document(
+        &documents.cpl,
+        &documents.cpl,
+        &signer.certificate,
+        &signer.private_key,
+        &signer.chain,
+    )
+    .expect_err("signing a CPL under a signed PKL must be refused");
+
+    assert!(
+        error.contains("sign the CPL before the PKL"),
+        "got: {error}"
+    );
+    assert_eq!(std::fs::read(&documents.cpl).unwrap(), cpl_before);
+    assert_eq!(std::fs::read(&documents.pkl).unwrap(), pkl_before);
+}
+
+#[test]
+fn signing_a_cpl_to_another_path_leaves_the_package_alone() {
+    let directory = tempfile::tempdir().unwrap();
+    let documents = write_imp(&directory.path().join("imp"));
+    let signer = signer_files(&directory.path().join("certificates"));
+    let pkl_before = std::fs::read(&documents.pkl).unwrap();
+
+    sign_document(
+        &documents.cpl,
+        &directory.path().join("signed_cpl.xml"),
+        &signer.certificate,
+        &signer.private_key,
+        &signer.chain,
+    )
+    .unwrap();
+
+    assert_eq!(std::fs::read(&documents.pkl).unwrap(), pkl_before);
+}

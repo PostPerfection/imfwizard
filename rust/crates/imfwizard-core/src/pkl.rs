@@ -46,6 +46,64 @@ pub fn write_pkl(
     std::fs::write(path, pkl.to_xml())
 }
 
+// the Hash and Size the PKL carries for one asset, taken off the file again
+pub(crate) fn patch_pkl_asset(pkl: &str, asset_id: &str, file: &Path) -> Result<String, String> {
+    let hash = postkit::hash::hash_file(file, postkit::hash::HashAlgorithm::Sha1)
+        .map_err(|error| format!("cannot hash {}: {error}", file.display()))?
+        .base64;
+    let size = file_size(file)?.to_string();
+    rewrite_asset(pkl, asset_id, |block| {
+        replace_element(&replace_element(block, "Hash", &hash), "Size", &size)
+    })
+    .ok_or_else(|| format!("the packing list lists no asset {asset_id}"))
+}
+
+pub(crate) fn file_size(file: &Path) -> Result<u64, String> {
+    Ok(std::fs::metadata(file)
+        .map_err(|error| format!("cannot stat {}: {error}", file.display()))?
+        .len())
+}
+
+// every <Asset> block that names `asset_id` passed through `edit`, None when no block does
+pub(crate) fn rewrite_asset(
+    xml: &str,
+    asset_id: &str,
+    edit: impl Fn(&str) -> String,
+) -> Option<String> {
+    const ASSET: &str = "<Asset>";
+    const ASSET_END: &str = "</Asset>";
+    let asset_id = asset_id.to_ascii_lowercase();
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    let mut rewritten = false;
+    while let Some(start) = rest.find(ASSET) {
+        let end = rest[start..]
+            .find(ASSET_END)
+            .map_or(rest.len(), |at| start + at + ASSET_END.len());
+        out.push_str(&rest[..start]);
+        let block = &rest[start..end];
+        if block.to_ascii_lowercase().contains(&asset_id) {
+            out.push_str(&edit(block));
+            rewritten = true;
+        } else {
+            out.push_str(block);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    rewritten.then_some(out)
+}
+
+pub(crate) fn replace_element(xml: &str, element: &str, value: &str) -> String {
+    let (open, close) = (format!("<{element}>"), format!("</{element}>"));
+    match (xml.find(&open), xml.find(&close)) {
+        (Some(start), Some(end)) if start < end => {
+            format!("{}{open}{value}{}", &xml[..start], &xml[end..])
+        }
+        _ => xml.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

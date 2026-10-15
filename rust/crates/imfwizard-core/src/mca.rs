@@ -286,7 +286,7 @@ fn refresh_package(mxf: &Path) -> Result<Vec<PathBuf>, String> {
 
     let mut pkl_xml = read(&pkl)?;
     for (asset, file) in &changed {
-        pkl_xml = patch_pkl_asset(&pkl_xml, asset, file)?;
+        pkl_xml = crate::pkl::patch_pkl_asset(&pkl_xml, asset, file)?;
     }
     write(&pkl, &pkl_xml)?;
     rewritten.push(pkl);
@@ -384,55 +384,6 @@ fn sound_descriptor_regxml(mxf: &Path) -> Result<String, String> {
         &descriptor,
         &labels,
     ))
-}
-
-// the Hash and Size the PKL carries for one asset, taken off the file again
-fn patch_pkl_asset(pkl: &str, asset_id: &str, file: &Path) -> Result<String, String> {
-    const ASSET: &str = "<Asset>";
-    const ASSET_END: &str = "</Asset>";
-    let hash = postkit::hash::hash_file(file, postkit::hash::HashAlgorithm::Sha1)
-        .map_err(|error| format!("cannot hash {}: {error}", file.display()))?
-        .base64;
-    let size = std::fs::metadata(file)
-        .map_err(|error| format!("cannot stat {}: {error}", file.display()))?
-        .len();
-
-    let mut out = String::with_capacity(pkl.len());
-    let mut rest = pkl;
-    let mut patched = false;
-    while let Some(start) = rest.find(ASSET) {
-        let end = rest[start..]
-            .find(ASSET_END)
-            .map_or(rest.len(), |at| start + at + ASSET_END.len());
-        out.push_str(&rest[..start]);
-        let block = &rest[start..end];
-        if block.contains(asset_id) {
-            out.push_str(&replace_element(
-                &replace_element(block, "Hash", &hash),
-                "Size",
-                &size.to_string(),
-            ));
-            patched = true;
-        } else {
-            out.push_str(block);
-        }
-        rest = &rest[end..];
-    }
-    out.push_str(rest);
-    if !patched {
-        return Err(format!("the packing list lists no asset {asset_id}"));
-    }
-    Ok(out)
-}
-
-fn replace_element(xml: &str, element: &str, value: &str) -> String {
-    let (open, close) = (format!("<{element}>"), format!("</{element}>"));
-    match (xml.find(&open), xml.find(&close)) {
-        (Some(start), Some(end)) if start < end => {
-            format!("{}{open}{value}{}", &xml[..start], &xml[end..])
-        }
-        _ => xml.to_string(),
-    }
 }
 
 fn between(text: &str, open: &str, close: &str) -> Option<String> {
