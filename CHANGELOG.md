@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- **The properties sit beside the assets**: Properties is on the right of the project view, with a drag handle between the two for its width, remembered across restarts. In the project view the preview docks at the top of the left column above the assets, and in other views it goes back to the strip above the transport.
+- **The preview height is adjustable**: a drag handle on the preview's edge changes the picture height, remembered across restarts. The handle is on the top edge in the strip and the bottom edge beside the properties.
+- **Deep colour preview on macOS and Windows**: the preview draws a frame at 10 bits or more when the display framebuffer carries that depth. Linux stays 8 bit, its GL surface has no deeper mode.
+- **IMSC subtitles in the preview**: the player shows a composition's IMSC text and image subtitles from its timed text track files, placed on the composition clock.
+
 ## [1.5.2] - 2026-10-15
 
 ### Fixed

@@ -25,10 +25,12 @@ import { serializeForm, restoreFormState, audioMapCells, OUTPUT_FIELDS, TEXT_FIE
 import { loadComponentVersions } from "../../extern/guikit/src/component-versions.js";
 import { documentsOrHomeDir } from "../../extern/guikit/src/folders.js";
 import { initGpuSettings, fillGpuSettings, gpuSettingsFromForm, uncheckGpu, applyGpuSetting } from "../../extern/guikit/src/gpu-settings.js";
-import { initAssetStripResize } from "../../extern/guikit/src/asset-strip-resize.js";
+import { initPreviewResize } from "../../extern/guikit/src/preview-resize.js";
+import { initProjectPropertiesLayout, syncPreviewDock } from "../../extern/guikit/src/properties-layout.js";
 import { setDragLabel } from "../../extern/guikit/src/drag-label.js";
 
-initAssetStripResize("imfwizard");
+initPreviewResize("imfwizard");
+initProjectPropertiesLayout("imfwizard");
 
 // === Browse wrapper ===
 const LAST_BROWSE_DIR_KEY = "imfwizard-last-browse-dir";
@@ -81,6 +83,7 @@ function switchView(viewName) {
   const view = document.getElementById(`view-${viewName}`);
   if (view) view.classList.add("active");
   if (viewName === "jobs") { refreshJobs(); startJobsPolling(); } else { stopJobsPolling(); }
+  syncPreviewDock();
 }
 
 const SHORTCUTS_KEY = "imfwizard-shortcuts";
