@@ -28,6 +28,8 @@ pub struct CompositionInput {
     pub title: String,
     #[serde(default)]
     pub content_kind: String,
+    // empty when the composition is a timeline
+    #[serde(default)]
     pub video_path: String,
     #[serde(default)]
     pub audio_path: Option<String>,
@@ -38,6 +40,11 @@ pub struct CompositionInput {
     // settled at submit from the panel's preset and this source's own signalling
     #[serde(default)]
     pub hdr: Option<imfwizard_core::hdr_wcg::HdrWcg>,
+    // leaves out the video's own sound, for a one-clip timeline's clip without sound
+    #[serde(default)]
+    pub silent: bool,
+    #[serde(default)]
+    pub timeline: Option<postkit::timeline::Timeline>,
 }
 
 /// How the Properties panel says to treat the source: where the sound sits
@@ -227,6 +234,18 @@ pub struct JobConfig {
     hints: Vec<String>,
 }
 
+impl JobConfig {
+    // a one-clip timeline the single build can make was turned into its video at submit
+    fn multi_clip_timeline(&self) -> Option<(&CompositionInput, &postkit::timeline::Timeline)> {
+        self.compositions.iter().find_map(|composition| {
+            composition
+                .timeline
+                .as_ref()
+                .map(|timeline| (composition, timeline))
+        })
+    }
+}
+
 impl postkit::job_queue::QueueJob for JobConfig {
     fn id(&self) -> u64 {
         self.id
@@ -281,6 +300,12 @@ fn plan_compositions(
 ) -> Result<Vec<String>, String> {
     let mut hints: Vec<String> = Vec::new();
     for composition in compositions {
+        if composition.video_path.is_empty() {
+            return Err(format!(
+                "{} has no video: pick one or send a timeline",
+                composition.title
+            ));
+        }
         let picture = PathBuf::from(&composition.video_path);
         if shared_plan.audio_map.is_some() && composition.audio_path.is_none() {
             return Err(format!(
@@ -327,12 +352,246 @@ fn plan_compositions(
     Ok(hints)
 }
 
+const TRIM_START_FIELD: &str = "Trim from start";
+const TRIM_END_FIELD: &str = "Trim from end";
+const STILL_LENGTH_FIELD: &str = "Still length";
+const BURN_SUBTITLE_FIELD: &str = "Burn subtitles into the picture";
+const AUDIO_DELAY_FIELD: &str = "Audio delay";
+const AUDIO_MAP_FIELD: &str = "Audio channel map";
+const CLIPS_CARRY_THEIR_LENGTH: &str = "each clip's in and out points set its length";
+const SOUND_COMES_FROM_THE_TIMELINE: &str = "the sound comes from the timeline's clips";
+const SUBTITLES_COME_FROM_THE_TIMELINE: &str = "the subtitles come from the timeline";
+
+fn filled(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|text| !text.trim().is_empty())
+}
+
+enum TimelineRoute {
+    SingleClip {
+        fps: postkit::encode::FrameRate,
+        trim_start_frames: u64,
+        trim_end_frames: u64,
+    },
+    MultiClip {
+        fps: postkit::encode::FrameRate,
+    },
+}
+
+impl TimelineRoute {
+    fn fps(&self) -> postkit::encode::FrameRate {
+        match self {
+            TimelineRoute::SingleClip { fps, .. } | TimelineRoute::MultiClip { fps } => *fps,
+        }
+    }
+}
+
+// a one-clip timeline the single build can make becomes that build's composition
+fn timeline_route(
+    compositions: &mut [CompositionInput],
+    settings: &SourceSettings,
+) -> Result<Option<TimelineRoute>, String> {
+    let [composition] = compositions else {
+        return match compositions.iter().find(|c| c.timeline.is_some()) {
+            // the job's frame rate and trims are shared by every composition
+            Some(composition) => Err(format!(
+                "{} is a timeline, and a timeline is built as the only composition: build the \
+                 other compositions separately",
+                composition.title
+            )),
+            None => Ok(None),
+        };
+    };
+    let Some(timeline) = composition.timeline.take() else {
+        return Ok(None);
+    };
+    if !composition.video_path.is_empty() {
+        return Err(format!(
+            "{} names both a video and a timeline: send one",
+            composition.title
+        ));
+    }
+    if timeline.version != postkit::timeline::TIMELINE_FORMAT_VERSION {
+        return Err(format!(
+            "The timeline is version {}, and this build reads version {}",
+            timeline.version,
+            postkit::timeline::TIMELINE_FORMAT_VERSION
+        ));
+    }
+    let beside_timeline = [
+        (
+            "A sound file",
+            composition.audio_path.is_some(),
+            SOUND_COMES_FROM_THE_TIMELINE,
+        ),
+        (
+            "A subtitle file",
+            !composition.subtitles.is_empty(),
+            SUBTITLES_COME_FROM_THE_TIMELINE,
+        ),
+        (
+            TRIM_START_FIELD,
+            filled(&settings.trim_start),
+            CLIPS_CARRY_THEIR_LENGTH,
+        ),
+        (
+            TRIM_END_FIELD,
+            filled(&settings.trim_end),
+            CLIPS_CARRY_THEIR_LENGTH,
+        ),
+        (
+            STILL_LENGTH_FIELD,
+            filled(&settings.still_length),
+            CLIPS_CARRY_THEIR_LENGTH,
+        ),
+    ];
+    if let Some((field, _, reason)) = beside_timeline.into_iter().find(|(_, given, _)| *given) {
+        return Err(format!("{field} does not apply to a timeline: {reason}"));
+    }
+
+    let fps = timeline.fps;
+    let single_clip = match postkit::timeline::shape(&timeline)? {
+        postkit::timeline::TimelineShape::SingleClip(build)
+            if imfwizard_core::timeline_imp::takes_the_single_path(&timeline, &build) =>
+        {
+            Some(build)
+        }
+        _ => None,
+    };
+    let Some(build) = single_clip else {
+        let refusals = imfwizard_core::timeline_imp::refuse_with_multi_clip(
+            &imfwizard_core::timeline_imp::MultiClipFlags {
+                burn_subtitle: filled(&settings.burn_subtitle).then_some(BURN_SUBTITLE_FIELD),
+                audio_delay: (settings.audio_delay_ms != 0).then_some(AUDIO_DELAY_FIELD),
+                audio_map: filled(&settings.audio_map).then_some(AUDIO_MAP_FIELD),
+                atmos: None,
+            },
+        );
+        if !refusals.is_empty() {
+            return Err(refusals.join("\n"));
+        }
+        composition.timeline = Some(timeline);
+        return Ok(Some(TimelineRoute::MultiClip { fps }));
+    };
+    composition.video_path = build.picture.to_string_lossy().into_owned();
+    composition.audio_path = build.audio.map(|path| path.to_string_lossy().into_owned());
+    composition.subtitles = build
+        .subtitle
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    composition.silent = build.silent;
+    Ok(Some(TimelineRoute::SingleClip {
+        fps,
+        trim_start_frames: build.trim_start_frames,
+        trim_end_frames: build.trim_end_frames,
+    }))
+}
+
+fn compression_of(job: &JobConfig) -> imfwizard_core::timeline_imp::PictureCompression {
+    imfwizard_core::timeline_imp::PictureCompression {
+        bitrate_mbps: Some(job.bandwidth as f64),
+        quality_psnr: job.quality_psnr,
+        ..Default::default()
+    }
+}
+
+fn timeline_imp_of(
+    job: &JobConfig,
+    composition: &CompositionInput,
+    timeline: &postkit::timeline::Timeline,
+    compression: imfwizard_core::timeline_imp::PictureCompression,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) -> imfwizard_core::timeline_imp::TimelineImp {
+    imfwizard_core::timeline_imp::TimelineImp {
+        timeline: timeline.clone(),
+        output_dir: job.output_dir.clone(),
+        title: composition.title.clone(),
+        content_kind: content_kind_or_feature(composition),
+        picture_options: job.picture.clone(),
+        source_colour: job.source_colour.clone(),
+        compression,
+        hdr: composition.hdr.clone(),
+        audio_language: composition.audio_lang.clone(),
+        audio_role: None,
+        timed_text_language: composition.audio_lang.clone(),
+        soundfield: Default::default(),
+        cancel,
+    }
+}
+
+fn content_kind_or_feature(composition: &CompositionInput) -> String {
+    if composition.content_kind.is_empty() {
+        "feature".to_string()
+    } else {
+        composition.content_kind.clone()
+    }
+}
+
+fn picture_file_name(picture: &Path) -> String {
+    picture
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| picture.display().to_string())
+}
+
+fn timeline_hints(build: &imfwizard_core::timeline_imp::TimelineImp) -> Vec<String> {
+    let timeline = &build.timeline;
+    let shared_plan = imfwizard_core::preflight::CreatePlan {
+        audio_language: build.audio_language.clone(),
+        timed_text_language: build.timed_text_language.clone(),
+        fps_num: timeline.fps.numerator,
+        fps_den: timeline.fps.denominator,
+        ..Default::default()
+    };
+    let clip_plans = timeline.clips.iter().enumerate().map(|(index, clip)| {
+        (
+            Some(format!(
+                "clip {} ({})",
+                index + 1,
+                picture_file_name(&clip.picture)
+            )),
+            imfwizard_core::preflight::CreatePlan {
+                audio_files: match &clip.sound {
+                    postkit::timeline::ClipSound::File(path) => vec![path.clone()],
+                    postkit::timeline::ClipSound::Embedded | postkit::timeline::ClipSound::None => {
+                        Vec::new()
+                    }
+                },
+                timed_text_files: clip.subtitle.iter().cloned().collect(),
+                ..shared_plan.clone()
+            },
+        )
+    });
+    let timeline_plan = imfwizard_core::preflight::CreatePlan {
+        audio_files: match &timeline.sound {
+            postkit::timeline::SoundTrack::Override(path) => vec![path.clone()],
+            postkit::timeline::SoundTrack::PerClip => Vec::new(),
+        },
+        timed_text_files: timeline.subtitle.iter().cloned().collect(),
+        ..shared_plan.clone()
+    };
+    let mut raised: Vec<String> = Vec::new();
+    let mut hints = Vec::new();
+    for (clip_label, plan) in clip_plans.chain([(None, timeline_plan)]) {
+        for hint in imfwizard_core::hints::gather_hints(&plan) {
+            // one missing language would otherwise be raised once a clip
+            if raised.contains(&hint.text) {
+                continue;
+            }
+            raised.push(hint.text.clone());
+            hints.push(match &clip_label {
+                Some(label) => format!("{label}: {}", hint.text),
+                None => hint.text,
+            });
+        }
+    }
+    hints
+}
+
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn submit_job(
-    app: AppHandle,
+#[derive(Default)]
+struct SubmitRequest {
     video_path: Option<String>,
     title: String,
     output_dir: String,
@@ -344,25 +603,22 @@ pub async fn submit_job(
     quality_psnr: Option<f64>,
     compositions: Option<Vec<CompositionInput>>,
     source_settings: Option<SourceSettings>,
-    hints_accepted: Option<bool>,
-) -> Result<SubmitResult, String> {
-    let queue = app.state::<JobQueue>();
-    let id = queue.reserve_job_id();
+}
 
-    let (fps_num, fps_den) = match framerate.as_deref() {
-        Some("24000/1001") => (24000, 1001),
-        Some("25/1") => (25, 1),
-        Some("30000/1001") => (30000, 1001),
-        Some("30/1") => (30, 1),
-        Some("48/1") => (48, 1),
-        Some("50/1") => (50, 1),
-        Some("60000/1001") => (60000, 1001),
-        Some("60/1") => (60, 1),
-        Some("100/1") => (100, 1),
-        Some("120000/1001") => (120000, 1001),
-        Some("120/1") => (120, 1),
-        _ => (24, 1),
-    };
+fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
+    let SubmitRequest {
+        video_path,
+        title,
+        output_dir,
+        audio_path,
+        subtitles,
+        framerate,
+        content_kind,
+        bandwidth,
+        quality_psnr,
+        compositions,
+        source_settings,
+    } = request;
 
     // Build/Delivery may pass a compositions array; legacy single-video callers
     // pass video_path and are treated as a one-composition job.
@@ -380,13 +636,34 @@ pub async fn submit_job(
                 audio_lang: None,
                 subtitles: subtitles.unwrap_or_default(),
                 hdr: None,
+                silent: false,
+                timeline: None,
             }]
         }
     };
 
+    let settings = source_settings.unwrap_or_default();
+    let timeline_route = timeline_route(&mut compositions, &settings)?;
+    let (fps_num, fps_den) = match &timeline_route {
+        Some(route) => (route.fps().numerator, route.fps().denominator),
+        None => match framerate.as_deref() {
+            Some("24000/1001") => (24000, 1001),
+            Some("25/1") => (25, 1),
+            Some("30000/1001") => (30000, 1001),
+            Some("30/1") => (30, 1),
+            Some("48/1") => (48, 1),
+            Some("50/1") => (50, 1),
+            Some("60000/1001") => (60000, 1001),
+            Some("60/1") => (60, 1),
+            Some("100/1") => (100, 1),
+            Some("120000/1001") => (120000, 1001),
+            Some("120/1") => (120, 1),
+            _ => (24, 1),
+        },
+    };
+
     // the colour space and the durations decide the encode, so a bad spelling
     // has to fail here rather than partway through it
-    let settings = source_settings.unwrap_or_default();
     let source_colour = imfwizard_core::source_colourspace::to_source_colour(
         match settings.source_colourspace.as_deref() {
             Some(spelling) => imfwizard_core::source_colourspace::parse(spelling)?,
@@ -398,10 +675,21 @@ pub async fn submit_job(
         Some(spec) => imfwizard_core::duration_spec::parse_duration_frames(spec, fps_num, fps_den),
         None => Ok(0),
     };
+    let (trim_start_frames, trim_end_frames) = match &timeline_route {
+        Some(TimelineRoute::SingleClip {
+            trim_start_frames,
+            trim_end_frames,
+            ..
+        }) => (*trim_start_frames, *trim_end_frames),
+        _ => (
+            frames_from_spec(&settings.trim_start)?,
+            frames_from_spec(&settings.trim_end)?,
+        ),
+    };
     let edits = imfwizard_core::source_edits::SourceEdits {
         audio_delay_ms: settings.audio_delay_ms,
-        trim_start_frames: frames_from_spec(&settings.trim_start)?,
-        trim_end_frames: frames_from_spec(&settings.trim_end)?,
+        trim_start_frames,
+        trim_end_frames,
     };
     let still_frames = match settings.still_length.as_deref() {
         Some(spec) => Some(imfwizard_core::duration_spec::parse_duration_frames(
@@ -440,9 +728,88 @@ pub async fn submit_job(
         still_frames,
         ..Default::default()
     };
-    let hints = plan_compositions(&mut compositions, &shared_plan)?;
+    let hints = match &timeline_route {
+        // the clips are checked through the timeline build's own plan below
+        Some(TimelineRoute::MultiClip { .. }) => {
+            for composition in &mut compositions {
+                composition.hdr = shared_plan.hdr.clone();
+            }
+            Vec::new()
+        }
+        _ => plan_compositions(&mut compositions, &shared_plan)?,
+    };
+
+    let mut job = JobConfig {
+        id,
+        title,
+        output_dir: PathBuf::from(output_dir),
+        compositions,
+        fps_num,
+        fps_den,
+        bandwidth: bandwidth.unwrap_or(250),
+        quality_psnr,
+        edits,
+        source_colour,
+        still_frames,
+        burn_subtitle,
+        burn_subtitle_font,
+        burn_style,
+        picture: picture_options,
+        audio_map,
+        hints,
+    };
+    if let Some((composition, timeline)) = job.multi_clip_timeline() {
+        let build = timeline_imp_of(
+            &job,
+            composition,
+            timeline,
+            compression_of(&job),
+            Default::default(),
+        );
+        imfwizard_core::timeline_imp::check_timeline(&build)?;
+        job.hints = timeline_hints(&build);
+    }
+    Ok(job)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn submit_job(
+    app: AppHandle,
+    video_path: Option<String>,
+    title: String,
+    output_dir: String,
+    audio_path: Option<String>,
+    subtitles: Option<Vec<String>>,
+    framerate: Option<String>,
+    content_kind: Option<String>,
+    bandwidth: Option<u32>,
+    quality_psnr: Option<f64>,
+    compositions: Option<Vec<CompositionInput>>,
+    source_settings: Option<SourceSettings>,
+    hints_accepted: Option<bool>,
+) -> Result<SubmitResult, String> {
+    let queue = app.state::<JobQueue>();
+    let id = queue.reserve_job_id();
     let submitted_title = title.clone();
     let submitted_output_dir = output_dir.clone();
+    let job = job_config_of(
+        id,
+        SubmitRequest {
+            video_path,
+            title,
+            output_dir,
+            audio_path,
+            subtitles,
+            framerate,
+            content_kind,
+            bandwidth,
+            quality_psnr,
+            compositions,
+            source_settings,
+        },
+    )?;
+    let hints = job.hints.clone();
 
     // the pref lives in the panel, which says it has taken the hints by sending
     // hintsAccepted rather than by naming the pref here
@@ -457,37 +824,16 @@ pub async fn submit_job(
 
     // packages are folders named by title, so a reused title lands in the old
     // package. refuse now, not after the encode.
-    let output_path = PathBuf::from(&output_dir);
-    if holds_imp(&output_path) {
+    if holds_imp(&job.output_dir) {
         return Err(format!(
-            "Output folder already holds an IMP: {output_dir}. Use a new title or output folder, or delete the old package first."
+            "Output folder already holds an IMP: {submitted_output_dir}. Use a new title or output folder, or delete the old package first."
         ));
     }
-    if queue.is_building_into(&output_path) {
+    if queue.is_building_into(&job.output_dir) {
         return Err(format!(
-            "A build is already running into {output_dir}. Wait for it to finish or cancel it."
+            "A build is already running into {submitted_output_dir}. Wait for it to finish or cancel it."
         ));
     }
-
-    let job = JobConfig {
-        id,
-        title: title.clone(),
-        output_dir: output_path,
-        compositions,
-        fps_num,
-        fps_den,
-        bandwidth: bandwidth.unwrap_or(250),
-        quality_psnr,
-        edits,
-        source_colour,
-        still_frames,
-        burn_subtitle,
-        burn_subtitle_font,
-        burn_style,
-        picture: picture_options,
-        audio_map,
-        hints: hints.clone(),
-    };
 
     queue.submit(job);
 
@@ -987,6 +1333,34 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         ),
     );
 
+    if let Some((composition, timeline)) = job.multi_clip_timeline() {
+        let build = timeline_imp_of(
+            job,
+            composition,
+            timeline,
+            imfwizard_core::timeline_imp::PictureCompression {
+                encode_threads,
+                detect_picture_findings,
+                ..compression_of(job)
+            },
+            cancel,
+        );
+        let total_elapsed = build_timeline_package(&build, &log_file, |progress| {
+            emit_progress(
+                app,
+                job.id,
+                &progress.stage,
+                &progress.message,
+                progress.frame,
+                progress.total_frames,
+                progress.fps,
+                progress.elapsed_secs,
+                progress.frame as f64 * PERCENT_OF_A_WHOLE / progress.total_frames.max(1) as f64,
+            )
+        })?;
+        return verify_built_package(app, job, &log_file, job_started, total_elapsed);
+    }
+
     // submit_job already proved the file parses, so a failure here is a file that
     // changed underneath
     let subtitle_burn = match &job.burn_subtitle {
@@ -1365,11 +1739,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             .collect();
         comps.push(imfwizard_core::imp::Composition {
             title: ci.title.clone(),
-            content_kind: if ci.content_kind.is_empty() {
-                "feature".to_string()
-            } else {
-                ci.content_kind.clone()
-            },
+            content_kind: content_kind_or_feature(ci),
             j2k_dir: source.j2k_dir,
             picture_mxf,
             audio_files,
@@ -1423,6 +1793,47 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         &format_stage_timing("package", package_started.elapsed()),
     );
 
+    verify_built_package(app, job, &log_file, job_started, total_elapsed)
+}
+
+const PERCENT_OF_A_WHOLE: f64 = 100.0;
+
+fn build_timeline_package(
+    build: &imfwizard_core::timeline_imp::TimelineImp,
+    log_file: &Arc<Mutex<std::fs::File>>,
+    on_progress: impl Fn(&postkit::pipeline::PipelineProgress),
+) -> Result<f64, String> {
+    log_to(
+        log_file,
+        &format!(
+            "[ENCODE] Timeline of {} clips, {} frames",
+            build.timeline.clips.len(),
+            build.timeline.total_frames()
+        ),
+    );
+    let build_started = Instant::now();
+    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, on_progress)
+        .inspect_err(|error| log_to(log_file, &format!("[PACKAGE] FAILED: {error}")))?;
+    log_to(
+        log_file,
+        &format!("[PACKAGE] Done, CPL {}", built.cpl_path.display()),
+    );
+    imfwizard_core::intermediates::remove_intermediates(&build.output_dir, &[]);
+    log_to(
+        log_file,
+        &format_stage_timing("timeline build", build_started.elapsed()),
+    );
+    Ok(build_started.elapsed().as_secs_f64())
+}
+
+fn verify_built_package(
+    app: &AppHandle,
+    job: &JobConfig,
+    log_file: &Arc<Mutex<std::fs::File>>,
+    job_started: Instant,
+    total_elapsed: f64,
+) -> Result<String, String> {
+    let output = &job.output_dir;
     emit_progress(
         app,
         job.id,
@@ -1442,16 +1853,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
         bundled_photon_directory(app).as_deref(),
     );
     for line in verification_log(validation.as_ref()) {
-        log_to(&log_file, &line);
+        log_to(log_file, &line);
     }
     if validation.is_some() {
         log_to(
-            &log_file,
+            log_file,
             &format_stage_timing("verify", verify_started.elapsed()),
         );
     }
     log_to(
-        &log_file,
+        log_file,
         &format_stage_timing("total", job_started.elapsed()),
     );
     if let Some(failed) = validation.filter(|found| !found.valid) {
@@ -1463,7 +1874,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     }
 
     log_to(
-        &log_file,
+        log_file,
         &format!("=== Pipeline finished in {total_elapsed:.1}s ==="),
     );
     Ok(format!("IMP created in {total_elapsed:.1}s"))
@@ -1507,7 +1918,7 @@ fn composition_sound_files(
     if let Some(named) = &composition.audio_path {
         return Ok(vec![PathBuf::from(named)]);
     }
-    if !source_is_video {
+    if !source_is_video || composition.silent {
         return Ok(Vec::new());
     }
     log("[AUDIO] No sound file named: extracting the source's own audio");
@@ -1527,9 +1938,11 @@ fn composition_sound_files(
 #[cfg(test)]
 mod tests {
     use super::{
-        composition_sound_files, encode_threads_status, format_encode_breakdown,
-        format_stage_timing, verification_log, verify_package, CompositionInput, SourceSettings,
+        build_timeline_package, composition_sound_files, compression_of, encode_threads_status,
+        format_encode_breakdown, format_stage_timing, job_config_of, timeline_imp_of,
+        verification_log, verify_package, CompositionInput, SourceSettings, SubmitRequest,
     };
+    use postkit::timeline::{Clip, ClipSound, SoundTrack, Timeline, TIMELINE_FORMAT_VERSION};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -1614,6 +2027,8 @@ mod tests {
             audio_lang: None,
             subtitles: Vec::new(),
             hdr: None,
+            silent: false,
+            timeline: None,
         }
     }
 
@@ -1983,5 +2398,255 @@ mod tests {
                 .any(|line| line.starts_with("[VERIFY]   error: ")),
             "the findings are missing from the log: {log:?}"
         );
+    }
+
+    const TIMELINE_SOURCE_FRAMES: u32 = 6;
+    const APP2E_RASTER_SPELLING: &str = "1920x1080";
+    const AUDIO_DELAY_MILLISECONDS: i64 = 40;
+    const UNKNOWN_TIMELINE_VERSION: u32 = TIMELINE_FORMAT_VERSION + 1;
+    // the reel start falls on the cut between the two clips
+    const FIRST_CLIP_FRAMES: u64 = 3;
+
+    fn test_pattern_clip(directory: &Path, name: &str) -> PathBuf {
+        let path = directory.join(format!("{name}.mkv"));
+        run_ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("testsrc=size={CLIP_WIDTH}x{CLIP_HEIGHT}:rate={FPS}"),
+            "-frames:v",
+            &TIMELINE_SOURCE_FRAMES.to_string(),
+            "-c:v",
+            "ffv1",
+            &path.to_string_lossy(),
+        ]);
+        path
+    }
+
+    fn timeline_clip(picture: &Path, in_frame: u64, out_frame: u64) -> Clip {
+        Clip {
+            picture: picture.to_path_buf(),
+            in_frame,
+            out_frame,
+            sound: ClipSound::Embedded,
+            subtitle: None,
+            source_colour: Default::default(),
+            picture_processing: Default::default(),
+        }
+    }
+
+    fn timeline_of(clips: Vec<Clip>) -> Timeline {
+        Timeline {
+            version: TIMELINE_FORMAT_VERSION,
+            fps: postkit::encode::FrameRate::whole(FPS),
+            clips,
+            sound: SoundTrack::PerClip,
+            subtitle: None,
+            reel_starts: Vec::new(),
+        }
+    }
+
+    fn timeline_composition(timeline: Timeline) -> CompositionInput {
+        CompositionInput {
+            timeline: Some(timeline),
+            ..composition(Path::new(""))
+        }
+    }
+
+    fn app2e_settings() -> SourceSettings {
+        SourceSettings {
+            raster: Some(APP2E_RASTER_SPELLING.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn request(
+        directory: &Path,
+        composition: CompositionInput,
+        settings: SourceSettings,
+    ) -> SubmitRequest {
+        SubmitRequest {
+            title: "Feature".to_string(),
+            output_dir: directory.join("imp").to_string_lossy().into_owned(),
+            compositions: Some(vec![composition]),
+            source_settings: Some(settings),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_one_clip_timeline_maps_to_the_job_the_trimmed_video_maps_to() {
+        let directory = scratch_directory("one-clip-timeline");
+        let picture = test_pattern_clip(&directory, "picture");
+        let subtitle = directory.join("clip.srt");
+        std::fs::write(&subtitle, "1\n00:00:00,000 --> 00:00:00,100\nHello\n").unwrap();
+        let timeline = timeline_of(vec![Clip {
+            subtitle: Some(subtitle.clone()),
+            ..timeline_clip(&picture, 1, 5)
+        }]);
+
+        let from_timeline = job_config_of(
+            1,
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        )
+        .unwrap();
+        let from_video = job_config_of(
+            1,
+            request(
+                &directory,
+                CompositionInput {
+                    subtitles: vec![subtitle.to_string_lossy().into_owned()],
+                    ..composition(&picture)
+                },
+                SourceSettings {
+                    trim_start: Some("1f".to_string()),
+                    trim_end: Some("1f".to_string()),
+                    ..app2e_settings()
+                },
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&from_timeline).unwrap(),
+            serde_json::to_value(&from_video).unwrap()
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn an_audio_delay_on_a_two_clip_timeline_is_refused_by_its_field() {
+        let directory = scratch_directory("two-clip-audio-delay");
+        let picture = test_pattern_clip(&directory, "picture");
+        let timeline = timeline_of(vec![
+            timeline_clip(&picture, 0, 3),
+            timeline_clip(&picture, 3, 6),
+        ]);
+
+        let Err(refusal) = job_config_of(
+            1,
+            request(
+                &directory,
+                timeline_composition(timeline),
+                SourceSettings {
+                    audio_delay_ms: AUDIO_DELAY_MILLISECONDS,
+                    ..app2e_settings()
+                },
+            ),
+        ) else {
+            panic!("an audio delay over more than one clip has to be refused");
+        };
+
+        assert!(
+            refusal.starts_with("Audio delay is not supported on a timeline of more than one clip"),
+            "{refusal}"
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_timeline_beside_a_video_is_refused() {
+        let directory = scratch_directory("timeline-beside-video");
+        let picture = test_pattern_clip(&directory, "picture");
+        let composition = CompositionInput {
+            video_path: picture.to_string_lossy().into_owned(),
+            ..timeline_composition(timeline_of(vec![timeline_clip(&picture, 0, 6)]))
+        };
+
+        let Err(refusal) = job_config_of(1, request(&directory, composition, app2e_settings()))
+        else {
+            panic!("a video beside a timeline has to be refused");
+        };
+
+        assert_eq!(
+            refusal,
+            "Feature names both a video and a timeline: send one"
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_timeline_of_another_version_is_refused() {
+        let directory = scratch_directory("timeline-version");
+        let picture = test_pattern_clip(&directory, "picture");
+        let timeline = Timeline {
+            version: UNKNOWN_TIMELINE_VERSION,
+            ..timeline_of(vec![timeline_clip(&picture, 0, 6)])
+        };
+
+        let Err(refusal) = job_config_of(
+            1,
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        ) else {
+            panic!("a timeline of an unknown version has to be refused");
+        };
+
+        assert!(
+            refusal.contains(&format!("version {UNKNOWN_TIMELINE_VERSION}")),
+            "{refusal}"
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_two_clip_timeline_with_a_reel_start_builds_two_segments() {
+        let directory = scratch_directory("two-clip-build");
+        let first = test_pattern_clip(&directory, "first");
+        let second = test_pattern_clip(&directory, "second");
+        let silent_clip = |picture: &Path, in_frame, out_frame| Clip {
+            sound: ClipSound::None,
+            ..timeline_clip(picture, in_frame, out_frame)
+        };
+        let timeline = Timeline {
+            reel_starts: vec![FIRST_CLIP_FRAMES],
+            ..timeline_of(vec![
+                silent_clip(&first, 0, FIRST_CLIP_FRAMES),
+                silent_clip(&second, 2, 6),
+            ])
+        };
+        let kept_frames = timeline.total_frames();
+        let job = job_config_of(
+            1,
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        )
+        .unwrap();
+        let (composition, timeline) = job
+            .multi_clip_timeline()
+            .expect("two clips build as a timeline");
+        let build = timeline_imp_of(
+            &job,
+            composition,
+            timeline,
+            compression_of(&job),
+            Default::default(),
+        );
+        let log_file = std::sync::Arc::new(std::sync::Mutex::new(
+            std::fs::File::create(directory.join("job.log")).unwrap(),
+        ));
+        let furthest_frame = std::cell::Cell::new(0);
+
+        build_timeline_package(&build, &log_file, |progress| {
+            assert_eq!(progress.total_frames, kept_frames);
+            furthest_frame.set(furthest_frame.get().max(progress.frame));
+        })
+        .unwrap();
+
+        assert!(
+            furthest_frame.get() > FIRST_CLIP_FRAMES,
+            "the second clip's progress was not counted after the first: {}",
+            furthest_frame.get()
+        );
+        let cpl = std::fs::read_dir(&job.output_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("CPL_"))
+            })
+            .expect("the package holds a CPL");
+        let cpl = std::fs::read_to_string(cpl).unwrap();
+        assert_eq!(cpl.matches("<Segment>").count(), 2, "{cpl}");
+        std::fs::remove_dir_all(&directory).ok();
     }
 }
