@@ -177,6 +177,73 @@ fn encode_picture(
     result
 }
 
+fn report_and_verify_imp(
+    output_dir: &Path,
+    cpl_paths: &[PathBuf],
+    pkl_path: &Path,
+    assetmap_path: &Path,
+    no_verify: bool,
+) {
+    println!("IMP created at {}", output_dir.display());
+    for cpl in cpl_paths {
+        println!("  CPL: {}", cpl.display());
+    }
+    println!("  PKL: {}", pkl_path.display());
+    println!("  ASSETMAP: {}", assetmap_path.display());
+    if no_verify {
+        eprintln!(
+            "--no-verify: the package was not validated, run `imfwizard validate {}` before delivering it",
+            output_dir.display()
+        );
+        return;
+    }
+    let validation = imfwizard_core::validate::validate_imp_with_photon(output_dir, None);
+    if !print_validation(&validation) {
+        std::process::exit(1);
+    }
+}
+
+fn create_from_timeline(
+    build: &imfwizard_core::timeline_imp::TimelineImp,
+    check: bool,
+    keep_intermediates: bool,
+    no_verify: bool,
+) {
+    use std::sync::atomic::Ordering;
+
+    if check {
+        imfwizard_core::timeline_imp::check_timeline(build).unwrap_or_else(|e| fail(e));
+        println!(
+            "Pre-build check passed for {} clips, nothing was encoded or written",
+            build.timeline.clips.len()
+        );
+        return;
+    }
+    let on_interrupt = build.cancel.clone();
+    let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
+    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, |progress| {
+        eprint!(
+            "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+            progress.frame,
+            progress.total_frames,
+            progress.frame as f64 * PERCENT_OF_A_WHOLE as f64 / progress.total_frames.max(1) as f64,
+            progress.fps
+        );
+    });
+    eprintln!();
+    let built = built.unwrap_or_else(|e| fail(e));
+    if !keep_intermediates {
+        imfwizard_core::intermediates::remove_intermediates(&build.output_dir, &[]);
+    }
+    report_and_verify_imp(
+        &build.output_dir,
+        &[built.cpl_path],
+        &built.pkl_path,
+        &built.assetmap_path,
+        no_verify,
+    );
+}
+
 /// Whether an encode timed anything. A still or a J2K sequence reports four
 /// zeros.
 fn measured_any_phase(progress: &postkit::pipeline::PipelineProgress) -> bool {
@@ -742,6 +809,13 @@ struct CreateArguments {
     /// Video file (mp4/mov/mkv) or J2K directory
     #[arg(long)]
     video: Option<String>,
+
+    /// Timeline file (JSON, the shape `conform` writes): clips in order, each
+    /// a source with an in and out point
+    #[arg(long, conflicts_with_all = [
+        "video", "audio", "subtitles", "trim_start", "trim_end", "still_length", "fps_num", "fps_den",
+    ])]
+    timeline: Option<PathBuf>,
 
     /// Audio WAV file (auto-demuxed from video if not provided)
     #[arg(long)]
@@ -1960,6 +2034,7 @@ fn run() {
                 output,
                 title,
                 video,
+                timeline,
                 audio,
                 audio_lang,
                 audio_role,
@@ -2074,6 +2149,93 @@ fn run() {
 
             let picture_options = picture_arguments.resolve();
 
+            let timeline = timeline
+                .map(|path| postkit::timeline::Timeline::read(&path).unwrap_or_else(|e| fail(e)));
+            let single_clip = match &timeline {
+                None => None,
+                Some(timeline) => {
+                    match postkit::timeline::shape(timeline).unwrap_or_else(|e| fail(e)) {
+                        postkit::timeline::TimelineShape::SingleClip(build)
+                            if imfwizard_core::timeline_imp::takes_the_single_path(
+                                timeline, &build,
+                            ) =>
+                        {
+                            Some((timeline.fps, build))
+                        }
+                        _ => None,
+                    }
+                }
+            };
+            if let Some(timeline) = timeline.filter(|_| single_clip.is_none()) {
+                let refusals = imfwizard_core::timeline_imp::refuse_with_multi_clip(
+                    &imfwizard_core::timeline_imp::MultiClipFlags {
+                        burn_subtitle: burn_arguments
+                            .burn_subtitle
+                            .as_ref()
+                            .map(|_| "--burn-subtitle")
+                            .or(burn_arguments.first_named()),
+                        audio_delay: audio_delay.is_some().then_some("--audio-delay"),
+                        audio_map: audio_map.is_some().then_some("--audio-map"),
+                        atmos: atmos.frame_directory.is_some().then_some("--atmos"),
+                    },
+                );
+                if !refusals.is_empty() {
+                    fail(refusals.join("\n"));
+                }
+                let build = imfwizard_core::timeline_imp::TimelineImp {
+                    timeline,
+                    output_dir: output,
+                    title,
+                    content_kind: kind,
+                    picture_options,
+                    source_colour,
+                    compression: imfwizard_core::timeline_imp::PictureCompression {
+                        bitrate_mbps: bitrate
+                            .or(preset.as_ref().and_then(|p| p.bitrate_ceiling_mbps())),
+                        quality_psnr,
+                        encode_threads,
+                        detect_picture_findings,
+                    },
+                    hdr,
+                    audio_language: audio_lang.clone(),
+                    audio_role,
+                    timed_text_language: subtitle_lang.or(audio_lang),
+                    soundfield: imfwizard_core::imp::SoundfieldLabels {
+                        title_version: soundfield.title_version,
+                        audio_content_kind: soundfield.audio_content_kind,
+                        audio_element_kind: soundfield.audio_element_kind,
+                    },
+                    cancel: Default::default(),
+                };
+                create_from_timeline(&build, check, keep_intermediates, no_verify);
+                return;
+            }
+            // a one-clip timeline is the --video build with the clip's in and out as its trims
+            let video = match &single_clip {
+                Some((_, build)) => Some(build.picture.to_string_lossy().into_owned()),
+                None => video,
+            };
+            let audio = match &single_clip {
+                Some((_, build)) => build
+                    .audio
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
+                None => audio,
+            };
+            let subtitles = match &single_clip {
+                Some((_, build)) => build
+                    .subtitle
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+                None => subtitles,
+            };
+            let (fps_num, fps_den) = match &single_clip {
+                Some((fps, _)) => (Some(fps.numerator), Some(fps.denominator)),
+                None => (fps_num, fps_den),
+            };
+            let silent = single_clip.as_ref().is_some_and(|(_, build)| build.silent);
+
             let requested_rate = (fps_num.is_some() || fps_den.is_some()).then(|| {
                 let default = imfwizard_core::preflight::DEFAULT_EDIT_RATE;
                 let fps_num = fps_num.unwrap_or(default.numerator);
@@ -2102,8 +2264,14 @@ fn run() {
             };
             let edits = imfwizard_core::source_edits::SourceEdits {
                 audio_delay_ms: audio_delay.unwrap_or(0),
-                trim_start_frames: frames_from_spec(&trim_start).unwrap_or(0),
-                trim_end_frames: frames_from_spec(&trim_end).unwrap_or(0),
+                trim_start_frames: match &single_clip {
+                    Some((_, build)) => build.trim_start_frames,
+                    None => frames_from_spec(&trim_start).unwrap_or(0),
+                },
+                trim_end_frames: match &single_clip {
+                    Some((_, build)) => build.trim_end_frames,
+                    None => frames_from_spec(&trim_end).unwrap_or(0),
+                },
             };
             let still_frames = frames_from_spec(&still_length);
 
@@ -2473,7 +2641,7 @@ fn run() {
 
                         // an image sequence carries no sound, so only a container
                         // is worth demuxing
-                        let audio_files = match (&audio, is_image_sequence) {
+                        let audio_files = match (&audio, is_image_sequence || silent) {
                             (Some(a), _) => vec![PathBuf::from(a)],
                             (None, true) => vec![],
                             (None, false) => {
@@ -2590,27 +2758,13 @@ fn run() {
                         &handed_in,
                     );
                 }
-                println!("IMP created at {}", result.output_dir.display());
-                for cpl in &result.cpl_paths {
-                    println!("  CPL: {}", cpl.display());
-                }
-                println!("  PKL: {}", result.pkl_path.display());
-                println!("  ASSETMAP: {}", result.assetmap_path.display());
-
-                if no_verify {
-                    eprintln!(
-                        "--no-verify: the package was not validated, run `imfwizard validate {}` before delivering it",
-                        result.output_dir.display()
-                    );
-                } else {
-                    let validation = imfwizard_core::validate::validate_imp_with_photon(
-                        &result.output_dir,
-                        None,
-                    );
-                    if !print_validation(&validation) {
-                        std::process::exit(1);
-                    }
-                }
+                report_and_verify_imp(
+                    &result.output_dir,
+                    &result.cpl_paths,
+                    &result.pkl_path,
+                    &result.assetmap_path,
+                    no_verify,
+                );
             } else {
                 eprintln!("Error: {}", result.error);
                 std::process::exit(1);

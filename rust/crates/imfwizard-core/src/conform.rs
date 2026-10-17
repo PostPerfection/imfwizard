@@ -1,6 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +9,9 @@ const REELS_WITH_NO_MEDIA: [&str; 2] = ["BL", "AX"];
 
 // the plan and what each event became, written beside the IMP
 pub const CONFORM_MANIFEST_NAME: &str = "conform_manifest.json";
+
+// the file create --timeline reads, named as dcpwizard's conform names it
+pub const CONFORM_TIMELINE_FILE: &str = "timeline.json";
 
 /// One timeline event with its source media found.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +24,7 @@ pub struct ConformEvent {
     /// The picture track file this event became, once the IMP is built.
     #[serde(default)]
     pub picture_track_file: Option<String>,
-    /// The sound track file this event became, once the IMP is built.
+    /// The sound track file that plays this event's sound, once the IMP is built.
     #[serde(default)]
     pub sound_track_file: Option<String>,
 }
@@ -152,62 +153,39 @@ pub fn write_conform_manifest(plan: &ConformPlan, output_dir: &Path) -> std::io:
     Ok(path)
 }
 
-/// What the picture of every event has to agree on, since one virtual track
-/// carries them all.
-struct Raster {
-    width: u32,
-    height: u32,
-    has_sound: bool,
-}
-
-fn checked_raster(plan: &ConformPlan) -> Result<Raster, String> {
-    let mut agreed: Option<Raster> = None;
-    for event in &plan.events {
-        let info = postkit::probe::probe_video(&event.media)
-            .ok_or_else(|| format!("ffprobe read no picture out of {}", event.media.display()))?;
-        // a source in and out are frames from the start of the media, so a
-        // timeline whose source timecode starts at 01:00:00:00 runs off the end
-        if info.total_frames > 0 && event.source_out > info.total_frames as u64 {
-            return Err(format!(
-                "event {} asks for frames {}..{} of {}, which is {} frames long",
-                event.event_number,
-                event.source_in,
-                event.source_out,
-                event.media.display(),
-                info.total_frames
-            ));
-        }
-        match &agreed {
-            None => {
-                agreed = Some(Raster {
-                    width: info.width,
-                    height: info.height,
-                    has_sound: info.has_audio,
-                });
-            }
-            Some(first) => {
-                if (first.width, first.height) != (info.width, info.height) {
-                    return Err(format!(
-                        "{} is {}x{} where the first event is {}x{}, and one image track carries one raster",
-                        event.media.display(),
-                        info.width,
-                        info.height,
-                        first.width,
-                        first.height
-                    ));
-                }
-                if first.has_sound != info.has_audio {
-                    return Err(format!(
-                        "{} carries {} sound where an earlier event carries {}",
-                        event.media.display(),
-                        if info.has_audio { "" } else { "no" },
-                        if first.has_sound { "some" } else { "none" }
-                    ));
-                }
-            }
-        }
-    }
-    agreed.ok_or_else(|| "the plan holds no events".to_string())
+/// The timeline the plan plays: a clip an event, with the media's own sound when
+/// it carries any, and one segment.
+pub fn timeline_from_plan(plan: &ConformPlan) -> Result<postkit::timeline::Timeline, String> {
+    let clips = plan
+        .events
+        .iter()
+        .map(|event| {
+            let info = postkit::probe::probe_video(&event.media).ok_or_else(|| {
+                format!("ffprobe read no picture out of {}", event.media.display())
+            })?;
+            Ok(postkit::timeline::Clip {
+                picture: event.media.clone(),
+                in_frame: event.source_in,
+                out_frame: event.source_out,
+                sound: if info.has_audio {
+                    postkit::timeline::ClipSound::Embedded
+                } else {
+                    postkit::timeline::ClipSound::None
+                },
+                subtitle: None,
+                source_colour: Default::default(),
+                picture_processing: Default::default(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(postkit::timeline::Timeline {
+        version: postkit::timeline::TIMELINE_FORMAT_VERSION,
+        fps: crate::encode::FrameRate::new(plan.fps_num, plan.fps_den),
+        clips,
+        sound: postkit::timeline::SoundTrack::PerClip,
+        subtitle: None,
+        reel_starts: Vec::new(),
+    })
 }
 
 /// What a finished conform wrote.
@@ -219,9 +197,8 @@ pub struct ConformResult {
     pub picture_frames: u64,
 }
 
-/// Build an IMP whose one composition follows the plan: one picture track file
-/// per event, played in order through the main image track, and the sound cut
-/// from the same media through the main audio track.
+/// Build an IMP whose one composition follows the plan, through the timeline
+/// the plan becomes, which is written beside the package for `create --timeline`.
 pub fn conform_to_imp(
     plan: &ConformPlan,
     output_dir: &Path,
@@ -229,101 +206,48 @@ pub fn conform_to_imp(
 ) -> Result<ConformResult, String> {
     std::fs::create_dir_all(output_dir)
         .map_err(|e| format!("cannot create {}: {e}", output_dir.display()))?;
-    let raster = checked_raster(plan)?;
-    let fps = crate::encode::FrameRate::new(plan.fps_num, plan.fps_den);
-    let rsiz = crate::encode::imf_rsiz_for_encode(
-        raster.width,
-        raster.height,
-        fps.as_f64(),
-        crate::encode::bitrate_mbps_for_job(None, None, raster.width, raster.height, fps.as_f64()),
-    )?;
-
-    let composition = crate::imp::Composition {
+    let timeline = timeline_from_plan(plan)?;
+    timeline.write(&output_dir.join(CONFORM_TIMELINE_FILE))?;
+    let build = crate::timeline_imp::TimelineImp {
+        timeline,
+        output_dir: output_dir.to_path_buf(),
         title: plan.title.clone(),
         content_kind: "feature".to_string(),
-        ..Default::default()
+        picture_options: Default::default(),
+        source_colour: crate::source_colourspace::to_source_colour(
+            crate::source_colourspace::APP2E_SOURCE_SPACE,
+        )?,
+        compression: crate::timeline_imp::PictureCompression {
+            encode_threads,
+            ..Default::default()
+        },
+        hdr: None,
+        audio_language: None,
+        audio_role: None,
+        timed_text_language: None,
+        soundfield: Default::default(),
+        cancel: Default::default(),
     };
-    let mut options = crate::imp::ImpOptions {
-        output_dir: output_dir.to_path_buf(),
-        compositions: vec![composition.clone()],
-        fps_num: plan.fps_num,
-        fps_den: plan.fps_den,
-        edit_rate: format!("{} {}", plan.fps_num, plan.fps_den),
-        duration: 0,
-        ..Default::default()
-    };
+    let built = crate::timeline_imp::build_timeline_imp(&build, |_| {})?;
 
     let mut manifest = plan.clone();
-    let mut picture_resources = Vec::new();
-    let mut sound_resources = Vec::new();
-    let mut track_files = Vec::new();
-    for (index, event) in plan.events.iter().enumerate() {
-        tracing::info!(
-            "Conforming event {} from {} frames {}..{}",
-            event.event_number,
-            event.media.display(),
-            event.source_in,
-            event.source_out
-        );
-        let picture = encode_event_picture(event, index, output_dir, plan, rsiz, encode_threads)?;
-        let frames = picture.duration;
-        options.duration = frames;
-        manifest.events[index].picture_track_file = file_name(&picture.path);
-        track_files.push(picture.clone());
-        picture_resources.push(crate::cpl::SequenceResource {
-            track_file: picture,
-            entry_point: 0,
-            source_duration: frames,
-        });
-
-        if raster.has_sound {
-            let sound = wrap_event_sound(event, index, output_dir, &options, &composition, frames)?;
-            manifest.events[index].sound_track_file = file_name(&sound.path);
-            track_files.push(sound.clone());
-            sound_resources.push(crate::cpl::SequenceResource {
-                track_file: sound,
-                entry_point: 0,
-                source_duration: frames,
-            });
-        }
+    let sound_track_file = built
+        .sound_track_file
+        .as_ref()
+        .and_then(|track| file_name(&track.path));
+    for (event, picture) in manifest.events.iter_mut().zip(&built.picture_track_files) {
+        event.picture_track_file = file_name(&picture.path);
+        event.sound_track_file = sound_track_file.clone();
     }
-
-    let cpl_uuid = uuid::Uuid::new_v4().to_string();
-    let cpl_path = output_dir.join(format!("CPL_{cpl_uuid}.xml"));
-    crate::cpl::write_sequenced_cpl(
-        &cpl_path,
-        &cpl_uuid,
-        &options,
-        &composition,
-        &picture_resources,
-        &sound_resources,
-    )
-    .map_err(|e| format!("Failed to write CPL: {e}"))?;
-
-    let cpls = vec![crate::imp::CplEntry {
-        uuid: cpl_uuid,
-        path: cpl_path.clone(),
-    }];
-    let pkl_uuid = uuid::Uuid::new_v4().to_string();
-    let pkl_path = output_dir.join(format!("PKL_{pkl_uuid}.xml"));
-    crate::pkl::write_pkl(&pkl_path, &pkl_uuid, &cpls, &track_files)
-        .map_err(|e| format!("Failed to write PKL: {e}"))?;
-    let assetmap_path = output_dir.join("ASSETMAP.xml");
-    crate::assetmap::write_assetmap(&assetmap_path, &pkl_uuid, &cpls, &track_files)
-        .map_err(|e| format!("Failed to write ASSETMAP: {e}"))?;
-
     let manifest_path = write_conform_manifest(&manifest, output_dir)
         .map_err(|e| format!("Failed to write the conform manifest: {e}"))?;
     crate::intermediates::remove_intermediates(output_dir, &[]);
 
     Ok(ConformResult {
         imp_dir: output_dir.to_path_buf(),
-        cpl_path,
+        cpl_path: built.cpl_path,
         manifest_path,
-        picture_frames: picture_resources
-            .iter()
-            .map(|resource| resource.source_duration)
-            .sum(),
+        picture_frames: built.frames,
     })
 }
 
@@ -331,162 +255,6 @@ fn file_name(path: &Path) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.to_string())
-}
-
-fn encode_event_picture(
-    event: &ConformEvent,
-    index: usize,
-    output_dir: &Path,
-    plan: &ConformPlan,
-    rsiz: u16,
-    encode_threads: u32,
-) -> Result<crate::MxfTrackFile, String> {
-    let encode_dir = output_dir.join(format!(
-        "{}{index}",
-        crate::intermediates::ENCODE_SCRATCH_PREFIX
-    ));
-    let options = postkit::pipeline::EncodeRunOptions {
-        compression_ratio: crate::encode::DEFAULT_COMPRESSION_RATIO,
-        fps: crate::encode::FrameRate::new(plan.fps_num, plan.fps_den),
-        source_colour: crate::source_colourspace::to_source_colour(
-            crate::source_colourspace::APP2E_SOURCE_SPACE,
-        )?,
-        frame_range: Some(postkit::encode::FrameRange {
-            first_frame: event.source_in,
-            frame_count: event.frames(),
-        }),
-        rsiz,
-        encode_threads,
-        ..Default::default()
-    };
-    let cancel = Arc::new(AtomicBool::new(false));
-    let pause = Arc::new(AtomicBool::new(false));
-    let (_, track) = crate::overlapped_picture::encode_and_wrap_picture(
-        &event.media,
-        &encode_dir,
-        &options,
-        crate::overlapped_picture::PictureWrapTarget {
-            imp_dir: output_dir.to_path_buf(),
-            fps_num: plan.fps_num,
-            fps_den: plan.fps_den,
-            colour: crate::mxf_wrap::picture_colour(None),
-        },
-        &cancel,
-        &pause,
-        |_| {},
-        |message| tracing::info!("{message}"),
-    )?;
-    Ok(track)
-}
-
-fn wrap_event_sound(
-    event: &ConformEvent,
-    index: usize,
-    output_dir: &Path,
-    options: &crate::imp::ImpOptions,
-    composition: &crate::imp::Composition,
-    picture_frames: u64,
-) -> Result<crate::MxfTrackFile, String> {
-    let demuxed = output_dir.join(format!(
-        "{}{index}_{}",
-        crate::intermediates::ENCODE_SCRATCH_PREFIX,
-        crate::intermediates::DEMUXED_AUDIO_NAME
-    ));
-    demux_sound(&event.media, &demuxed)?;
-    let cut = output_dir.join(format!(
-        "{}{index}.wav",
-        crate::source_edits::TRIMMED_AUDIO_PREFIX
-    ));
-    cut_wav_frames(
-        &demuxed,
-        &cut,
-        event.source_in,
-        picture_frames,
-        options.fps_num,
-        options.fps_den,
-    )?;
-    let fitted = output_dir.join(format!(
-        "{}{index}.wav",
-        crate::source_edits::FITTED_AUDIO_PREFIX
-    ));
-    let sound = match crate::source_edits::fit_audio_to_picture(
-        &cut,
-        &fitted,
-        picture_frames,
-        options.fps_num,
-        options.fps_den,
-    )? {
-        None => cut,
-        Some(_) => fitted,
-    };
-    let track = crate::imp::AudioTrack {
-        path: sound.clone(),
-        language: None,
-        role: None,
-    };
-    let mca = crate::imp::soundfield_config(&track, composition, &options.soundfield)?;
-    crate::imp::wrap_one(
-        options,
-        output_dir,
-        &sound,
-        crate::EssenceType::Wav,
-        None,
-        Some(mca),
-        picture_frames,
-    )
-}
-
-fn demux_sound(media: &Path, output: &Path) -> Result<(), String> {
-    let run = std::process::Command::new("ffmpeg")
-        .arg("-y")
-        .args(["-i".as_ref(), media.as_os_str()])
-        .args(["-vn", "-acodec", "pcm_s24le", "-ar", "48000"])
-        .args(["-rf64", "auto"])
-        .arg(output)
-        .output()
-        .map_err(|e| format!("cannot run ffmpeg: {e}"))?;
-    if !run.status.success() {
-        return Err(format!(
-            "ffmpeg demuxed no sound out of {}: {}",
-            media.display(),
-            String::from_utf8_lossy(&run.stderr).trim()
-        ));
-    }
-    Ok(())
-}
-
-/// Copy `frames` picture frames of sound starting at `first_frame`, so the cut
-/// carries the samples the event's source range covers.
-fn cut_wav_frames(
-    input: &Path,
-    output: &Path,
-    first_frame: u64,
-    frames: u64,
-    fps_num: u32,
-    fps_den: u32,
-) -> Result<(), String> {
-    use postkit::wav_io::Samples;
-    let (spec, samples) = postkit::wav_io::read_interleaved_exact(input)
-        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
-    let channels = spec.channels.max(1) as usize;
-    let fps = fps_num.max(1) as f64 / fps_den.max(1) as f64;
-    let per_frame = (spec.sample_rate.max(1) as f64 / fps).ceil() as u64;
-    let start = (first_frame * per_frame) as usize * channels;
-    let wanted = (frames * per_frame) as usize * channels;
-
-    fn window<T: Copy + Default>(samples: &[T], start: usize, wanted: usize) -> Vec<T> {
-        let mut out = vec![T::default(); wanted];
-        let available = samples.len().saturating_sub(start);
-        let kept = wanted.min(available);
-        out[..kept].copy_from_slice(&samples[start..start + kept]);
-        out
-    }
-    let cut = match &samples {
-        Samples::Int(v) => Samples::Int(window(v, start, wanted)),
-        Samples::Float(v) => Samples::Float(window(v, start, wanted)),
-    };
-    postkit::wav_io::write_interleaved_exact(output, spec, &cut)
-        .map_err(|e| format!("cannot write {}: {e}", output.display()))
 }
 
 #[cfg(test)]

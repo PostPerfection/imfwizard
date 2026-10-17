@@ -9,6 +9,7 @@ pub mod overlapped_picture;
 pub mod partial_version;
 pub mod pkl;
 pub mod timeline;
+pub mod timeline_imp;
 
 // Encoding/transcoding
 pub mod duration_spec;

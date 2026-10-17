@@ -161,17 +161,48 @@ fn assert_conformed(imp: &Path, title: &str) {
     assert_eq!(cpl.matches("<cc:MainImageSequence").count(), 1, "{cpl}");
     assert_eq!(cpl.matches("<cc:MainAudioSequence").count(), 1, "{cpl}");
 
-    for element in ["MainImageSequence", "MainAudioSequence"] {
-        let durations = sequence_values(&cpl, element, "SourceDuration");
-        assert_eq!(
-            durations,
-            vec![EVENT_FRAMES.to_string(); EVENTS],
-            "{element} does not play {EVENTS} trimmed resources"
-        );
-        let track_files = sequence_values(&cpl, element, "TrackFileId");
-        assert_eq!(track_files.len(), EVENTS);
-        assert_ne!(track_files[0], track_files[1], "{element} plays one file");
-    }
+    let durations = sequence_values(&cpl, "MainImageSequence", "SourceDuration");
+    assert_eq!(
+        durations,
+        vec![EVENT_FRAMES.to_string(); EVENTS],
+        "the image track does not play {EVENTS} trimmed resources"
+    );
+    let track_files = sequence_values(&cpl, "MainImageSequence", "TrackFileId");
+    assert_eq!(track_files.len(), EVENTS);
+    assert_ne!(
+        track_files[0], track_files[1],
+        "the image track plays one file"
+    );
+    // the events' sound is joined into one track file
+    assert_eq!(
+        sequence_values(&cpl, "MainAudioSequence", "SourceDuration"),
+        vec![(EVENT_FRAMES * EVENTS as u64).to_string()]
+    );
+
+    let timeline = postkit::timeline::Timeline::read(&imp.join("timeline.json"))
+        .expect("conform writes the timeline create --timeline reads");
+    let windows: Vec<(u64, u64)> = timeline
+        .clips
+        .iter()
+        .map(|clip| (clip.in_frame, clip.out_frame))
+        .collect();
+    assert_eq!(
+        windows,
+        vec![
+            (0, EVENT_FRAMES),
+            (
+                SECOND_EVENT_SOURCE_IN,
+                SECOND_EVENT_SOURCE_IN + EVENT_FRAMES
+            )
+        ]
+    );
+    assert!(
+        timeline
+            .clips
+            .iter()
+            .all(|clip| clip.sound == postkit::timeline::ClipSound::Embedded)
+    );
+    assert!(timeline.reel_starts.is_empty());
 
     let pictures = files_starting_with(imp, imfwizard_core::imp::PICTURE_PREFIX);
     assert_eq!(pictures.len(), EVENTS);

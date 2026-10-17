@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use postkit::packaging::{App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfTrackKind};
+use postkit::packaging::{
+    App2eEdition, ImfCpl, ImfEssenceDescriptor, ImfResource, ImfSegment, ImfSequence, ImfTrackKind,
+};
 use quick_xml::events::Event;
 use quick_xml::name::QName;
 use quick_xml::reader::Reader;
@@ -269,13 +271,14 @@ fn descriptor_body(entry: &str) -> String {
 /// essence, so the descriptor the OV wrote for it is dropped with the link.
 fn descriptors_still_referenced(
     descriptors: &[ImfEssenceDescriptor],
-    resources: &[ImfResource],
+    sequences: &[ImfSequence],
 ) -> Vec<ImfEssenceDescriptor> {
     descriptors
         .iter()
         .filter(|descriptor| {
-            resources
+            sequences
                 .iter()
+                .flat_map(|sequence| &sequence.resources)
                 .any(|resource| resource.source_encoding.as_deref() == Some(&descriptor.id))
         })
         .cloned()
@@ -447,14 +450,16 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
     let mut wrapped_descriptors: Vec<ImfEssenceDescriptor> = Vec::new();
     let edit_rate = asdcplib::Rational::new(ov.fps_num as i32, ov.fps_den as i32);
     let mut picture_frames = ov_picture_frames(&ov);
-    let mut resources: Vec<ImfResource> = ov
+    let mut sequences: Vec<ImfSequence> = ov
         .resources
         .iter()
-        .map(|r| ImfResource {
-            track_file_uuid: r.uuid.clone(),
-            duration: r.duration,
-            kind: r.kind,
-            source_encoding: r.source_encoding.clone(),
+        .map(|r| {
+            ImfSequence::whole_track_file(
+                r.kind,
+                r.uuid.clone(),
+                r.duration,
+                r.source_encoding.clone(),
+            )
         })
         .collect();
 
@@ -489,18 +494,20 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             picture_frames = Some(tf.duration);
         }
         // swap the Nth resource of this kind to the new track file
-        let target = resources
+        let target = sequences
             .iter_mut()
-            .filter(|r| r.kind == s.kind)
+            .filter(|sequence| sequence.kind == s.kind)
             .nth(s.index)
             .expect("replace target validated above");
-        target.track_file_uuid = tf.uuid.clone();
-        target.duration = tf.duration;
         let descriptor = match crate::cpl::track_file_descriptor(&tf.path, s.kind, edit_rate) {
             Ok(descriptor) => descriptor,
             Err(e) => return SupplementResult::fail(out, e.to_string()),
         };
-        target.source_encoding = descriptor.as_ref().map(|d| d.id.clone());
+        target.resources = vec![ImfResource::whole_track_file(
+            tf.uuid.clone(),
+            tf.duration,
+            descriptor.as_ref().map(|d| d.id.clone()),
+        )];
         wrapped_descriptors.extend(descriptor);
         present.push(tf);
     }
@@ -513,12 +520,12 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
             Ok(descriptor) => descriptor,
             Err(e) => return SupplementResult::fail(out, e.to_string()),
         };
-        resources.push(ImfResource {
-            track_file_uuid: tf.uuid.clone(),
-            duration: tf.duration,
-            kind: s.kind,
-            source_encoding: descriptor.as_ref().map(|d| d.id.clone()),
-        });
+        sequences.push(ImfSequence::whole_track_file(
+            s.kind,
+            tf.uuid.clone(),
+            tf.duration,
+            descriptor.as_ref().map(|d| d.id.clone()),
+        ));
         wrapped_descriptors.extend(descriptor);
         present.push(tf);
     }
@@ -529,7 +536,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
 
     // 5. build the supplemental CPL: references both new and unchanged OV UUIDs
     let cpl_uuid = uuid::Uuid::new_v4().to_string();
-    let mut essence_descriptors = descriptors_still_referenced(&ov.essence_descriptors, &resources);
+    let mut essence_descriptors = descriptors_still_referenced(&ov.essence_descriptors, &sequences);
     essence_descriptors.extend(wrapped_descriptors);
     let cpl = ImfCpl {
         uuid: cpl_uuid.clone(),
@@ -540,7 +547,7 @@ pub fn create_supplement(opts: &SupplementOptions) -> SupplementResult {
         issue_date: crate::issue_date(),
         fps_num: ov.fps_num,
         fps_den: ov.fps_den,
-        resources,
+        segments: vec![ImfSegment { sequences }],
         languages: Vec::new(),
         essence_descriptors,
         max_cll: None,

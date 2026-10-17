@@ -325,7 +325,7 @@ fn wrap_iab(
     })
 }
 
-const CANCELLED_ERROR: &str = "cancelled before the package was finished";
+pub(crate) const CANCELLED_ERROR: &str = "cancelled before the package was finished";
 
 fn cancelled(opts: &ImpOptions) -> Option<ImpResult> {
     opts.cancel.load(Ordering::Relaxed).then(|| ImpResult {

@@ -34,6 +34,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT or ASS into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
+- **Timelines**, `create --timeline <file>`: clips in order, each cut to its own in and out point with its own sound and subtitle, fitted onto one raster and built into one composition with a segment at each reel start. See [Timeline file](#timeline-file)
 - **Source picture processing**, `create --crop-left/--crop-right/--crop-top/--crop-bottom` cut source pixels off each side, `--auto-crop` (`--auto-crop-threshold`) measures the black borders and cuts them, `--fill-crop` crops to the target aspect instead of padding to it, `--deinterlace`, `--denoise`, `--rotate 90|180|270`, `--flip horizontal|vertical|both`, and `--raster <WxH>` fits the result into one of the App 2E rasters. Anything other than the untouched source is fitted into a raster, so the App 2E check runs on what the encoder writes rather than on the source
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
@@ -88,7 +89,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Workflow & Automation
 - **Delivery presets**, profiles (Netflix, Disney+, HBO Max, Cinema 2K/4K, ...); apply one to an encode with `create --profile <name>`, or name the target directly with `create --bitrate <Mbps>`
 - **Watch folder** (`watch <dir> --output <dir> [--webhook-url <url>] [--interval <seconds>] [-- <create flags>]`), build an IMP from every video file or frame folder that lands in the watched directory, once it stops changing. The file stem is the title, a same-named `.wav` and `.ttml` beside it become the sound and subtitle, the job log is written beside the package, the source moves into `done/` or `failed/` and a webhook gets `imp.created` or `imp.failed`
-- **EDL conform**, `conform --input <timeline> --media-dir <dir> --output <imp>` builds an IMP whose CPL follows a CMX3600 or FCP7 timeline, one picture and sound resource per event, trimmed to the event's source range
+- **EDL conform**, `conform --input <timeline> --media-dir <dir> --output <imp>` builds an IMP whose CPL follows a CMX3600 or FCP7 timeline, one picture track file per event trimmed to the event's source range and the events' sound joined into one track file, and writes the cut as `timeline.json` for `create --timeline`
 - **S3 / Aspera / rsync upload** of completed IMPs, with a SQLite delivery tracker
 - **Partial restore** (`restore --input <imp> --output <dir> [--video-only|--audio-only]`), unwraps every track file the IMP's CPLs name, in process: a picture track becomes one numbered `.j2c` codestream per frame and a sound track becomes one WAV at the channel count, rate and depth the track file declares, each under a directory named after the track file
 
@@ -792,12 +793,76 @@ imfwizard conform -i timeline.edl --media-dir /path/to/rushes -o /path/to/imp
 
 Each event's reel name is matched against the file names under `--media-dir`,
 and its source in and out are read as frame counts from the start of that file.
-Every event becomes one picture track file encoded from its own source range and
-one sound track file cut from the same media, and the CPL plays them in record
-order through a single main image track and a single main audio track. Every
-event's media has to carry the same raster, and either all of them carry sound
-or none does. `conform_manifest.json` in the output directory records the plan
-and the track file each event became.
+The plan is written as `timeline.json`, a clip per event with the media's own
+sound, or silence where the media has none, and built as `create --timeline`
+builds it with no reel starts. Every event becomes one picture track file encoded
+from its own source range and fitted onto the first event's raster, the events'
+sound is joined into one sound track file, and the CPL plays them in record order
+through a single main image track and a single main audio track in one segment.
+`conform_manifest.json` in the output directory records the plan, the picture
+track file each event became and the sound track file that plays it.
+
+### Timeline file
+
+`create --timeline` reads a JSON file of clips in order, the shape `conform`
+writes.
+
+```json
+{
+  "version": 1,
+  "fps": { "numerator": 24, "denominator": 1 },
+  "clips": [
+    {
+      "picture": "/media/feature.mov",
+      "in_frame": 192,
+      "out_frame": 151200,
+      "sound": "Embedded",
+      "subtitle": "/media/feature.srt"
+    },
+    {
+      "picture": "/media/trailer.mov",
+      "in_frame": 0,
+      "out_frame": 2880,
+      "sound": { "File": "/media/trailer.wav" },
+      "subtitle": null
+    }
+  ],
+  "sound": "PerClip",
+  "subtitle": null,
+  "reel_starts": [151008]
+}
+```
+
+Frames count from the source's first frame and `out_frame` is exclusive. Every
+clip has to run at `fps`, which is the edit rate, and a clip at another rate is
+refused by name. A clip's `sound` is `"Embedded"` (the audio in its picture file),
+`{ "File": "<wav>" }` (a WAV cut at the clip's frames) or `"None"` (silence for its
+length), and the clips with sound have to share a channel count. The timeline's
+`sound` is `"PerClip"`, the clips' sound joined in order, or
+`{ "Override": "<wav>" }`, one WAV for the whole timeline. A clip's `subtitle` is an
+SRT timed against its own source, shifted to the clip's place and cut to its range.
+The timeline's `subtitle` is timed against the timeline and takes any format
+`--subtitle` takes. One file cannot carry both. `reel_starts` are timeline frames,
+never 0, and each starts a CPL segment. On a timeline of more than one clip, a clip
+may also carry `source_colour` and `picture_processing` in postkit's shapes, which
+replace the create flags for that clip.
+
+Every clip becomes one picture track file, fitted onto the `--raster` raster, else
+the first clip's own. The picture flags and `--auto-crop` resolve per clip from its
+own size, and a J2K directory or picture MXF clip is refused. The sound becomes one
+sound track file and the subtitles one timed text track file. A reel start inside
+a clip splits that clip's track file between two segments by entry point, and the
+sound and timed text play one resource a segment. `--timeline` is refused beside
+`--video`, `--audio`, `--subtitle`, `--trim-start`, `--trim-end`, `--still-length`,
+`--fps-num` and `--fps-den`. A timeline built clip by clip also refuses
+`--burn-subtitle` and its appearance flags, `--audio-delay`, `--audio-map` and
+`--atmos`. `--check` runs every create refusal on every clip.
+
+A timeline of one clip builds as `--video` does, with `--trim-start` and
+`--trim-end` taken from its in and out points and `--audio` from its WAV or the
+override, so burn-in and the other create flags work. It builds clip by clip
+instead when it has reel starts, or when its in point is past 0 and an override
+WAV or a timeline subtitle is timed against the timeline.
 
 ### Frame comparison
 
