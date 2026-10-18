@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tauri_webdriver import INPUT_SETTLE_SECONDS, POLL_SECONDS, Window, visible_windows, wait_until, xdotool
+from tauri_webdriver import CONFIRM_KEY, INPUT_SETTLE_SECONDS, POLL_SECONDS, Window, visible_windows, wait_until, xdotool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GUI_BINARY = REPOSITORY_ROOT / "gui/src-tauri/target/release/imfwizard-gui"
@@ -1260,6 +1260,57 @@ def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path)
         lambda: session.execute(CLIP_TITLES) == [clip_title(picture.name, TRIM_START_TIMECODE, whole_clip[1])],
         REACTION_TIMEOUT_SECONDS,
     )
+
+
+PROPERTIES_HANDLE = "#properties-resize-handle"
+PROPERTIES_COLLAPSED_CLASS = "properties-collapsed"
+PROPERTIES_COLLAPSED_STORAGE_KEY = "imfwizard-properties-collapsed"
+SHOW_PROPERTIES_LABEL = "Show Properties"
+RESIZE_PROPERTIES_LABEL = "Resize Properties"
+
+PROPERTIES_STATE = """
+return {
+  collapsed: document.querySelector("#view-project .workspace").classList.contains(arguments[1]),
+  displayed: getComputedStyle(document.getElementById("properties")).display !== "none",
+  label: document.querySelector(arguments[0]).getAttribute("aria-label"),
+  stored: localStorage.getItem(arguments[2]),
+};
+"""
+
+
+def properties_state(session):
+    return session.execute(
+        PROPERTIES_STATE, PROPERTIES_HANDLE, PROPERTIES_COLLAPSED_CLASS, PROPERTIES_COLLAPSED_STORAGE_KEY
+    )
+
+
+def test_enter_on_the_properties_handle_hides_and_shows_the_panel(window):
+    session = window.session
+    wait_for_view(session, "view-project")
+    assert properties_state(session) == {
+        "collapsed": False, "displayed": True, "label": RESIZE_PROPERTIES_LABEL, "stored": None,
+    }
+
+    session.execute("document.querySelector(arguments[0]).focus()", PROPERTIES_HANDLE)
+    window.press(CONFIRM_KEY)
+    wait_until(
+        "Enter on the handle never hid the Properties panel",
+        lambda: properties_state(session)["collapsed"],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    assert properties_state(session) == {
+        "collapsed": True, "displayed": False, "label": SHOW_PROPERTIES_LABEL, "stored": "1",
+    }
+
+    window.press(CONFIRM_KEY)
+    wait_until(
+        "Enter on the handle never brought the Properties panel back",
+        lambda: not properties_state(session)["collapsed"],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    assert properties_state(session) == {
+        "collapsed": False, "displayed": True, "label": RESIZE_PROPERTIES_LABEL, "stored": None,
+    }
 
 
 PLAY_TIMELINE_BUTTON = '#timeline-editor [data-action="play-timeline"]'
