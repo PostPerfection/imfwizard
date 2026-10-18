@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { emptyTimeline } from '../../extern/guikit/src/composition-timeline.js';
-import { compositionsRequest, timelinesSetClipLengths } from '../src/composition-request.js';
+import { emptyTimeline, timelineWire } from '../../extern/guikit/src/composition-timeline.js';
+import {
+  compositionsRequest,
+  durationFrames,
+  everySingleClipProbed,
+  sharedClipTrimSpecs,
+  timelinesSetClipLengths,
+  withClipTrims,
+} from '../src/composition-request.js';
 
 const ASSETS = [
   { id: 1, type: 'video', path: '/media/feature.mov', name: 'feature.mov', fps: '24/1', frames: 240 },
@@ -54,7 +61,7 @@ test("a trimmed clip sends its in and out points as the trims, with its own soun
   assert.deepEqual(compositions[0].subtitles, ['/media/trailer.ttml']);
   assert.equal('timeline' in compositions[0], false);
   assert.deepEqual(clipTrims, { trimStart: '12f', trimEnd: '12f' });
-  assert.equal(timelinesSetClipLengths([main]), true);
+  assert.equal(timelinesSetClipLengths([main]), false, 'a trimmed clip leaves the Trim fields on to show its trims');
 });
 
 test('a clip without sound goes silent rather than taking the picture file sound', () => {
@@ -114,4 +121,36 @@ test('a composition with nothing on its timeline is left out of the request', ()
   const { compositions } = compositionsRequest([main, composition('Empty', {})], 'Film', assetById);
 
   assert.deepEqual(compositions.map((each) => each.title), ['Film - Main']);
+});
+
+test('the Trim fields set every composition\'s single clip, and the build and the preview read the same frames', () => {
+  const main = composition('Main', { clips: [clip(1, 240, 0, 240)] });
+  const textless = composition('Textless', { clips: [clip(1, 240, 0, 240)] });
+  const trimStartFrames = durationFrames('2s', [24, 1]);
+  const trimEndFrames = durationFrames('12f', [24, 1]);
+
+  const trimmed = [main, textless].map((each) => withClipTrims(each, trimStartFrames, trimEndFrames));
+  const { compositions, clipTrims } = compositionsRequest(trimmed, 'Film', assetById);
+  const played = timelineWire(trimmed[0].timeline, assetById).clips[0];
+
+  assert.deepEqual(trimmed.map((each) => each.timeline.clips[0]), [clip(1, 240, 48, 228), clip(1, 240, 48, 228)]);
+  assert.deepEqual(clipTrims, { trimStart: '48f', trimEnd: '12f' });
+  assert.deepEqual(compositions.map((each) => each.videoPath), ['/media/feature.mov', '/media/feature.mov']);
+  assert.deepEqual([played.in_frame, played.out_frame], [48, 228]);
+  assert.deepEqual(sharedClipTrimSpecs(trimmed), { trimStart: '48f', trimEnd: '12f' });
+  assert.deepEqual(sharedClipTrimSpecs([main]), { trimStart: '', trimEnd: '' });
+  assert.equal(sharedClipTrimSpecs([trimmed[0], textless]), null, 'clips keeping different frames leave the fields as typed');
+  assert.equal(durationFrames('2s', [24000, 1001]), 48);
+  assert.throws(() => withClipTrims(main, 200, 40), RangeError);
+});
+
+test('an unprobed clip waits for its frames before it takes the Trim fields, and the build reads the fields until then', () => {
+  const unprobed = composition('Main', { clips: [clip(1, 0, 0, 0)] });
+  const segmented = composition('Main', { clips: [clip(1, 240, 0, 240)], reelStarts: [120] });
+
+  assert.equal(withClipTrims(unprobed, 48, 12), unprobed);
+  assert.equal(everySingleClipProbed([unprobed]), false);
+  assert.equal(sharedClipTrimSpecs([unprobed]), null);
+  assert.equal(everySingleClipProbed([composition('Main', { clips: [clip(1, 240, 0, 240)] })]), true);
+  assert.equal(sharedClipTrimSpecs([segmented]), null, 'the fields are off beside a segment start');
 });

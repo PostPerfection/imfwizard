@@ -1,17 +1,58 @@
 import { assetPath, firstSoundAsset, timelineWire } from "../../extern/guikit/src/composition-timeline.js";
+import { setClipRange } from "../../extern/guikit/src/timeline-editor.js";
+
+const SECONDS_UNIT = "s";
+
+// durations are spelled as the CLI spells them: frames or seconds, never bare
+export const DURATION_SPEC = /^(\d+f|\d+(\.\d+)?s)$/i;
 
 function frameSpec(frames) {
   return `${frames}f`;
 }
 
-function clipIsTrimmed(clip) {
-  return clip.inFrame > 0 || clip.outFrame < clip.frames;
+// the panel's Trim and Still Length apply while every timeline is at most one clip with no segment start
+export function timelinesSetClipLengths(compositions) {
+  return compositions.some(({ timeline }) => timeline.clips.length > 1 || timeline.reelStarts.length > 0);
 }
 
-// the panel's Trim and Still Length apply while every timeline is one whole clip
-export function timelinesSetClipLengths(compositions) {
-  return compositions.some(({ timeline }) =>
-    timeline.clips.length > 1 || timeline.reelStarts.length > 0 || timeline.clips.some(clipIsTrimmed));
+// a spec DURATION_SPEC accepts, read at the job's rate as the build reads it
+export function durationFrames(spec, [numerator, denominator]) {
+  const value = Number(spec.slice(0, -1));
+  if (spec.slice(-1).toLowerCase() !== SECONDS_UNIT) return value;
+  return Math.round((value * numerator) / denominator);
+}
+
+// the Trim fields are the single clip's in and out points, which an unprobed clip takes once it is probed
+export function withClipTrims(composition, trimStartFrames, trimEndFrames) {
+  const { timeline } = composition;
+  const [clip] = timeline.clips;
+  if (!clip || clip.frames === 0) return composition;
+  const outFrame = clip.frames - trimEndFrames;
+  if (trimStartFrames >= outFrame) {
+    throw new RangeError(`The trims leave none of the ${clip.frames} frames of ${composition.name}'s clip`);
+  }
+  return { ...composition, timeline: setClipRange(timeline, 0, trimStartFrames, outFrame) };
+}
+
+function singleClips(compositions) {
+  return compositions.filter(({ timeline }) => timeline.clips.length === 1).map(({ timeline }) => timeline.clips[0]);
+}
+
+export function everySingleClipProbed(compositions) {
+  return singleClips(compositions).every((clip) => clip.frames > 0);
+}
+
+function clipTrimFrames(clip) {
+  return [clip.inFrame, clip.frames - clip.outFrame];
+}
+
+// what the Trim fields show, null while they are off, a clip is unprobed or the clips keep different frames
+export function sharedClipTrimSpecs(compositions) {
+  const clips = singleClips(compositions);
+  if (timelinesSetClipLengths(compositions) || clips.length === 0 || !everySingleClipProbed(compositions)) return null;
+  const [trimStart, trimEnd] = clipTrimFrames(clips[0]);
+  if (!clips.every((clip) => sameTrim(clipTrimFrames(clip), [trimStart, trimEnd]))) return null;
+  return { trimStart: trimStart > 0 ? frameSpec(trimStart) : "", trimEnd: trimEnd > 0 ? frameSpec(trimEnd) : "" };
 }
 
 // mirrors takes_the_single_path, where a sound or subtitle on the timeline is timed against the timeline
@@ -36,7 +77,7 @@ function compositionRequest(composition, title, assetById) {
   const [clip, ...laterClips] = timeline.clips;
   const named = { title, contentKind: composition.contentKind || "feature" };
   if (laterClips.length === 0 && takesSingleRequest(timeline, clip)) {
-    const trimFrames = [clip.inFrame, clip.frames - clip.outFrame];
+    const trimFrames = clipTrimFrames(clip);
     return { request: { ...named, ...singleRequest(timeline, clip, assetById) }, trimFrames };
   }
   const timelineRequest = { videoPath: "", audioPath: null, subtitles: [], timeline: timelineWire(timeline, assetById) };

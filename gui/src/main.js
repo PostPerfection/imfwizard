@@ -30,7 +30,7 @@ import {
   withReelStartingClipsPlaced,
   withUnplacedAssetsFilled,
 } from "../../extern/guikit/src/composition-timeline.js";
-import { compositionsRequest, timelinesSetClipLengths } from "./composition-request.js";
+import { DURATION_SPEC, compositionsRequest, durationFrames, everySingleClipProbed, sharedClipTrimSpecs, timelinesSetClipLengths, withClipTrims } from "./composition-request.js";
 import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
 import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
@@ -373,10 +373,14 @@ async function probeUnprobedClips() {
 
 // clips placed before their source was probed get its length and rate
 function takeProbedFrames(asset) {
+  const waitingForTrims = new Set(project.compositions
+    .filter(({ timeline }) => timeline.clips.length === 1 && timeline.clips[0].picture === asset.id && timeline.clips[0].frames === 0)
+    .map((composition) => composition.id));
   project.compositions = project.compositions.map((composition) => ({
     ...composition,
     timeline: withFirstClipRate(withProbedFrames(composition.timeline, asset.id, asset.frames), assetById),
   }));
+  takeTrimFields((composition) => waitingForTrims.has(composition.id));
   showActiveTimeline();
 }
 
@@ -454,12 +458,56 @@ function afterTimelineChange() {
 }
 
 // the job's trims and still length apply to every composition
-const CLIP_LENGTH_FIELD_IDS = ["prop-trim-start", "prop-trim-end", "prop-still-length"];
+const TRIM_START_FIELD_ID = "prop-trim-start";
+const TRIM_END_FIELD_ID = "prop-trim-end";
+const TRIM_START_LABEL = "Trim from start";
+const TRIM_END_LABEL = "Trim from end";
+const CLIP_LENGTH_FIELD_IDS = [TRIM_START_FIELD_ID, TRIM_END_FIELD_ID, "prop-still-length"];
 
 function refreshClipLengthFields() {
   const fromTimelines = timelinesSetClipLengths(project.compositions);
   for (const id of CLIP_LENGTH_FIELD_IDS) document.getElementById(id).disabled = fromTimelines;
   document.getElementById("prop-clip-length-hint").hidden = !fromTimelines;
+  const shared = sharedClipTrimSpecs(project.compositions);
+  if (!shared) return;
+  document.getElementById(TRIM_START_FIELD_ID).value = shared.trimStart;
+  document.getElementById(TRIM_END_FIELD_ID).value = shared.trimEnd;
+}
+
+function typedDuration(id, label) {
+  const value = document.getElementById(id)?.value?.trim();
+  if (!value) return null;
+  if (!DURATION_SPEC.test(value)) {
+    throw new Error(`${label} "${value}" is not a duration: use frames like 48f or seconds like 2s`);
+  }
+  return value;
+}
+
+function typedTrimFrames(id, label) {
+  const spec = typedDuration(id, label);
+  const jobRate = parseFrameRate(document.getElementById("prop-framerate")?.value) ?? DEFAULT_TIMELINE_FPS;
+  return spec === null ? 0 : durationFrames(spec, jobRate);
+}
+
+// false when a clip cannot take the typed trims, which the status names
+function takeTrimFields(takesTrims) {
+  if (timelinesSetClipLengths(project.compositions)) return true;
+  try {
+    const trimStartFrames = typedTrimFrames(TRIM_START_FIELD_ID, TRIM_START_LABEL);
+    const trimEndFrames = typedTrimFrames(TRIM_END_FIELD_ID, TRIM_END_LABEL);
+    project.compositions = project.compositions.map((composition) =>
+      takesTrims(composition) ? withClipTrims(composition, trimStartFrames, trimEndFrames) : composition);
+  } catch (error) {
+    setStatus(error.message);
+    return false;
+  }
+  return true;
+}
+
+for (const id of [TRIM_START_FIELD_ID, TRIM_END_FIELD_ID]) {
+  document.getElementById(id).addEventListener("change", () => {
+    if (takeTrimFields(() => true)) showActiveTimeline();
+  });
 }
 
 // === Multi-CPL Management ===
@@ -895,29 +943,16 @@ function readAudioMap() {
 // === Build IMP ===
 let currentJobId = null;
 
-// durations are spelled as the CLI spells them: frames or seconds, never bare
-const DURATION_SPEC = /^(\d+f|\d+(\.\d+)?s)$/i;
-
 // Read the Properties panel's source treatment. A bad duration throws here so a
-// build fails before the encode rather than partway through it. Clip trims
-// stand in for the Trim and Still Length fields while a timeline sets the
-// clips' lengths.
-function readSourceSettings(clipTrims) {
-  const duration = (id, label) => {
-    const value = document.getElementById(id)?.value?.trim();
-    if (!value) return null;
-    if (!DURATION_SPEC.test(value)) {
-      throw new Error(`${label} "${value}" is not a duration: use frames like 48f or seconds like 2s`);
-    }
-    return value;
+// build fails before the encode rather than partway through it. The clips'
+// trims stand in for the Trim fields once every single clip is probed, and
+// Still Length is off while a timeline sets the clips' lengths.
+function readSourceSettings(clipTrims, trimsFromClips, lengthsFromTimelines) {
+  const clipLengths = {
+    trimStart: trimsFromClips ? clipTrims.trimStart : typedDuration(TRIM_START_FIELD_ID, TRIM_START_LABEL),
+    trimEnd: trimsFromClips ? clipTrims.trimEnd : typedDuration(TRIM_END_FIELD_ID, TRIM_END_LABEL),
+    stillLength: lengthsFromTimelines ? null : typedDuration("prop-still-length", "Still length"),
   };
-  const clipLengths = clipTrims
-    ? { ...clipTrims, stillLength: null }
-    : {
-        trimStart: duration("prop-trim-start", "Trim from start"),
-        trimEnd: duration("prop-trim-end", "Trim from end"),
-        stillLength: duration("prop-still-length", "Still length"),
-      };
   return {
     audioDelayMs: parseInt(document.getElementById("prop-audio-delay")?.value) || 0,
     sourceColourspace: document.getElementById("prop-source-colourspace")?.value || "rec709",
@@ -993,11 +1028,16 @@ function cropPixels(id, label) {
 function currentJobRequest() {
   const title = document.getElementById("prop-title")?.value?.trim() || "";
   const { compositions, clipTrims } = compositionsRequest(project.compositions, title, assetById);
+  const lengthsFromTimelines = timelinesSetClipLengths(project.compositions);
   return {
     title,
     outputDir: document.getElementById("prop-output")?.value || "",
     compositions,
-    sourceSettings: readSourceSettings(timelinesSetClipLengths(project.compositions) ? clipTrims : null),
+    sourceSettings: readSourceSettings(
+      clipTrims,
+      lengthsFromTimelines || everySingleClipProbed(project.compositions),
+      lengthsFromTimelines,
+    ),
     framerate: document.getElementById("prop-framerate")?.value || "24/1",
     bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,

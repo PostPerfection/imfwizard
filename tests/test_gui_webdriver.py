@@ -1199,6 +1199,11 @@ return [box.left + box.width * arguments[1], box.top + box.height / 2];
 """
 
 
+TRIM_START_FIELD = "#prop-trim-start"
+TRIM_START = "12f"
+TRIM_START_TIMECODE = "00:00:00:12"
+
+
 def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path):
     session = window.session
     picture = tmp_path / "source.mov"
@@ -1245,6 +1250,14 @@ def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path)
         "a click on the clip never seeked the preview",
         lambda: abs(session.execute(PREVIEW_METADATA)["position"] - CLICKED_SECONDS)
         <= SEEK_TOLERANCE_SECONDS,
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    replace_field_text(window, TRIM_START_FIELD, TRIM_START)
+    window.press(NEXT_FIELD_KEY)
+    wait_until(
+        "Trim From Start never moved the clip's in point, which Play timeline plays from",
+        lambda: session.execute(CLIP_TITLES) == [clip_title(picture.name, TRIM_START_TIMECODE, whole_clip[1])],
         REACTION_TIMEOUT_SECONDS,
     )
 
