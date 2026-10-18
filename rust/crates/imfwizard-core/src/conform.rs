@@ -156,6 +156,7 @@ pub fn write_conform_manifest(plan: &ConformPlan, output_dir: &Path) -> std::io:
 /// The timeline the plan plays: a clip an event, with the media's own sound when
 /// it carries any, and one segment.
 pub fn timeline_from_plan(plan: &ConformPlan) -> Result<postkit::timeline::Timeline, String> {
+    let mut start = 0;
     let clips = plan
         .events
         .iter()
@@ -163,8 +164,13 @@ pub fn timeline_from_plan(plan: &ConformPlan) -> Result<postkit::timeline::Timel
             let info = postkit::probe::probe_video(&event.media).ok_or_else(|| {
                 format!("ffprobe read no picture out of {}", event.media.display())
             })?;
+            let clip_start = start;
+            start += event.frames();
             Ok(postkit::timeline::Clip {
                 picture: event.media.clone(),
+                start: clip_start,
+                layer: 0,
+                opacity: 1.0,
                 in_frame: event.source_in,
                 out_frame: event.source_out,
                 sound: if info.has_audio {

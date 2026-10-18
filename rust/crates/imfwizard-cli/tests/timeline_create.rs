@@ -18,15 +18,18 @@ fn cmd() -> Command {
 }
 
 fn write_media(dir: &Path, name: &str, tone_hz: u32) -> PathBuf {
+    write_media_of(dir, name, &format!("testsrc2={}", media_picture()), tone_hz)
+}
+
+fn media_picture() -> String {
+    format!("size={WIDTH}x{HEIGHT}:rate={FPS}:duration=1")
+}
+
+fn write_media_of(dir: &Path, name: &str, picture_source: &str, tone_hz: u32) -> PathBuf {
     let media = dir.join(name);
     let made = std::process::Command::new("ffmpeg")
         .args(["-y", "-v", "error"])
-        .args([
-            "-f",
-            "lavfi",
-            "-i",
-            &format!("testsrc2=size={WIDTH}x{HEIGHT}:rate={FPS}:duration=1"),
-        ])
+        .args(["-f", "lavfi", "-i", picture_source])
         .args([
             "-f",
             "lavfi",
@@ -46,9 +49,12 @@ fn write_media(dir: &Path, name: &str, tone_hz: u32) -> PathBuf {
     media
 }
 
-fn clip(picture: &Path, (in_frame, out_frame): (u64, u64)) -> Clip {
+fn clip(picture: &Path, start: u64, (in_frame, out_frame): (u64, u64)) -> Clip {
     Clip {
         picture: picture.to_path_buf(),
+        start,
+        layer: 0,
+        opacity: 1.0,
         in_frame,
         out_frame,
         sound: ClipSound::Embedded,
@@ -136,7 +142,10 @@ fn two_clips_with_a_reel_start_build_two_segments() {
     let second = write_media(dir.path(), "second.mov", 880);
     let timeline = write_timeline(
         dir.path(),
-        vec![clip(&first, FIRST_CLIP), clip(&second, SECOND_CLIP)],
+        vec![
+            clip(&first, 0, FIRST_CLIP),
+            clip(&second, FIRST_CLIP.1 - FIRST_CLIP.0, SECOND_CLIP),
+        ],
         vec![REEL_START],
     );
     let imp = dir.path().join("imp");
@@ -194,7 +203,7 @@ fn one_clip_builds_what_the_trimmed_video_build_does() {
     let (in_frame, out_frame) = (2, 7);
     let timeline = write_timeline(
         dir.path(),
-        vec![clip(&media, (in_frame, out_frame))],
+        vec![clip(&media, 0, (in_frame, out_frame))],
         vec![],
     );
 
@@ -243,7 +252,7 @@ fn a_timeline_beside_a_video_is_refused_naming_the_flag() {
     let dir = TempDir::new().unwrap();
     let timeline = write_timeline(
         dir.path(),
-        vec![clip(Path::new("/media/a.mov"), (0, 1))],
+        vec![clip(Path::new("/media/a.mov"), 0, (0, 1))],
         vec![],
     );
     cmd()
@@ -261,7 +270,10 @@ fn a_burn_on_a_timeline_of_two_clips_is_refused_by_name() {
     let media = write_media(dir.path(), "feature.mov", 440);
     let timeline = write_timeline(
         dir.path(),
-        vec![clip(&media, FIRST_CLIP), clip(&media, SECOND_CLIP)],
+        vec![
+            clip(&media, 0, FIRST_CLIP),
+            clip(&media, FIRST_CLIP.1 - FIRST_CLIP.0, SECOND_CLIP),
+        ],
         vec![],
     );
     let imp = dir.path().join("imp");
@@ -278,4 +290,143 @@ fn a_burn_on_a_timeline_of_two_clips_is_refused_by_name() {
             "--burn-subtitle is not supported on a timeline of more than one clip",
         ));
     assert!(!imp.exists(), "a refusal writes nothing");
+}
+
+// layer 0 is black for GAP_FRAMES, then blue, with a still sequence on layer 1
+// that is red on its left half and transparent on its right
+const GAP_FRAMES: u64 = 3;
+const OVERLAY_START: u64 = 5;
+const OVERLAY_FRAMES: u64 = 4;
+// the stretches: the gap, blue, red over blue, blue
+const STRETCH_WINDOWS: [(u64, u64); 4] = [(0, 3), (0, 2), (0, 4), (0, 2)];
+// a full scale 12-bit sample has to come back above this, and an empty one below the ceiling
+const FULL_FLOOR: i32 = 3500;
+const EMPTY_CEILING: i32 = 400;
+
+fn write_half_red_stills(dir: &Path) -> PathBuf {
+    let stills = dir.join("half_red");
+    std::fs::create_dir_all(&stills).unwrap();
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+        .arg(format!(
+            "color=c=red:size={}x{HEIGHT}:rate={FPS}",
+            WIDTH / 2
+        ))
+        .arg("-vf")
+        .arg(format!(
+            "format=rgba,pad={WIDTH}:{HEIGHT}:0:0:color=black@0"
+        ))
+        .args(["-frames:v", &OVERLAY_FRAMES.to_string(), "-pix_fmt", "rgba"])
+        .arg(stills.join("frame_%04d.png"))
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    stills
+}
+
+// the first frame's samples left and right of the centre
+fn first_frame_samples(mxf: &Path, unwrapped: &Path) -> [[i32; 3]; 2] {
+    let info = postkit::mxf_unwrap::unwrap_picture_mxf(
+        mxf,
+        unwrapped,
+        &std::sync::atomic::AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .expect("the track file reads back");
+    assert_eq!((info.width, info.height), (WIDTH, HEIGHT));
+    let mut codestreams: Vec<PathBuf> = std::fs::read_dir(unwrapped)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    codestreams.sort();
+    assert_eq!(codestreams.len() as u64, info.frames);
+    let frame = postkit::grok_decoder::decode(std::fs::read(&codestreams[0]).unwrap(), 0)
+        .expect("the codestream decodes");
+    assert_eq!(frame.precision, 12);
+    [WIDTH / 4, WIDTH * 3 / 4].map(|x| {
+        let at = (HEIGHT / 2 * WIDTH + x) as usize;
+        [0, 1, 2].map(|component| frame.components[component][at])
+    })
+}
+
+fn only(sample: [i32; 3], full_component: Option<usize>) -> bool {
+    (0..3).all(|component| {
+        if Some(component) == full_component {
+            sample[component] > FULL_FLOOR
+        } else {
+            sample[component] < EMPTY_CEILING
+        }
+    })
+}
+
+#[test]
+fn a_gap_and_an_overlay_with_alpha_build_a_track_file_a_stretch() {
+    const RED: Option<usize> = Some(0);
+    const BLUE: Option<usize> = Some(2);
+    const BLACK: Option<usize> = None;
+    let dir = TempDir::new().unwrap();
+    let blue = write_media_of(
+        dir.path(),
+        "blue.mov",
+        &format!("color=c=blue:{}", media_picture()),
+        440,
+    );
+    let half_red = write_half_red_stills(dir.path());
+    let timeline = write_timeline(
+        dir.path(),
+        vec![
+            clip(&blue, GAP_FRAMES, (0, u64::from(MEDIA_FRAMES))),
+            Clip {
+                layer: 1,
+                sound: ClipSound::None,
+                ..clip(&half_red, OVERLAY_START, (0, OVERLAY_FRAMES))
+            },
+        ],
+        vec![],
+    );
+    let imp = dir.path().join("imp");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy(), "-t", "Layered"])
+        .args(["--timeline", &timeline.to_string_lossy()])
+        .assert()
+        .success();
+    let photon = imfwizard_core::photon::run_photon(&imp, None).expect("Photon analyses the IMP");
+    assert!(
+        photon.errors.is_empty() && photon.warnings.is_empty(),
+        "Photon errors {:?}, warnings {:?}",
+        photon.errors,
+        photon.warnings
+    );
+
+    let cpl = read_cpl(&imp);
+    assert_eq!(
+        resource_windows(&cpl, "MainImageSequence"),
+        STRETCH_WINDOWS.to_vec(),
+        "{cpl}"
+    );
+    assert_eq!(
+        resource_windows(&cpl, "MainAudioSequence"),
+        vec![(0, GAP_FRAMES + u64::from(MEDIA_FRAMES))]
+    );
+    let track_files: Vec<PathBuf> = sequence_values(&cpl, "MainImageSequence", "TrackFileId")
+        .iter()
+        .map(|id| imp.join(format!("VIDEO_{}.mxf", id.trim_start_matches("urn:uuid:"))))
+        .collect();
+    let want = [[BLACK, BLACK], [BLUE, BLUE], [RED, BLUE], [BLUE, BLUE]];
+    assert_eq!(track_files.len(), want.len(), "{cpl}");
+    for (index, (track_file, want)) in track_files.iter().zip(want).enumerate() {
+        let samples =
+            first_frame_samples(track_file, &dir.path().join(format!("unwrapped_{index}")));
+        assert!(
+            samples
+                .iter()
+                .zip(want)
+                .all(|(&sample, want)| only(sample, want)),
+            "stretch {index} samples {samples:?} left and right, not {want:?}"
+        );
+    }
 }

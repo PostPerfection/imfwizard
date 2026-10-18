@@ -55,8 +55,9 @@ export function sharedClipTrimSpecs(compositions) {
   return { trimStart: trimStart > 0 ? frameSpec(trimStart) : "", trimEnd: trimEnd > 0 ? frameSpec(trimEnd) : "" };
 }
 
-// mirrors takes_the_single_path, where a sound or subtitle on the timeline is timed against the timeline
+// mirrors postkit's shape and takes_the_single_path, where a sound or subtitle on the timeline is timed against the timeline
 function takesSingleRequest(timeline, clip) {
+  if (clip.start !== 0 || clip.layer !== 0 || clip.opacity !== 1) return false;
   if (timeline.reelStarts.length > 0) return false;
   if (timeline.subtitle !== null && clip.subtitle !== null) return false;
   return clip.inFrame === 0 || (timeline.sound === null && timeline.subtitle === null);

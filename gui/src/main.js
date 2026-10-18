@@ -11,7 +11,7 @@ import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
-import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
+import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, baseClipsInOrder, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
 import {
   DEFAULT_TIMELINE_FPS,
   TIMELINE_KIND_BY_ASSET_TYPE,
@@ -707,7 +707,7 @@ function applyPreviewSelection() {
 }
 
 function previewTargetInput() {
-  const firstClip = activeTimeline().clips[0];
+  const firstClip = baseClipsInOrder(activeTimeline())[0]?.clip;
   return {
     selectedPreview,
     firstPicturePath: firstClip ? assetPath(firstClip.picture) : undefined,
@@ -842,7 +842,8 @@ document.getElementById("btn-supplement")?.addEventListener("click", () => {
 
 // === Source picture processing ===
 document.getElementById("prop-auto-crop")?.addEventListener("click", async () => {
-  const clip = activeTimeline().clips[previewedClipIndex ?? 0];
+  const timeline = activeTimeline();
+  const clip = previewedClipIndex === null ? baseClipsInOrder(timeline)[0]?.clip : timeline.clips[previewedClipIndex];
   const picture = clip ? assetById(clip.picture) : null;
   const plan = document.getElementById("prop-picture-plan");
   const button = document.getElementById("prop-auto-crop");

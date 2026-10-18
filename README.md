@@ -34,7 +34,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Burn-in appearance**, `create --burn-font-size`, `--burn-colour`, `--burn-effect none|outline|shadow`, `--burn-effect-colour`, `--burn-outline-width`, `--burn-line-height`, `--burn-margin`, `--burn-x-scale`, `--burn-y-scale`, `--burn-fade-up` and `--burn-fade-down` set how the burnt text looks. A flag left out keeps the default, and any of them without `--burn-subtitle` is refused by name. The Properties panel carries all but the two scales
 - **Subtitle burn-in as a standalone pass**, `burn-in` renders SRT or ASS into video frames via ffmpeg, outside a package
 - **Trim**, `create --trim-start` / `--trim-end` take frames (`48f`) or seconds (`2s`) off the head and tail; picture, sound and timed text move together, and cues outside the kept range are dropped or clamped
-- **Timelines**, `create --timeline <file>`: clips in order, each cut to its own in and out point with its own sound and subtitle, fitted onto one raster and built into one composition with a segment at each reel start. See [Timeline file](#timeline-file)
+- **Timelines**, `create --timeline <file>`: clips placed at timeline frames, each cut to its own in and out point with its own sound and subtitle, fitted onto one raster and built into one composition with a segment at each reel start. Clips on higher layers composite over layer 0 at their opacity through their alpha, and a gap on layer 0 is black and silent. See [Timeline file](#timeline-file)
 - **Source picture processing**, `create --crop-left/--crop-right/--crop-top/--crop-bottom` cut source pixels off each side, `--auto-crop` (`--auto-crop-threshold`) measures the black borders and cuts them, `--fill-crop` crops to the target aspect instead of padding to it, `--deinterlace`, `--denoise`, `--rotate 90|180|270`, `--flip horizontal|vertical|both`, and `--raster <WxH>` fits the result into one of the App 2E rasters. Anything other than the untouched source is fitted into a raster, so the App 2E check runs on what the encoder writes rather than on the source
 - **Still image with duration**, `create --still-length` holds a single image (dpx, tif/tiff, exr, png, jpg/jpeg, bmp) for that long, encoding it once and repeating the codestream. With `--burn-subtitle` the repeat breaks only where the cues change, so the hold costs a handful of encodes rather than one per frame
 
@@ -105,7 +105,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 ### Desktop GUI (Tauri 2)
 - **Dark theme** by default with optional light mode toggle
 - **File import** (video, WAV, TTML/subtitle) via file picker. An imported video goes on the end of the active composition's timeline, and the first WAV and the first subtitle cover the whole timeline
-- **Timeline**, the project view shows each composition as picture, sound and timed text tracks. A clip is a source with an In and an Out point, set by timecode or from the preview's playhead. A WAV or subtitle dropped on a clip is that clip's own, and dropped on the track label it covers the whole timeline. Split segment here starts a CPL segment at the playhead, and clicking a marker removes it. Clicking a clip seeks the preview to that frame of its source once the preview plays one of the timeline's clips, and the playhead follows playback. A timeline of one clip without a segment start builds as a single picture always has, its In and Out going in as the trims. Any other timeline builds clip by clip and has to be the only composition of its build. Trim and Still Length are off while any composition's timeline sets its clips' lengths, and two compositions whose single clips are trimmed differently are refused by name, since the trims apply to every composition
+- **Timeline**, the project view shows each composition as a picture row a layer over sound and timed text tracks. A clip is a source with an In and an Out point, set by timecode or from the preview's playhead, and a Start on the timeline. A clip drags along its row to a new start or onto another row to change its layer, and a video dropped on the empty row above the top layer goes on a new layer. A clip above layer 0 has an Opacity and no sound, and a gap left on layer 0 builds as black and silence. A WAV or subtitle dropped on a clip is that clip's own, and dropped on the track label it covers the whole timeline. Split segment here starts a CPL segment at the playhead, and clicking a marker removes it. Clicking a clip seeks the preview to that frame of its source once the preview plays one of the timeline's clips, and the playhead follows playback. A timeline of one clip at frame 0 on layer 0 at full opacity without a segment start builds as a single picture always has, its In and Out going in as the trims. Any other timeline builds stretch by stretch and has to be the only composition of its build. Trim and Still Length are off while any composition's timeline sets its clips' lengths, and two compositions whose single clips are trimmed differently are refused by name, since the trims apply to every composition
 - **Keyboard shortcuts**, Ctrl+N/O/S/B/P/I, Ctrl+Shift+S (Save As), Ctrl+Shift+O (Open IMP), Ctrl+Shift+N (Create supplement), Ctrl+1..7 for the views in sidebar order, Ctrl+Shift+P/A/E/F for Play, Queue, Inspect and Reveal on a finished build, and Space/arrows/,/./Home/F during preview. Every button in a view has an Alt+letter, underlined while Alt is held and named in its tooltip. Alt letters don't work while a text field has focus, Escape leaves the field first. Ctrl+Enter runs the action of the focused section, Alt+Down in a path field opens its file dialog, and Alt+P opens the Project menu, where N, O, S and A run its items and the arrow keys pick a recent project. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
@@ -807,16 +807,17 @@ track file each event became and the sound track file that plays it.
 
 ### Timeline file
 
-`create --timeline` reads a JSON file of clips in order, the shape `conform`
-writes.
+`create --timeline` reads a JSON file of clips placed on layers, the shape
+`conform` writes.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "fps": { "numerator": 24, "denominator": 1 },
   "clips": [
     {
       "picture": "/media/feature.mov",
+      "start": 0,
       "in_frame": 192,
       "out_frame": 151200,
       "sound": "Embedded",
@@ -824,9 +825,20 @@ writes.
     },
     {
       "picture": "/media/trailer.mov",
+      "start": 151008,
       "in_frame": 0,
       "out_frame": 2880,
       "sound": { "File": "/media/trailer.wav" },
+      "subtitle": null
+    },
+    {
+      "picture": "/media/titles_png",
+      "start": 0,
+      "layer": 1,
+      "opacity": 0.8,
+      "in_frame": 0,
+      "out_frame": 240,
+      "sound": "None",
       "subtitle": null
     }
   ],
@@ -836,12 +848,18 @@ writes.
 }
 ```
 
-Frames count from the source's first frame and `out_frame` is exclusive. Every
+Frames count from the source's first frame and `out_frame` is exclusive. `start` is
+the timeline frame the clip's in point plays at. `layer` is 0 unless given, and a
+clip on a higher layer lies over the ones below it, bottom to top, through its
+source's straight alpha scaled by `opacity`, 0 to 1 and 1 unless given. Two clips
+on one layer cannot overlap. Layer 0 may leave gaps, which play black and silent,
+and the timeline runs to the furthest clip end on any layer. Every
 clip has to run at `fps`, which is the edit rate, and a clip at another rate is
 refused by name. A clip's `sound` is `"Embedded"` (the audio in its picture file),
 `{ "File": "<wav>" }` (a WAV cut at the clip's frames) or `"None"` (silence for its
-length), and the clips with sound have to share a channel count. The timeline's
-`sound` is `"PerClip"`, the clips' sound joined in order, or
+length), a clip above layer 0 is always `"None"`, and the clips with sound have to
+share a channel count. The timeline's
+`sound` is `"PerClip"`, the layer 0 clips' sound joined in order, or
 `{ "Override": "<wav>" }`, one WAV for the whole timeline. A clip's `subtitle` is an
 SRT timed against its own source, shifted to the clip's place and cut to its range.
 The timeline's `subtitle` is timed against the timeline and takes any format
@@ -850,21 +868,24 @@ never 0, and each starts a CPL segment. On a timeline of more than one clip, a c
 may also carry `source_colour` and `picture_processing` in postkit's shapes, which
 replace the create flags for that clip.
 
-Every clip becomes one picture track file, fitted onto the `--raster` raster, else
-the first clip's own. The picture flags and `--auto-crop` resolve per clip from its
-own size, and a J2K directory or picture MXF clip is refused. The sound becomes one
-sound track file and the subtitles one timed text track file. A reel start inside
-a clip splits that clip's track file between two segments by entry point, and the
-sound and timed text play one resource a segment. `--timeline` is refused beside
+The timeline is cut at every clip's start and end, and each stretch between two
+cuts becomes one picture track file, its clips composited bottom to top and fitted
+onto the `--raster` raster, else the raster of the first clip on layer 0. A gap
+with nothing over it is black at that raster. The picture flags and `--auto-crop`
+resolve per clip from its own size, and a J2K directory or picture MXF clip is
+refused. The clips of one stretch have to share a source colour. The sound becomes
+one sound track file and the subtitles one timed text track file. A reel start
+inside a stretch splits its track file between two segments by entry point, and
+the sound and timed text play one resource a segment. `--timeline` is refused beside
 `--video`, `--audio`, `--subtitle`, `--trim-start`, `--trim-end`, `--still-length`,
-`--fps-num` and `--fps-den`. A timeline built clip by clip also refuses
+`--fps-num` and `--fps-den`. A timeline built stretch by stretch also refuses
 `--burn-subtitle` and its appearance flags, `--audio-delay`, `--audio-map` and
 `--atmos`. `--check` runs every create refusal on every clip.
 
-A timeline of one clip builds as `--video` does, with `--trim-start` and
+A timeline of one clip at frame 0 on layer 0 at full opacity builds as `--video` does, with `--trim-start` and
 `--trim-end` taken from its in and out points and `--audio` from its WAV or the
-override, so burn-in and the other create flags work. It builds clip by clip
-instead when it has reel starts, or when its in point is past 0 and an override
+override, so burn-in and the other create flags work. It builds stretch by
+stretch instead when it has reel starts, or when its in point is past 0 and an override
 WAV or a timeline subtitle is timed against the timeline.
 
 ### Frame comparison

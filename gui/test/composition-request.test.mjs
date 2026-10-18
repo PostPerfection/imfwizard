@@ -25,7 +25,7 @@ function assetById(assetId) {
 }
 
 function clip(picture, frames, inFrame, outFrame, sound = { kind: 'embedded', asset: null }, subtitle = null) {
-  return { picture, frames, inFrame, outFrame, sound, subtitle };
+  return { picture, frames, start: 0, layer: 0, opacity: 1, inFrame, outFrame, sound, subtitle };
 }
 
 function composition(name, timeline) {
@@ -74,7 +74,10 @@ test('a clip without sound goes silent rather than taking the picture file sound
 });
 
 test('two clips go as a timeline of paths and nothing in the single picture fields', () => {
-  const main = composition('Main', { clips: [clip(1, 240, 0, 240), clip(2, 96, 12, 84, { kind: 'file', asset: 3 })], reelStarts: [240] });
+  const main = composition('Main', {
+    clips: [clip(1, 240, 0, 240), { ...clip(2, 96, 12, 84, { kind: 'file', asset: 3 }), start: 240 }],
+    reelStarts: [240],
+  });
 
   const { compositions, clipTrims } = compositionsRequest([main], 'Film', assetById);
 
@@ -93,8 +96,11 @@ test('two clips go as a timeline of paths and nothing in the single picture fiel
 test('what the single picture request times against the source goes as a timeline', () => {
   const segmented = composition('Main', { clips: [clip(1, 240, 0, 240)], reelStarts: [120] });
   const timedAgainstTimeline = composition('Main', { clips: [clip(1, 240, 24, 240)], sound: 5 });
+  const afterAGap = composition('Main', { clips: [{ ...clip(1, 240, 0, 240), start: 24 }] });
+  const overTheBase = composition('Main', { clips: [{ ...clip(1, 240, 0, 240), layer: 1, sound: { kind: 'none', asset: null } }] });
+  const seeThrough = composition('Main', { clips: [{ ...clip(1, 240, 0, 240), opacity: 0.5 }] });
 
-  for (const timeline of [segmented, timedAgainstTimeline]) {
+  for (const timeline of [segmented, timedAgainstTimeline, afterAGap, overTheBase, seeThrough]) {
     const [request] = compositionsRequest([timeline], 'Film', assetById).compositions;
     assert.equal(request.videoPath, '');
     assert.ok(request.timeline);

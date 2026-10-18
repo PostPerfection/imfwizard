@@ -41,7 +41,7 @@ REACTION_TIMEOUT_SECONDS = 15
 BUILD_TITLE = "Wizard End To End"
 
 PROJECT_WIZARD = "imfwizard"
-PROJECT_FILE_VERSION = 2
+PROJECT_FILE_VERSION = 3
 
 # both printed by imfwizard create --check on the media write_media makes
 LANGUAGE_HINT = "The sound has no language set. Set one unless it has no spoken parts."
@@ -1071,6 +1071,17 @@ def set_clip_range(window, index, in_timecode, out_timecode):
     window.press(NEXT_FIELD_KEY)
 
 
+# a trim leaves the clips after it where they were
+def start_the_second_clip_where_the_first_ends(window):
+    replace_field_text(window, TIMELINE_START_FIELD, FIRST_CLIP_OUT)
+    window.press(NEXT_FIELD_KEY)
+    wait_until(
+        "the second clip never took its start",
+        lambda: window.session.property(TIMELINE_START_FIELD, "value") == FIRST_CLIP_OUT,
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+
 def click_first_frame_of_clip(window, css, kept_frames):
     x, y = window.session.execute(FIRST_FRAME_OF_CLIP, css, kept_frames)
     xdotool(
@@ -1122,6 +1133,7 @@ def test_two_clips_with_trims_and_a_segment_start_build_a_two_segment_imp(window
 
     set_clip_range(window, 0, WHOLE_CLIP[0], FIRST_CLIP_OUT)
     set_clip_range(window, 1, SECOND_CLIP_IN, SECOND_CLIP_OUT)
+    start_the_second_clip_where_the_first_ends(window)
     wait_until(
         "the clips never took their in and out points",
         lambda: session.execute(CLIP_TITLES)
@@ -1163,6 +1175,153 @@ def test_two_clips_with_trims_and_a_segment_start_build_a_two_segment_imp(window
         (SECOND_CLIP_IN_FRAME, SECOND_CLIP_OUT_FRAME),
     ]
     assert timeline["reelStarts"] == [FIRST_CLIP_OUT_FRAME]
+
+
+LAYER_ROW = '#timeline-editor .timeline-editor-track[data-layer="{}"] .timeline-editor-track-content'
+TIMELINE_START_FIELD = '#timeline-editor input[data-field="start"]'
+SELECTED_CLIP_NAME = "#timeline-editor .timeline-editor-clip-name"
+LAYERED_TITLE = "Layered End To End"
+BASE_CLIP_SECONDS = 2
+OVERLAY_SECONDS = 1
+OVERLAY_START = "00:00:00:12"
+OVERLAY_START_FRAME = 12
+OVERLAY_FRAMES = OVERLAY_SECONDS * FIXTURE_FPS
+BASE_FRAMES = BASE_CLIP_SECONDS * FIXTURE_FPS
+# the drop lands a quarter of the way along the empty row
+DROP_FRACTION = 0.25
+
+# the editor draws the top layer's row first
+CLIP_LAYERS = """
+return [...document.querySelectorAll("#timeline-editor .timeline-editor-clip")]
+  .map((clip) => [clip.title, Number(clip.closest("[data-layer]").dataset.layer)]);
+"""
+
+CLIP_AND_ROW_POINTS = """
+const clip = document.querySelector(arguments[0]);
+clip.scrollIntoView({ block: "center" });
+const clipBox = clip.getBoundingClientRect();
+const rowBox = document.querySelector(arguments[1]).getBoundingClientRect();
+return [
+  [clipBox.left + clipBox.width / 2, clipBox.top + clipBox.height / 2],
+  [rowBox.left + rowBox.width * arguments[2], rowBox.top + rowBox.height / 2],
+];
+"""
+
+
+# red over the left half and transparent over the right, in a QuickTime PNG video
+def write_half_red_overlay(path, seconds):
+    width, height = FIXTURE_SIZE.split("x")
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"color=c=red:size={int(width) // 2}x{height}:rate={FIXTURE_FPS}:duration={seconds}",
+        "-vf", f"format=rgba,pad={width}:{height}:0:0:color=black@0",
+        "-c:v", "png", "-pix_fmt", "rgba",
+        str(path),
+    )
+    return path
+
+
+# a real pointer drag, which the editor reads as pointer events
+def drag_clip_onto_row(window, clip_css, row_css):
+    (clip_x, clip_y), (row_x, row_y) = window.session.execute(
+        CLIP_AND_ROW_POINTS, clip_css, row_css, DROP_FRACTION
+    )
+    origin_x, origin_y = window.origin
+    xdotool(
+        "mousemove", str(origin_x + round(clip_x)), str(origin_y + round(clip_y)),
+        "mousedown", "1",
+        "sleep", str(INPUT_SETTLE_SECONDS),
+        "mousemove", str(origin_x + round((clip_x + row_x) / 2)), str(origin_y + round((clip_y + row_y) / 2)),
+        "sleep", str(INPUT_SETTLE_SECONDS),
+        "mousemove", str(origin_x + round(row_x)), str(origin_y + round(row_y)),
+        "sleep", str(INPUT_SETTLE_SECONDS),
+        "mouseup", "1",
+    )
+    time.sleep(INPUT_SETTLE_SECONDS)
+
+
+# what each resource of the one segment's picture plays, in frames
+def segment_image_durations(cpl_path):
+    [segment] = named(ElementTree.parse(cpl_path).getroot(), "Segment")
+    resources = named(named(segment, "MainImageSequence")[0], "Resource")
+    return [int(only_text(resource, "SourceDuration")) for resource in resources]
+
+
+def test_a_clip_with_alpha_dragged_onto_a_layer_builds_a_track_file_a_stretch(window, tmp_path):
+    session = window.session
+    media = tmp_path / "media"
+    media.mkdir()
+    base, _ = write_media(media, BASE_CLIP_SECONDS)
+    overlay = write_half_red_overlay(media / "titles.mov", OVERLAY_SECONDS)
+    package = tmp_path / "package"
+    package.mkdir()
+    base_title = clip_title(base.name, "00:00:00:00", f"00:00:{BASE_CLIP_SECONDS:02d}:00")
+    overlay_title = clip_title(overlay.name, "00:00:00:00", f"00:00:{OVERLAY_SECONDS:02d}:00")
+
+    choose_in_dialog(window, "#import-video", base)
+    choose_in_dialog(window, "#import-video", overlay)
+    wait_until(
+        "the two clips never took their sources' lengths on layer 0",
+        lambda: session.execute(CLIP_LAYERS) == [[base_title, 0], [overlay_title, 0]],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+
+    drag_clip_onto_row(window, TIMELINE_CLIP.format(1), LAYER_ROW.format(1))
+    wait_until(
+        "the dragged clip never moved onto layer 1",
+        lambda: session.execute(CLIP_LAYERS) == [[overlay_title, 1], [base_title, 0]],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.click(TIMELINE_CLIP.format(0))
+    wait_until(
+        "a click never selected the clip on layer 0",
+        lambda: session.property(SELECTED_CLIP_NAME, "textContent") == base.name,
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.click(TIMELINE_CLIP.format(1))
+    wait_until(
+        "a click never selected the clip on layer 1",
+        lambda: session.property(SELECTED_CLIP_NAME, "textContent") == overlay.name,
+        REACTION_TIMEOUT_SECONDS,
+    )
+    replace_field_text(window, TIMELINE_START_FIELD, OVERLAY_START)
+    window.press(NEXT_FIELD_KEY)
+    wait_until(
+        "the clip on layer 1 never took its start",
+        lambda: session.property(TIMELINE_START_FIELD, "value") == OVERLAY_START,
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    window.click("#prop-title")
+    window.type_text(LAYERED_TITLE)
+    choose_in_dialog(window, "#browse-output", package)
+    wait_until(
+        "the output folder never took",
+        lambda: session.property("#prop-output", "value") == str(package),
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    window.click("#btn-build")
+    hints = hint_texts(session)
+    assert f"clip 1 ({base.name}): {LANGUAGE_HINT}" in hints, hints
+    window.click("#hints-build")
+    wait_until(
+        "the build never finished",
+        lambda: session.property("#progress-stage", "textContent") in FINISHED_STAGES,
+        CREATE_TIMEOUT_SECONDS,
+    )
+    assert session.property("#progress-stage", "textContent") == DONE_STAGE, status_text(session)
+
+    assert segment_image_durations(only_cpl(package)) == [
+        OVERLAY_START_FRAME,
+        OVERLAY_FRAMES,
+        BASE_FRAMES - OVERLAY_START_FRAME - OVERLAY_FRAMES,
+    ]
+    built = json.loads(project_path_beside(package).read_text())
+    clips = built["form"]["project"]["compositions"][0]["timeline"]["clips"]
+    assert [(clip["start"], clip["layer"], clip["sound"]["kind"]) for clip in clips] == [
+        (0, 0, "embedded"),
+        (OVERLAY_START_FRAME, 1, "none"),
+    ]
 
 
 FOLLOWED_CLIP_SECONDS = 10
@@ -1336,6 +1495,7 @@ def test_play_timeline_plays_the_trimmed_clips_back_to_back(window, tmp_path):
     )
     set_clip_range(window, 0, WHOLE_CLIP[0], FIRST_CLIP_OUT)
     set_clip_range(window, 1, SECOND_CLIP_IN, SECOND_CLIP_OUT)
+    start_the_second_clip_where_the_first_ends(window)
     wait_until(
         "the clips never took their in and out points",
         lambda: session.execute(CLIP_TITLES)

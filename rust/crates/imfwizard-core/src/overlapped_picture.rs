@@ -45,6 +45,37 @@ pub struct PictureWrapTarget {
     pub colour: asdcplib::jp2k::HdrMetadata,
 }
 
+// removes the part-written MXFs an earlier run left first
+pub fn picture_wrap_options(
+    target: PictureWrapTarget,
+) -> Result<postkit::mxf_wrap::IncrementalWrapOptions, String> {
+    std::fs::create_dir_all(&target.imp_dir)
+        .map_err(|e| format!("cannot create {}: {e}", target.imp_dir.display()))?;
+    let removed = postkit::mxf_wrap::remove_part_written_mxfs(&target.imp_dir).map_err(|e| {
+        format!(
+            "cannot remove part-written MXFs from {}: {e}",
+            target.imp_dir.display()
+        )
+    })?;
+    for path in removed {
+        tracing::info!("removed {}, left by an earlier run", path.display());
+    }
+    let asset_uuid = uuid::Uuid::new_v4();
+    Ok(postkit::mxf_wrap::IncrementalWrapOptions {
+        output: crate::imp::track_file_path(
+            &target.imp_dir,
+            crate::imp::PICTURE_PREFIX,
+            &asset_uuid,
+        ),
+        standard: postkit::mxf_wrap::MxfStandard::As02,
+        fps_num: target.fps_num,
+        fps_den: target.fps_den,
+        encryption: None,
+        hdr: Some(target.colour),
+        asset_uuid: Some(*asset_uuid.as_bytes()),
+    })
+}
+
 /// Encode a composition's picture and write its AS-02 picture MXF as the frames
 /// finish, returning the track file [`crate::imp::create_imp`] would otherwise
 /// have wrapped for itself. Pass it as `Composition::picture_mxf`; the J2K
@@ -60,35 +91,11 @@ pub fn encode_and_wrap_picture(
     on_progress: impl Fn(&postkit::pipeline::PipelineProgress),
     on_log: impl Fn(&str),
 ) -> Result<(postkit::pipeline::EncodeResult, crate::MxfTrackFile), String> {
-    std::fs::create_dir_all(&target.imp_dir)
-        .map_err(|e| format!("cannot create {}: {e}", target.imp_dir.display()))?;
-    let removed = postkit::mxf_wrap::remove_part_written_mxfs(&target.imp_dir).map_err(|e| {
-        format!(
-            "cannot remove part-written MXFs from {}: {e}",
-            target.imp_dir.display()
-        )
-    })?;
-    for path in removed {
-        tracing::info!("removed {}, left by an earlier run", path.display());
-    }
-    let asset_uuid = uuid::Uuid::new_v4();
     let (encode, track) = postkit::pipeline::run_encode_and_wrap_picture(
         video,
         encode_dir,
         options,
-        postkit::mxf_wrap::IncrementalWrapOptions {
-            output: crate::imp::track_file_path(
-                &target.imp_dir,
-                crate::imp::PICTURE_PREFIX,
-                &asset_uuid,
-            ),
-            standard: postkit::mxf_wrap::MxfStandard::As02,
-            fps_num: target.fps_num,
-            fps_den: target.fps_den,
-            encryption: None,
-            hdr: Some(target.colour),
-            asset_uuid: Some(*asset_uuid.as_bytes()),
-        },
+        picture_wrap_options(target)?,
         cancel,
         pause,
         on_progress,

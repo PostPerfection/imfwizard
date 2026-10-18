@@ -2445,9 +2445,12 @@ mod tests {
         path
     }
 
-    fn timeline_clip(picture: &Path, in_frame: u64, out_frame: u64) -> Clip {
+    fn timeline_clip(picture: &Path, start: u64, in_frame: u64, out_frame: u64) -> Clip {
         Clip {
             picture: picture.to_path_buf(),
+            start,
+            layer: 0,
+            opacity: 1.0,
             in_frame,
             out_frame,
             sound: ClipSound::Embedded,
@@ -2504,7 +2507,7 @@ mod tests {
         std::fs::write(&subtitle, "1\n00:00:00,000 --> 00:00:00,100\nHello\n").unwrap();
         let timeline = timeline_of(vec![Clip {
             subtitle: Some(subtitle.clone()),
-            ..timeline_clip(&picture, 1, 5)
+            ..timeline_clip(&picture, 0, 1, 5)
         }]);
 
         let from_timeline = job_config_of(
@@ -2541,8 +2544,8 @@ mod tests {
         let directory = scratch_directory("two-clip-audio-delay");
         let picture = test_pattern_clip(&directory, "picture");
         let timeline = timeline_of(vec![
-            timeline_clip(&picture, 0, 3),
-            timeline_clip(&picture, 3, 6),
+            timeline_clip(&picture, 0, 0, 3),
+            timeline_clip(&picture, 3, 3, 6),
         ]);
 
         let Err(refusal) = job_config_of(
@@ -2572,7 +2575,7 @@ mod tests {
         let picture = test_pattern_clip(&directory, "picture");
         let composition = CompositionInput {
             video_path: picture.to_string_lossy().into_owned(),
-            ..timeline_composition(timeline_of(vec![timeline_clip(&picture, 0, 6)]))
+            ..timeline_composition(timeline_of(vec![timeline_clip(&picture, 0, 0, 6)]))
         };
 
         let Err(refusal) = job_config_of(1, request(&directory, composition, app2e_settings()))
@@ -2593,7 +2596,7 @@ mod tests {
         let picture = test_pattern_clip(&directory, "picture");
         let timeline = Timeline {
             version: UNKNOWN_TIMELINE_VERSION,
-            ..timeline_of(vec![timeline_clip(&picture, 0, 6)])
+            ..timeline_of(vec![timeline_clip(&picture, 0, 0, 6)])
         };
 
         let Err(refusal) = job_config_of(
@@ -2615,15 +2618,15 @@ mod tests {
         let directory = scratch_directory("two-clip-build");
         let first = test_pattern_clip(&directory, "first");
         let second = test_pattern_clip(&directory, "second");
-        let silent_clip = |picture: &Path, in_frame, out_frame| Clip {
+        let silent_clip = |picture: &Path, start, in_frame, out_frame| Clip {
             sound: ClipSound::None,
-            ..timeline_clip(picture, in_frame, out_frame)
+            ..timeline_clip(picture, start, in_frame, out_frame)
         };
         let timeline = Timeline {
             reel_starts: vec![FIRST_CLIP_FRAMES],
             ..timeline_of(vec![
-                silent_clip(&first, 0, FIRST_CLIP_FRAMES),
-                silent_clip(&second, 2, 6),
+                silent_clip(&first, 0, 0, FIRST_CLIP_FRAMES),
+                silent_clip(&second, FIRST_CLIP_FRAMES, 2, 6),
             ])
         };
         let kept_frames = timeline.total_frames();
@@ -2687,13 +2690,13 @@ mod tests {
         let directory = scratch_directory("paused-timeline-build");
         let first = test_pattern_clip(&directory, "first");
         let second = test_pattern_clip(&directory, "second");
-        let silent_clip = |picture: &Path, in_frame, out_frame| Clip {
+        let silent_clip = |picture: &Path, start, in_frame, out_frame| Clip {
             sound: ClipSound::None,
-            ..timeline_clip(picture, in_frame, out_frame)
+            ..timeline_clip(picture, start, in_frame, out_frame)
         };
         let timeline = timeline_of(vec![
-            silent_clip(&first, 0, FIRST_CLIP_FRAMES),
-            silent_clip(&second, 2, 6),
+            silent_clip(&first, 0, 0, FIRST_CLIP_FRAMES),
+            silent_clip(&second, FIRST_CLIP_FRAMES, 2, 6),
         ]);
         let job = job_config_of(
             1,

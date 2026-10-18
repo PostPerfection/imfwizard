@@ -1,11 +1,12 @@
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use postkit::dolby_vision::DolbyVisionSummary;
-use postkit::encode::{FrameRange, FrameRate, InputType, SourceColour, detect_input_type};
-use postkit::picture_processing::PictureProcessing;
-use postkit::pipeline::{EncodeRunOptions, PipelineProgress};
+use postkit::encode::{FrameRate, InputType, SourceColour, detect_input_type};
+use postkit::picture_processing::{Fit, PictureProcessing, Placement};
+use postkit::pipeline::{EncodeRunOptions, PipelineProgress, StretchBase, TimelineStretch};
 use postkit::timeline::{Clip, ClipSound, SingleClipBuild, SoundTrack, Timeline};
 use serde::{Deserialize, Serialize};
 
@@ -56,7 +57,7 @@ pub struct TimelineImpResult {
     pub cpl_path: PathBuf,
     pub pkl_path: PathBuf,
     pub assetmap_path: PathBuf,
-    /// One a clip, in clip order.
+    /// One a stretch of timeline frames whose clips stay the same, in timeline order.
     pub picture_track_files: Vec<MxfTrackFile>,
     pub sound_track_file: Option<MxfTrackFile>,
     pub frames: u64,
@@ -104,23 +105,81 @@ fn clip_name(index: usize, clip: &Clip) -> String {
     format!("clip {} ({})", index + 1, clip.picture.display())
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 struct ClipPicture {
     processing: PictureProcessing,
     source_colour: SourceColour,
 }
 
+// postkit's TimelineStretch, which does not serialise, with None for a black base
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct PlannedStretch {
+    frames: Range<u64>,
+    base_clip: Option<usize>,
+    overlays: Vec<usize>,
+}
+
+impl PlannedStretch {
+    fn of(stretch: TimelineStretch) -> Self {
+        PlannedStretch {
+            base_clip: match stretch.base {
+                StretchBase::Clip(index) => Some(index),
+                StretchBase::Black { .. } => None,
+            },
+            frames: stretch.frames,
+            overlays: stretch.overlays,
+        }
+    }
+
+    fn timeline_stretch(&self, (width, height): (u32, u32)) -> TimelineStretch {
+        TimelineStretch {
+            frames: self.frames.clone(),
+            base: match self.base_clip {
+                Some(index) => StretchBase::Clip(index),
+                None => StretchBase::Black { width, height },
+            },
+            overlays: self.overlays.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TimelinePlan {
     raster: (u32, u32),
-    clips: Vec<ClipPicture>,
+    // the timeline with every clip's planned source colour and picture processing in it
+    planned_timeline: Timeline,
+    stretches: Vec<PlannedStretch>,
     hdr: Option<HdrWcg>,
+}
+
+fn raster_fit((width, height): (u32, u32)) -> PictureProcessing {
+    PictureProcessing {
+        fit: Some(Fit {
+            box_width: width,
+            box_height: height,
+            raster_width: width,
+            raster_height: height,
+            placement: Placement::default(),
+        }),
+        ..PictureProcessing::default()
+    }
+}
+
+// a clip whose planned colour or processing is postkit's default takes these instead
+fn with_clip_defaults(
+    options: EncodeRunOptions,
+    build: &TimelineImp,
+    raster: (u32, u32),
+) -> EncodeRunOptions {
+    EncodeRunOptions {
+        source_colour: build.source_colour.clone(),
+        picture: raster_fit(raster),
+        ..options
+    }
 }
 
 /// Every refusal the build can make, before anything is encoded.
 pub fn check_timeline(build: &TimelineImp) -> Result<TimelinePlan, String> {
     let timeline = &build.timeline;
-    timeline.check()?;
     postkit::timeline::refuse_two_subtitle_sources(timeline)?;
     if let SoundTrack::Override(sound) = &timeline.sound {
         crate::source_edits::check_sound_depth(sound)?;
@@ -128,25 +187,60 @@ pub fn check_timeline(build: &TimelineImp) -> Result<TimelinePlan, String> {
     if let Some(subtitle) = &timeline.subtitle {
         crate::subtitle_convert::readable_source_format(subtitle)?;
     }
-    let first_clip = &timeline.clips[0];
     let raster = match build.picture_options.raster {
         Some(raster) => raster,
-        None => postkit::encode::source_raster(&first_clip.picture)
-            .map_err(|e| format!("{}: {e}", clip_name(0, first_clip)))?,
+        None => timeline_raster(timeline)?,
     };
+    // the stretches check the timeline too
+    let stretches = postkit::pipeline::timeline_stretches(
+        timeline,
+        &with_clip_defaults(Default::default(), build, raster),
+    )?
+    .into_iter()
+    .map(PlannedStretch::of)
+    .collect();
     let clips = timeline
         .clips
         .iter()
         .enumerate()
         .map(|(index, clip)| {
-            plan_clip(build, clip, raster).map_err(|e| format!("{}: {e}", clip_name(index, clip)))
+            let planned = plan_clip(build, clip, raster)
+                .map_err(|e| format!("{}: {e}", clip_name(index, clip)))?;
+            Ok(Clip {
+                source_colour: planned.source_colour,
+                picture_processing: planned.processing,
+                ..clip.clone()
+            })
         })
         .collect::<Result<Vec<_>, String>>()?;
     let hdr = match build.hdr.clone() {
         Some(hdr) => Some(light_levels_from_clip_rpus(timeline, hdr)?),
         None => None,
     };
-    Ok(TimelinePlan { raster, clips, hdr })
+    Ok(TimelinePlan {
+        raster,
+        planned_timeline: Timeline {
+            clips,
+            ..timeline.clone()
+        },
+        stretches,
+        hdr,
+    })
+}
+
+fn timeline_raster(timeline: &Timeline) -> Result<(u32, u32), String> {
+    let base_clips = timeline.base_clips();
+    let Some(&(index, first_base_clip)) = base_clips.first() else {
+        if timeline.clips.is_empty() {
+            return Err("the timeline has no clips".to_string());
+        }
+        return Err(
+            "layer 0 has no clip to take the raster from, so the raster has to be given"
+                .to_string(),
+        );
+    };
+    postkit::encode::source_raster(&first_base_clip.picture)
+        .map_err(|e| format!("{}: {e}", clip_name(index, first_base_clip)))
 }
 
 // a clip without an RPU adds no light level
@@ -244,8 +338,9 @@ fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<Cli
     })
 }
 
-/// A picture track file a clip, one sound and one subtitle track file, and a
-/// segment a reel. Scratch is left under the output directory.
+/// A picture track file a stretch of timeline frames whose clips stay the same,
+/// one sound and one subtitle track file, and a segment a reel. Scratch is left
+/// under the output directory.
 pub fn build_timeline_imp(
     build: &TimelineImp,
     plan: &TimelinePlan,
@@ -274,42 +369,39 @@ pub fn build_timeline_imp(
         ..Default::default()
     };
 
-    let encode = picture_encode_options(&build.compression, plan.raster, timeline.fps)?;
+    let encode = with_clip_defaults(
+        picture_encode_options(&build.compression, plan.raster, timeline.fps)?,
+        build,
+        plan.raster,
+    );
     let mut picture_track_files = Vec::new();
-    for (index, ((clip, clip_picture), first_frame)) in timeline
-        .clips
-        .iter()
-        .zip(&plan.clips)
-        .zip(timeline.clip_starts())
-        .enumerate()
-    {
+    for (index, planned) in plan.stretches.iter().enumerate() {
         if build.cancel.load(Ordering::Relaxed) {
             return Err(crate::imp::CANCELLED_ERROR.to_string());
         }
-        let name = clip_name(index, clip);
+        let stretch = planned.timeline_stretch(plan.raster);
         on_log(&format!(
-            "Encoding {name} frames {}..{} at timeline frame {first_frame}",
-            clip.in_frame, clip.out_frame
+            "Encoding {} at timeline frames {}..{}",
+            stretch_name(&plan.planned_timeline, &stretch),
+            stretch.frames.start,
+            stretch.frames.end
         ));
-        let clip_options = EncodeRunOptions {
-            source_colour: clip_picture.source_colour.clone(),
-            picture: clip_picture.processing.clone(),
-            frame_range: Some(FrameRange {
-                first_frame: clip.in_frame,
-                frame_count: clip.out_frame - clip.in_frame,
-            }),
-            ..encode.clone()
-        };
-        let on_clip_progress = |progress: &PipelineProgress| {
+        let on_stretch_progress = |progress: &PipelineProgress| {
             on_progress(&PipelineProgress {
-                frame: first_frame + progress.frame,
+                frame: stretch.frames.start + progress.frame,
                 total_frames: frames,
                 ..progress.clone()
             })
         };
-        let track =
-            encode_clip_picture(build, clip, index, &clip_options, on_clip_progress, &on_log)
-                .map_err(|e| format!("{name}: {e}"))?;
+        let track = encode_stretch_picture(
+            build,
+            &plan.planned_timeline,
+            &stretch,
+            index,
+            &encode,
+            on_stretch_progress,
+            &on_log,
+        )?;
         picture_track_files.push(track);
     }
 
@@ -319,12 +411,12 @@ pub fn build_timeline_imp(
     let sound_track_file = wrap_timeline_sound(build, &options, &mut composition, frames)?;
     let timed_text_track_file = wrap_timeline_subtitle(build, &options, frames)?;
 
-    let clip_lengths: Vec<u64> = timeline
-        .clips
+    let stretch_lengths: Vec<u64> = plan
+        .stretches
         .iter()
-        .map(|clip| clip.out_frame - clip.in_frame)
+        .map(|stretch| stretch.frames.end - stretch.frames.start)
         .collect();
-    let segments: Vec<CompositionSegment> = segment_spans(&clip_lengths, &timeline.reel_starts)
+    let segments: Vec<CompositionSegment> = segment_spans(&stretch_lengths, &timeline.reel_starts)
         .into_iter()
         .map(|span| {
             let whole_span = |track_file: &MxfTrackFile| {
@@ -336,10 +428,10 @@ pub fn build_timeline_imp(
             };
             CompositionSegment {
                 picture: span
-                    .clip_pieces
+                    .stretch_pieces
                     .iter()
                     .map(|piece| SequenceResource {
-                        track_file: picture_track_files[piece.clip].clone(),
+                        track_file: picture_track_files[piece.stretch].clone(),
                         entry_point: piece.entry_point,
                         source_duration: piece.length,
                     })
@@ -415,9 +507,26 @@ fn picture_encode_options(
     })
 }
 
-fn encode_clip_picture(
+fn stretch_name(timeline: &Timeline, stretch: &TimelineStretch) -> String {
+    let base = match stretch.base {
+        StretchBase::Clip(index) => clip_name(index, &timeline.clips[index]),
+        StretchBase::Black { .. } => "black".to_string(),
+    };
+    if stretch.overlays.is_empty() {
+        return base;
+    }
+    let overlays: Vec<String> = stretch
+        .overlays
+        .iter()
+        .map(|&index| clip_name(index, &timeline.clips[index]))
+        .collect();
+    format!("{base} under {}", overlays.join(", "))
+}
+
+fn encode_stretch_picture(
     build: &TimelineImp,
-    clip: &Clip,
+    timeline: &Timeline,
+    stretch: &TimelineStretch,
     index: usize,
     options: &EncodeRunOptions,
     on_progress: impl Fn(&PipelineProgress),
@@ -426,29 +535,39 @@ fn encode_clip_picture(
     let encode_dir = build
         .output_dir
         .join(format!("{ENCODE_SCRATCH_PREFIX}{index}"));
-    let (encode, track) = crate::overlapped_picture::encode_and_wrap_picture(
-        &clip.picture,
-        &encode_dir,
-        options,
+    std::fs::create_dir_all(&encode_dir)
+        .map_err(|e| format!("cannot create {}: {e}", encode_dir.display()))?;
+    let wrap = crate::overlapped_picture::picture_wrap_options(
         crate::overlapped_picture::PictureWrapTarget {
             imp_dir: build.output_dir.clone(),
             fps_num: options.fps.numerator,
             fps_den: options.fps.denominator,
             colour: crate::mxf_wrap::picture_colour(build.hdr.as_ref()),
         },
+    )?;
+    let (encode, track) = postkit::pipeline::run_encode_timeline_stretch_and_wrap_picture(
+        timeline,
+        stretch,
+        &encode_dir,
+        options,
+        wrap,
         &build.cancel,
         &build.pause,
         on_progress,
         on_log,
     )?;
+    let track = crate::mxf_wrap::track_file_from_postkit(track)?;
     for finding in encode.picture_findings.describe(options.fps.as_f64()) {
         tracing::warn!("{finding}");
     }
-    let kept = clip.out_frame - clip.in_frame;
-    if track.duration != kept {
+    let length = stretch.frames.end - stretch.frames.start;
+    if track.duration != length {
         return Err(format!(
-            "the encode wrapped {} frames where the clip keeps {kept}",
-            track.duration
+            "{}: the encode wrapped {} frames where timeline frames {}..{} are {length}",
+            stretch_name(timeline, stretch),
+            track.duration,
+            stretch.frames.start,
+            stretch.frames.end
         ));
     }
     Ok(track)
@@ -539,19 +658,20 @@ fn wrap_timeline_subtitle(
 struct SegmentSpan {
     start: u64,
     length: u64,
-    clip_pieces: Vec<ClipPiece>,
+    stretch_pieces: Vec<StretchPiece>,
 }
 
-// the part of one clip's track file a segment plays
+// the part of one stretch's track file a segment plays
 #[derive(Debug, PartialEq)]
-struct ClipPiece {
-    clip: usize,
+struct StretchPiece {
+    stretch: usize,
     entry_point: u64,
     length: u64,
 }
 
-fn segment_spans(clip_lengths: &[u64], reel_starts: &[u64]) -> Vec<SegmentSpan> {
-    let total: u64 = clip_lengths.iter().sum();
+// the stretches run end to end from timeline frame 0
+fn segment_spans(stretch_lengths: &[u64], reel_starts: &[u64]) -> Vec<SegmentSpan> {
+    let total: u64 = stretch_lengths.iter().sum();
     let mut boundaries = vec![0];
     boundaries.extend_from_slice(reel_starts);
     boundaries.push(total);
@@ -559,25 +679,25 @@ fn segment_spans(clip_lengths: &[u64], reel_starts: &[u64]) -> Vec<SegmentSpan> 
         .windows(2)
         .map(|pair| {
             let (start, end) = (pair[0], pair[1]);
-            let mut clip_start = 0;
-            let mut clip_pieces = Vec::new();
-            for (clip, &length) in clip_lengths.iter().enumerate() {
-                let clip_end = clip_start + length;
-                let first = start.max(clip_start);
-                let last = end.min(clip_end);
+            let mut stretch_start = 0;
+            let mut stretch_pieces = Vec::new();
+            for (stretch, &length) in stretch_lengths.iter().enumerate() {
+                let stretch_end = stretch_start + length;
+                let first = start.max(stretch_start);
+                let last = end.min(stretch_end);
                 if first < last {
-                    clip_pieces.push(ClipPiece {
-                        clip,
-                        entry_point: first - clip_start,
+                    stretch_pieces.push(StretchPiece {
+                        stretch,
+                        entry_point: first - stretch_start,
                         length: last - first,
                     });
                 }
-                clip_start = clip_end;
+                stretch_start = stretch_end;
             }
             SegmentSpan {
                 start,
                 length: end - start,
-                clip_pieces,
+                stretch_pieces,
             }
         })
         .collect()
@@ -595,49 +715,50 @@ mod tests {
     const OTHER_CLIP_RATE: u32 = 25;
     const LOGGED_CLIP_RASTER: &str = "1920x1080";
 
-    fn piece(clip: usize, entry_point: u64, length: u64) -> ClipPiece {
-        ClipPiece {
-            clip,
+    fn piece(stretch: usize, entry_point: u64, length: u64) -> StretchPiece {
+        StretchPiece {
+            stretch,
             entry_point,
             length,
         }
     }
 
     #[test]
-    fn no_reel_start_is_one_segment_of_whole_clips() {
+    fn no_reel_start_is_one_segment_of_whole_stretches() {
         assert_eq!(
             segment_spans(&[6, 6], &[]),
             vec![SegmentSpan {
                 start: 0,
                 length: 12,
-                clip_pieces: vec![piece(0, 0, 6), piece(1, 0, 6)],
+                stretch_pieces: vec![piece(0, 0, 6), piece(1, 0, 6)],
             }]
         );
     }
 
     #[test]
-    fn a_reel_start_inside_a_clip_splits_its_track_file() {
+    fn a_reel_start_inside_a_stretch_splits_its_track_file() {
         assert_eq!(
             segment_spans(&[6, 6], &[4]),
             vec![
                 SegmentSpan {
                     start: 0,
                     length: 4,
-                    clip_pieces: vec![piece(0, 0, 4)],
+                    stretch_pieces: vec![piece(0, 0, 4)],
                 },
                 SegmentSpan {
                     start: 4,
                     length: 8,
-                    clip_pieces: vec![piece(0, 4, 2), piece(1, 0, 6)],
+                    stretch_pieces: vec![piece(0, 4, 2), piece(1, 0, 6)],
                 },
             ]
         );
     }
 
     #[test]
-    fn a_reel_start_on_a_clip_boundary_splits_nothing() {
+    fn a_reel_start_on_a_stretch_boundary_splits_nothing() {
         let spans = segment_spans(&[6, 3, 5], &[6, 9]);
-        let pieces: Vec<&Vec<ClipPiece>> = spans.iter().map(|span| &span.clip_pieces).collect();
+        let pieces: Vec<&Vec<StretchPiece>> =
+            spans.iter().map(|span| &span.stretch_pieces).collect();
         assert_eq!(
             pieces,
             vec![
@@ -724,16 +845,24 @@ mod tests {
         media
     }
 
-    fn two_clip_build(dir: &Path) -> TimelineImp {
-        let clips = ["first.mov", "second.mov"].map(|name| Clip {
-            picture: write_clip_media(dir, name, LOGGED_CLIP_RATE),
+    fn logged_clip(picture: PathBuf, start: u64) -> Clip {
+        Clip {
+            picture,
+            start,
+            layer: 0,
+            opacity: 1.0,
             in_frame: 0,
             out_frame: LOGGED_CLIP_FRAMES,
             sound: ClipSound::None,
             subtitle: None,
             source_colour: Default::default(),
             picture_processing: Default::default(),
-        });
+        }
+    }
+
+    fn two_clip_build(dir: &Path) -> TimelineImp {
+        let clips = [("first.mov", 0), ("second.mov", LOGGED_CLIP_FRAMES)]
+            .map(|(name, start)| logged_clip(write_clip_media(dir, name, LOGGED_CLIP_RATE), start));
         TimelineImp {
             timeline: Timeline {
                 version: postkit::timeline::TIMELINE_FORMAT_VERSION,
@@ -762,13 +891,82 @@ mod tests {
         }
     }
 
+    // black, clip 1, clip 1 under clip 3, clip 2 under clip 3, clip 2
+    fn layered_build(dir: &Path) -> TimelineImp {
+        let mut build = two_clip_build(dir);
+        let clips = &mut build.timeline.clips;
+        clips[0].start = 2;
+        clips[1].start = 4;
+        clips.push(Clip {
+            layer: 1,
+            opacity: 0.5,
+            ..logged_clip(write_clip_media(dir, "over.mov", LOGGED_CLIP_RATE), 3)
+        });
+        build
+    }
+
+    fn planned(frames: Range<u64>, base_clip: Option<usize>, overlays: &[usize]) -> PlannedStretch {
+        PlannedStretch {
+            frames,
+            base_clip,
+            overlays: overlays.to_vec(),
+        }
+    }
+
     #[test]
-    fn every_clip_names_itself_in_the_log() {
+    fn a_gap_and_an_overlay_cut_the_timeline_into_stretches() {
         let dir = tempfile::tempdir().unwrap();
-        let build = two_clip_build(dir.path());
+        let build = layered_build(dir.path());
+        let plan = check_timeline(&build).unwrap();
+        assert_eq!(
+            plan.stretches,
+            vec![
+                planned(0..2, None, &[]),
+                planned(2..3, Some(0), &[]),
+                planned(3..4, Some(0), &[2]),
+                planned(4..5, Some(1), &[2]),
+                planned(5..6, Some(1), &[]),
+            ]
+        );
+        assert_eq!(
+            plan.stretches[0].timeline_stretch(plan.raster).base,
+            StretchBase::Black {
+                width: 1920,
+                height: 1080
+            }
+        );
+        assert!(
+            plan.planned_timeline
+                .clips
+                .iter()
+                .all(|clip| clip.source_colour == build.source_colour),
+            "every clip carries the colour it was planned with"
+        );
+    }
+
+    #[test]
+    fn a_reel_start_inside_a_composite_splits_its_stretch() {
+        let spans = segment_spans(&[2, 1, 1, 1, 1], &[3]);
+        let pieces: Vec<&Vec<StretchPiece>> =
+            spans.iter().map(|span| &span.stretch_pieces).collect();
+        assert_eq!(
+            pieces,
+            vec![
+                &vec![piece(0, 0, 2), piece(1, 0, 1)],
+                &vec![piece(2, 0, 1), piece(3, 0, 1), piece(4, 0, 1)],
+            ]
+        );
+        let spans = segment_spans(&[2, 2], &[3]);
+        assert_eq!(spans[1].stretch_pieces, vec![piece(1, 1, 1)]);
+    }
+
+    #[test]
+    fn every_stretch_names_its_clips_in_the_log_and_wraps_a_track_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let build = layered_build(dir.path());
         let plan = check_timeline(&build).unwrap();
         let lines = RefCell::new(Vec::new());
-        build_timeline_imp(
+        let built = build_timeline_imp(
             &build,
             &plan,
             |_| {},
@@ -776,13 +974,33 @@ mod tests {
         )
         .unwrap();
         let lines = lines.into_inner();
-        for (index, clip) in build.timeline.clips.iter().enumerate() {
-            let encoding = format!("Encoding {}", clip_name(index, clip));
+        let clips = &build.timeline.clips;
+        let names: Vec<String> = (0..clips.len())
+            .map(|index| clip_name(index, &clips[index]))
+            .collect();
+        for encoding in [
+            "Encoding black at timeline frames 0..2".to_string(),
+            format!("Encoding {} at timeline frames 2..3", names[0]),
+            format!(
+                "Encoding {} under {} at timeline frames 3..4",
+                names[0], names[2]
+            ),
+            format!(
+                "Encoding {} under {} at timeline frames 4..5",
+                names[1], names[2]
+            ),
+        ] {
             assert!(
-                lines.iter().any(|line| line.starts_with(&encoding)),
+                lines.iter().any(|line| line == &encoding),
                 "no {encoding:?} in {lines:?}"
             );
         }
+        let durations: Vec<u64> = built
+            .picture_track_files
+            .iter()
+            .map(|track| track.duration)
+            .collect();
+        assert_eq!(durations, vec![2, 1, 1, 1, 1]);
     }
 
     #[test]

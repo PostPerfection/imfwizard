@@ -43,7 +43,11 @@ function emptyPanel(fill) {
 }
 
 function clip(picture, frames, inFrame, outFrame, sound = { kind: 'embedded', asset: null }, subtitle = null) {
-  return { picture, frames, inFrame, outFrame, sound, subtitle };
+  return { picture, frames, start: 0, layer: 0, opacity: 1, inFrame, outFrame, sound, subtitle };
+}
+
+function startingAt(start, placed) {
+  return { ...placed, start };
 }
 
 function timeline(fields) {
@@ -64,7 +68,7 @@ function editedPanel() {
         id: 1,
         name: 'Main',
         contentKind: 'feature',
-        timeline: timeline({ clips: [clip(3, 240, 0, 240), clip(7, 96, 12, 84, { kind: 'file', asset: 5 })], subtitle: 6, reelStarts: [240] }),
+        timeline: timeline({ clips: [clip(3, 240, 0, 240), startingAt(240, clip(7, 96, 12, 84, { kind: 'file', asset: 5 }))], subtitle: 6, reelStarts: [240] }),
       },
       { id: 4, name: 'Teaser', contentKind: 'trailer', timeline: timeline({ clips: [clip(7, 96, 0, 96)] }) },
     ],
@@ -177,6 +181,23 @@ test('a version 1 project puts each later segment on the timeline as a clip that
   const savedAgain = emptyPanel(() => '');
   restoreFormState(saved, serialized(emptyPanel(() => ''), null), savedAgain);
   assert.deepEqual(savedAgain.project.compositions, [probed]);
+});
+
+test('a version 2 project puts its clips end to end on layer 0, and a probe moves the clips after an unprobed one along', () => {
+  const versionTwoClip = ({ start, layer, opacity, ...rest }) => rest;
+  const savedClips = [clip(3, 240, 0, 240), clip(7, 0, 0, 0), clip(8, 96, 12, 84)];
+  const text = JSON.stringify({
+    wizard: 'imfwizard',
+    version: 2,
+    form: { project: { title: 'Film', assets: [], compositions: [{ id: 1, name: 'Main', timeline: timeline({ clips: savedClips.map(versionTwoClip) }) }], activeComposition: 0 } },
+  });
+
+  const { form } = readProjectFile(text, 'imfwizard', PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS);
+  const [composition] = form.project.compositions;
+
+  assert.deepEqual(composition.timeline.clips, [savedClips[0], startingAt(240, savedClips[1]), startingAt(240, savedClips[2])]);
+  const probed = withProbedFrames(composition.timeline, 7, 48);
+  assert.deepEqual(probed.clips.map((placed) => placed.start), [0, 240, 288]);
 });
 
 function selectOffering(label, values, value) {

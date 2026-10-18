@@ -9,7 +9,7 @@ import {
 const VALUE = "value";
 const CHECKED = "checked";
 
-export const PROJECT_FILE_VERSION = 2;
+export const PROJECT_FILE_VERSION = 3;
 
 // frames stay 0 until the restore probes the source
 function migratedClip(picture, sound, subtitle) {
@@ -53,8 +53,23 @@ function segmentsIntoTimeline(form, upgradeNotes) {
   return { ...form, project: { ...form.project, compositions } };
 }
 
+// a version 2 timeline plays its clips end to end on one picture track
+function clipsPlacedEndToEnd(form) {
+  if (!form.project) return form;
+  const compositions = form.project.compositions.map((composition) => {
+    let start = 0;
+    const clips = composition.timeline.clips.map((clip) => {
+      const placed = { ...clip, start, layer: 0, opacity: 1 };
+      start += clip.outFrame - clip.inFrame;
+      return placed;
+    });
+    return { ...composition, timeline: { ...composition.timeline, clips } };
+  });
+  return { ...form, project: { ...form.project, compositions } };
+}
+
 // a rename or a meaning change gets a step and a version bump, a new field with a default does not
-export const PROJECT_FILE_MIGRATIONS = { 2: segmentsIntoTimeline };
+export const PROJECT_FILE_MIGRATIONS = { 2: segmentsIntoTimeline, 3: clipsPlacedEndToEnd };
 
 // [form key, control id, control property], keyed like the submit_job payload
 export const FORM_CONTROLS = [
