@@ -361,6 +361,38 @@ fn a_source_lut_passes_the_pre_build_check() {
         .stdout(predicate::str::contains("Pre-build check passed"));
 }
 
+#[test]
+fn the_sound_of_the_video_without_a_language_raises_the_language_hint() {
+    let dir = TempDir::new().unwrap();
+    let clip = dir.path().join("clip.mov");
+    synthesize_clip(&clip, 1920, 1080);
+    let check = |language: &[&str]| {
+        let run = cmd()
+            .args([
+                "create",
+                "--check",
+                "-o",
+                &dir.path().join("out").to_string_lossy(),
+                "-t",
+                "Spoken",
+                "--video",
+                &clip.to_string_lossy(),
+            ])
+            .args(language)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{run:?}");
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        )
+    };
+
+    assert!(check(&[]).contains("no language set"));
+    assert!(!check(&["--audio-lang", "en"]).contains("no language set"));
+}
+
 /// A held still is encoded without a decode for the LUT to run in, so the pair
 /// is refused rather than dropping the LUT.
 #[test]
@@ -1735,6 +1767,8 @@ fn the_pre_build_check_is_quiet_on_a_clean_job() {
             "Clean",
             "--video",
             &clip.to_string_lossy(),
+            "--audio-lang",
+            "en",
         ])
         .assert()
         .success()

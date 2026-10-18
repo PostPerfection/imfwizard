@@ -2337,6 +2337,7 @@ fn run() {
                 hdr: hdr.clone(),
                 still_frames,
                 atmos_frame_directory: atmos.frame_directory.clone(),
+                sound_from_picture: !silent,
             };
             imfwizard_core::preflight::check_before_encode(&plan).unwrap_or_else(|e| fail(e));
 

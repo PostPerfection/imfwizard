@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use postkit::encode::{InputType, detect_input_type};
 use postkit::hints::{
     AudioLevel, Hint, HintCue, SubtitleCues, audio_language_hint, audio_level_hint, subtitle_hints,
 };
@@ -99,12 +100,24 @@ fn probe_hint_facts(plan: &CreatePlan) -> HintFacts {
 
     HintFacts {
         audio,
-        has_audio: !plan.audio_files.is_empty() || plan.atmos_frame_directory.is_some(),
+        has_audio: !plan.audio_files.is_empty()
+            || plan.atmos_frame_directory.is_some()
+            || picture_sound_goes_in(plan),
         audio_language: plan.audio_language.clone(),
         subtitles,
         dropped_override_tag_messages,
         fps,
     }
+}
+
+fn picture_sound_goes_in(plan: &CreatePlan) -> bool {
+    plan.sound_from_picture
+        && plan
+            .picture
+            .as_deref()
+            .filter(|picture| detect_input_type(picture) == InputType::Video)
+            .and_then(crate::probe::probe_video)
+            .is_some_and(|info| info.has_audio)
 }
 
 fn subtitle_cues(path: &Path, cues: Vec<TimedTextCue>) -> SubtitleCues {

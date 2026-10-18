@@ -38,6 +38,7 @@ pub struct CreatePlan {
     /// Frames to hold a still for; None when the picture is not a still.
     pub still_frames: Option<u64>,
     pub atmos_frame_directory: Option<PathBuf>,
+    pub sound_from_picture: bool,
 }
 
 impl CreatePlan {

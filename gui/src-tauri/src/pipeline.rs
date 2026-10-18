@@ -339,6 +339,7 @@ fn plan_compositions(
             audio_files: composition.audio_path.iter().map(PathBuf::from).collect(),
             audio_language: composition.audio_lang.clone(),
             timed_text_files: composition.subtitles.iter().map(PathBuf::from).collect(),
+            sound_from_picture: !composition.silent,
             ..shared_plan.clone()
         };
         imfwizard_core::preflight::check_before_encode(&plan)?;
@@ -555,6 +556,8 @@ fn timeline_hints(build: &imfwizard_core::timeline_imp::TimelineImp) -> Vec<Stri
                 picture_file_name(&clip.picture)
             )),
             imfwizard_core::preflight::CreatePlan {
+                picture: Some(clip.picture.clone()),
+                sound_from_picture: matches!(clip.sound, postkit::timeline::ClipSound::Embedded),
                 audio_files: match &clip.sound {
                     postkit::timeline::ClipSound::File(path) => vec![path.clone()],
                     postkit::timeline::ClipSound::Embedded | postkit::timeline::ClipSound::None => {
