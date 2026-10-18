@@ -59,6 +59,7 @@ pub fn run() {
         .manage(guikit::launch_project::LaunchProject::default())
         .invoke_handler(tauri::generate_handler![
             guikit::preview::preview_load,
+            guikit::preview::preview_load_timeline,
             guikit::preview::preview_play_pause,
             guikit::preview::preview_seek,
             guikit::preview::preview_seek_absolute,

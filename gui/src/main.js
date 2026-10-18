@@ -4,14 +4,14 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, previewTimeline, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
-import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, clipAtFrame } from "../../extern/guikit/src/timeline-editor.js";
+import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
 import {
   DEFAULT_TIMELINE_FPS,
   TIMELINE_KIND_BY_ASSET_TYPE,
@@ -22,6 +22,7 @@ import {
   firstSoundAsset,
   parseFrameRate,
   timelineFrameAtSourceFrame,
+  timelineWire,
   withFirstClipRate,
   withImportedAsset,
   withoutAsset,
@@ -1754,6 +1755,8 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   sourceFrames,
   onChange: timelineEdited,
   onSeek: seekTimelineFrame,
+  playTimeline: (timeline) => previewTimeline(timelineWire(timeline, assetById)),
+  seekTimeline: previewSeekAbsolute,
 });
 renderAssets();
 showActiveTimeline();
@@ -1788,6 +1791,7 @@ watchPreviewShown((path, ended) => {
   previewedClipIndex = path === null ? null : clipIndexShowing(path, previewedClipIndex);
   updateToolbarState();
 });
+watchPreviewTimelinePosition(followTimelinePosition);
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({

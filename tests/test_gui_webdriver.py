@@ -1247,3 +1247,57 @@ def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path)
         <= SEEK_TOLERANCE_SECONDS,
         REACTION_TIMEOUT_SECONDS,
     )
+
+
+PLAY_TIMELINE_BUTTON = '#timeline-editor [data-action="play-timeline"]'
+FRAME_SECONDS = 1 / FIXTURE_FPS
+
+
+def test_play_timeline_plays_the_trimmed_clips_back_to_back(window, tmp_path):
+    session = window.session
+    media = tmp_path / "media"
+    media.mkdir()
+    first = write_picture(media / "first.mov", EACH_CLIP_SECONDS)
+    second = write_picture(media / "second.mov", EACH_CLIP_SECONDS)
+    sound = write_sound(media / "timeline.wav", TIMELINE_SECONDS)
+
+    choose_in_dialog(window, "#import-video", first)
+    choose_in_dialog(window, "#import-video", second)
+    choose_in_dialog(window, "#import-audio", sound)
+    wait_until(
+        "the two clips never took their sources' lengths",
+        lambda: session.execute(CLIP_TITLES)
+        == [clip_title(first.name, *WHOLE_CLIP), clip_title(second.name, *WHOLE_CLIP)],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    set_clip_range(window, 0, WHOLE_CLIP[0], FIRST_CLIP_OUT)
+    set_clip_range(window, 1, SECOND_CLIP_IN, SECOND_CLIP_OUT)
+    wait_until(
+        "the clips never took their in and out points",
+        lambda: session.execute(CLIP_TITLES)
+        == [
+            clip_title(first.name, WHOLE_CLIP[0], FIRST_CLIP_OUT),
+            clip_title(second.name, SECOND_CLIP_IN, SECOND_CLIP_OUT),
+        ],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    playhead_before = session.execute(EDITOR_PLAYHEAD_LEFT)
+
+    window.click(PLAY_TIMELINE_BUTTON)
+    wait_until(
+        "the preview never reported the timeline's duration",
+        lambda: reported_duration(session) > 0,
+        PREVIEW_TIMEOUT_SECONDS,
+    )
+    assert reported_duration(session) == pytest.approx(TIMELINE_SECONDS)
+    assert session.execute(PREVIEW_METADATA)["duration"] == pytest.approx(TIMELINE_SECONDS, abs=FRAME_SECONDS)
+    wait_until(
+        "the editor playhead never moved with the timeline",
+        lambda: session.execute(EDITOR_PLAYHEAD_LEFT) != playhead_before,
+        PLAYHEAD_TIMEOUT_SECONDS,
+    )
+    wait_until(
+        "the timeline never played into the second clip",
+        lambda: session.execute(PREVIEW_METADATA).get("timeline_clip_index") == 1,
+        PLAYHEAD_TIMEOUT_SECONDS,
+    )
