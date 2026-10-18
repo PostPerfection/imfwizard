@@ -98,7 +98,7 @@
         <!-- PROJECT VIEW -->
         <div class="view active" id="view-project">
           <div class="workspace">
-            <!-- Left: Asset browser + segments -->
+            <!-- Left: Asset browser + timeline -->
             <div class="workspace-main">
               <section class="panel assets-panel">
                 <div class="panel-header">
@@ -129,31 +129,9 @@
 
               <section class="panel reels-panel">
                 <div class="panel-header">
-                  <h2>Virtual Tracks</h2>
-                  <button id="add-segment" class="btn-sm" data-key="g">+ Segment</button>
+                  <h2>Timeline</h2>
                 </div>
-                <div id="track-list" class="reel-list">
-                  <div class="reel" data-segment="1">
-                    <div class="reel-header">
-                      <span class="reel-label">Segment 1</span>
-                      <span class="reel-duration" id="seg-1-duration">--:--:--</span>
-                    </div>
-                    <div class="reel-tracks">
-                      <div class="track track-picture" id="seg-1-picture">
-                        <span class="track-label">Picture</span>
-                        <span class="track-info">Drop video here</span>
-                      </div>
-                      <div class="track track-sound" id="seg-1-sound">
-                        <span class="track-label">Sound</span>
-                        <span class="track-info">Drop audio here</span>
-                      </div>
-                      <div class="track track-subtitle" id="seg-1-subtitle">
-                        <span class="track-label">Timed Text</span>
-                        <span class="track-info">Optional</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <div id="timeline-editor"></div>
               </section>
             </div>
 
@@ -370,6 +348,7 @@
                     <label for="prop-trim-end">From End</label>
                     <input type="text" id="prop-trim-end" placeholder="48f or 2s">
                   </div>
+                  <p class="field-hint" id="prop-clip-length-hint" hidden>A clip's In and Out on the timeline set its length, so Trim and Still Length are off while any composition has more than one clip, a trimmed clip or a segment start.</p>
                 </fieldset>
 
                 <fieldset>

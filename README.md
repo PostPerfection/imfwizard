@@ -104,7 +104,8 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 
 ### Desktop GUI (Tauri 2)
 - **Dark theme** by default with optional light mode toggle
-- **File import** (video, WAV, TTML/subtitle) via file picker; a build packages the selected picture, audio and subtitle
+- **File import** (video, WAV, TTML/subtitle) via file picker. An imported video goes on the end of the active composition's timeline, and the first WAV and the first subtitle cover the whole timeline
+- **Timeline**, the project view shows each composition as picture, sound and timed text tracks. A clip is a source with an In and an Out point, set by timecode or from the preview's playhead. A WAV or subtitle dropped on a clip is that clip's own, and dropped on the track label it covers the whole timeline. Split segment here starts a CPL segment at the playhead, and clicking a marker removes it. Clicking a clip seeks the preview to that frame of its source once the preview plays one of the timeline's clips, and the playhead follows playback. A timeline of one clip without a segment start builds as a single picture always has, its In and Out going in as the trims. Any other timeline builds clip by clip and has to be the only composition of its build. Trim and Still Length are off while any composition's timeline sets its clips' lengths, and two compositions whose single clips are trimmed differently are refused by name, since the trims apply to every composition
 - **Keyboard shortcuts**, Ctrl+N/O/S/B/P/I, Ctrl+Shift+S (Save As), Ctrl+Shift+O (Open IMP), Ctrl+Shift+N (Create supplement), Ctrl+1..7 for the views in sidebar order, Ctrl+Shift+P/A/E/F for Play, Queue, Inspect and Reveal on a finished build, and Space/arrows/,/./Home/F during preview. Every button in a view has an Alt+letter, underlined while Alt is held and named in its tooltip. Alt letters don't work while a text field has focus, Escape leaves the field first. Ctrl+Enter runs the action of the focused section, Alt+Down in a path field opens its file dialog, and Alt+P opens the Project menu, where N, O, S and A run its items and the arrow keys pick a recent project. Ctrl+K opens the shortcut list, where clicking a shortcut rebinds it (Backspace clears, Escape cancels) and the rebindings are saved
 - **Progress bars**, real-time progress tracking for encode/wrap jobs
 - **IMP metadata editor**, edit CPL title/annotation
@@ -117,7 +118,7 @@ video sources, image sequences, and WAV audio, conforming to SMPTE ST 2067 (App#
 - **Per-stage timings in the job log**, `[TIMING]` lines next to the stage's own log lines giving probe, encode, audio map, source edits and packaging time per composition, plus the total
 - **Job queue manager**, submit, monitor, cancel background jobs. The queue is written to `~/.config/imfwizard/gui-jobs.jsonl`, one JSON line per job on submit and on every state change, and read back on start, so closing the window does not lose queued jobs. A job left running when the app closed is listed failed. `$IMFWIZARD_GUI_JOBS_FILE` points a second app at another file
 - **Progress notifications**, system notifications when jobs complete
-- **Projects**, New (Ctrl+N) asks where the `.imfwizard` file goes and starts from the default panel, titled after the file, with the IMP going in a folder of that name beside it. Save (Ctrl+S), Save As (Ctrl+Shift+S) and Open (Ctrl+O) write and read the whole Properties panel, with the sources, compositions, segments, channel map and output directory but not Settings. A source that moved is looked for beside the file. Every build also writes `<output>.imfwizard` beside the package and saves the open project, the Project menu lists these files, and unsaved changes are kept as a draft in the app data folder that comes back on the next launch. A file saved by an older version is upgraded on open and rewritten on Save, one saved by a newer version is refused. Open IMP (Ctrl+Shift+O) opens a built package
+- **Projects**, New (Ctrl+N) asks where the `.imfwizard` file goes and starts from the default panel, titled after the file, with the IMP going in a folder of that name beside it. Save (Ctrl+S), Save As (Ctrl+Shift+S) and Open (Ctrl+O) write and read the whole Properties panel, with the sources, compositions and their timelines, channel map and output directory but not Settings. A source that moved is looked for beside the file. Every build also writes `<output>.imfwizard` beside the package and saves the open project, the Project menu lists these files, and unsaved changes are kept as a draft in the app data folder that comes back on the next launch. A file saved by an older version is upgraded on open and rewritten on Save, one saved by a newer version is refused. Open IMP (Ctrl+Shift+O) opens a built package
 
 ### Packaging & Deployment
 - **Docker image**, headless batch processing (`docker run imfwizard create ...`)
@@ -481,7 +482,9 @@ source with no transfer tag says nothing about its colour, so the preset is take
 word.
 
 The CLI writes one CPL per `create`. The GUI packages multiple compositions
-(one CPL tab each) into a single IMP that shares one PKL and ASSETMAP.
+(one CPL tab each) into a single IMP that shares one PKL and ASSETMAP, as long as
+each composition's timeline is a single clip without a segment start. A longer
+timeline builds as the only composition of its IMP.
 
 ### Crop and fit the picture into a legal raster
 

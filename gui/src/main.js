@@ -11,6 +11,25 @@ import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
+import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, clipAtFrame } from "../../extern/guikit/src/timeline-editor.js";
+import {
+  DEFAULT_TIMELINE_FPS,
+  TIMELINE_KIND_BY_ASSET_TYPE,
+  clipIndexShowing as clipIndexShowingInTimeline,
+  clipPreviewSubtitle,
+  emptyTimeline,
+  ffprobeVideoInfo,
+  firstSoundAsset,
+  parseFrameRate,
+  timelineFrameAtSourceFrame,
+  withFirstClipRate,
+  withImportedAsset,
+  withoutAsset,
+  withProbedFrames,
+  withReelStartingClipsPlaced,
+  withUnplacedAssetsFilled,
+} from "../../extern/guikit/src/composition-timeline.js";
+import { compositionsRequest, timelinesSetClipLengths } from "./composition-request.js";
 import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
 import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
@@ -238,27 +257,28 @@ const project = {
   title: "",
   assets: [],
   compositions: [
-    { id: 1, name: "Main", contentKind: "feature", segments: [{ id: 1, picture: null, sound: null, subtitle: null }] }
+    { id: 1, name: "Main", contentKind: "feature", timeline: emptyTimeline(DEFAULT_TIMELINE_FPS) }
   ],
   activeComposition: 0,
 };
 
-// Convenience accessor for active composition segments
-function getActiveSegments() {
-  return project.compositions[project.activeComposition]?.segments || [];
-}
-function setActiveSegments(segs) {
-  if (project.compositions[project.activeComposition]) {
-    project.compositions[project.activeComposition].segments = segs;
-  }
+// the timeline holds asset ids
+function activeTimeline() {
+  return project.compositions[project.activeComposition].timeline;
 }
 
-// Legacy alias for backward compat
-Object.defineProperty(project, 'segments', {
-  get() { return getActiveSegments(); },
-  set(v) { setActiveSegments(v); },
-  configurable: true,
-});
+function storeActiveTimeline(timeline) {
+  project.compositions[project.activeComposition].timeline = timeline;
+}
+
+function assetById(assetId) {
+  return project.assets.find((asset) => asset.id === assetId);
+}
+
+function assetPath(assetId) {
+  return assetById(assetId).path;
+}
+
 let nextAssetId = 1;
 
 // === Drop overlay ===
@@ -302,49 +322,59 @@ document.getElementById("import-subtitle")?.addEventListener("click", async () =
   if (path) importAssetFromPath(path, 'subtitle');
 });
 
-const SEGMENT_SLOT_BY_ASSET_TYPE = { video: 'picture', audio: 'sound', subtitle: 'subtitle' };
-
-function placedAssetIds() {
-  return new Set(project.segments.flatMap(s => [s.picture, s.sound, s.subtitle]).filter(Boolean).map(a => a.id));
-}
-
-// the first segment takes the first asset of each type no segment holds yet
-function fillFirstSegmentFromUnplacedAssets() {
-  const seg = project.segments[0];
-  const placed = placedAssetIds();
-  for (const [type, slot] of Object.entries(SEGMENT_SLOT_BY_ASSET_TYPE)) {
-    if (seg[slot]) continue;
-    seg[slot] = project.assets.find(a => a.type === type && !placed.has(a.id)) ?? null;
-  }
+function fillTimelineFromUnplacedAssets() {
+  storeActiveTimeline(withUnplacedAssetsFilled(activeTimeline(), project.assets));
 }
 
 function importAssetFromPath(path, type) {
   const name = path.split(/[/\\]/).pop();
   const asset = { id: nextAssetId++, type, path, name, meta: '' };
   project.assets.push(asset);
-
-  const seg = project.segments[0];
-  const slot = SEGMENT_SLOT_BY_ASSET_TYPE[type];
-  if (slot && !seg[slot]) seg[slot] = asset;
+  storeActiveTimeline(withImportedAsset(activeTimeline(), asset));
 
   renderAssets();
-  renderSegments();
-  updateStatusStats();
+  showActiveTimeline();
   setStatus(`Imported: ${name}`);
 
   // Auto-detect video properties
   if (type === 'video') {
     probeVideo(path).then(info => {
-      if (!info) return;
+      if (!info) {
+        setStatus(`Could not read the frame count of ${name}`);
+        return;
+      }
       asset.meta = `${info.width}×${info.height} ${info.fps}`;
+      asset.fps = info.fps;
+      asset.frames = info.frames;
       const fpsEl = document.getElementById("prop-framerate");
       const probedRate = [...(fpsEl?.options ?? [])].find(opt => opt.value === info.fps);
       if (project.assets.filter(a => a.type === 'video').length === 1 && probedRate) {
         fpsEl.value = probedRate.value;
       }
+      takeProbedFrames(asset);
       renderAssets();
     });
   }
+}
+
+// a clip from an older project file holds 0 frames until its source is probed
+async function probeUnprobedClips() {
+  const clips = project.compositions.flatMap((composition) => composition.timeline.clips);
+  const pictures = new Set(clips.filter((clip) => clip.frames === 0).map((clip) => clip.picture));
+  for (const assetId of pictures) {
+    const asset = assetById(assetId);
+    asset.frames = await sourceFrames(assetId);
+    takeProbedFrames(asset);
+  }
+}
+
+// clips placed before their source was probed get its length and rate
+function takeProbedFrames(asset) {
+  project.compositions = project.compositions.map((composition) => withReelStartingClipsPlaced({
+    ...composition,
+    timeline: withFirstClipRate(withProbedFrames(composition.timeline, asset.id, asset.frames), assetById),
+  }));
+  showActiveTimeline();
 }
 
 function renderAssets() {
@@ -389,56 +419,45 @@ function renderAssets() {
   applyPreviewSelection();
 }
 
-function renderSegments() {
-  const list = document.getElementById("track-list");
-  if (!list) return;
-  list.innerHTML = project.segments.map((seg, i) => `
-    <div class="reel" data-segment="${seg.id}">
-      <div class="reel-header">
-        <span class="reel-label">Segment ${i + 1}</span>
-        <span class="reel-duration">${seg.picture ? '—' : '--:--:--'}</span>
-      </div>
-      <div class="reel-tracks">
-        <div class="track track-picture" data-seg-id="${seg.id}" data-track="picture">
-          <span class="track-label">Picture</span>
-          <span class="track-info ${seg.picture ? 'has-content' : ''}">${seg.picture ? escapeHtml(seg.picture.name) : 'Drop video here'}</span>
-        </div>
-        <div class="track track-sound" data-seg-id="${seg.id}" data-track="sound">
-          <span class="track-label">Sound</span>
-          <span class="track-info ${seg.sound ? 'has-content' : ''}">${seg.sound ? escapeHtml(seg.sound.name) : 'Drop audio here'}</span>
-        </div>
-        <div class="track track-subtitle" data-seg-id="${seg.id}" data-track="subtitle">
-          <span class="track-label">Timed Text</span>
-          <span class="track-info ${seg.subtitle ? 'has-content' : ''}">${seg.subtitle ? escapeHtml(seg.subtitle.name) : 'Optional'}</span>
-        </div>
-      </div>
-    </div>
-  `).join('');
-
-  list.querySelectorAll('.track').forEach(track => {
-    track.addEventListener('dragover', (e) => { e.preventDefault(); track.style.background = 'var(--surface-hover)'; });
-    track.addEventListener('dragleave', () => { track.style.background = ''; });
-    track.addEventListener('drop', (e) => {
-      e.preventDefault(); track.style.background = '';
-      const assetId = parseInt(e.dataTransfer.getData('text/plain'));
-      const asset = project.assets.find(a => a.id === assetId);
-      if (!asset) return;
-      const seg = project.segments.find(s => s.id === parseInt(track.dataset.segId));
-      if (!seg || SEGMENT_SLOT_BY_ASSET_TYPE[asset.type] !== track.dataset.track) return;
-      seg[track.dataset.track] = asset;
-      renderSegments();
-      updateStatusStats();
-    });
-  });
-
-  audioMapDrawn = renderAudioMap();
+function assetName(assetId) {
+  return assetById(assetId).name;
 }
 
-document.getElementById("add-segment")?.addEventListener("click", () => {
-  const maxId = project.segments.reduce((m, s) => Math.max(m, s.id), 0);
-  project.segments.push({ id: maxId + 1, picture: null, sound: null, subtitle: null });
-  renderSegments();
-});
+async function sourceFrames(assetId) {
+  const asset = assetById(assetId);
+  if (asset.frames) return asset.frames;
+  const info = await probeVideo(asset.path);
+  if (!info) setStatus(`Could not read the frame count of ${asset.name}`);
+  return info?.frames ?? 0;
+}
+
+function timelineEdited(timeline) {
+  const rated = withFirstClipRate(timeline, assetById);
+  storeActiveTimeline(rated);
+  if (rated !== timeline) showTimelineInEditor(rated);
+  afterTimelineChange();
+}
+
+function showActiveTimeline() {
+  showTimelineInEditor(activeTimeline());
+  afterTimelineChange();
+}
+
+function afterTimelineChange() {
+  previewedClipIndex = clipIndexShowing(previewShownPath, previewedClipIndex);
+  refreshClipLengthFields();
+  refreshAudioMap();
+  updateStatusStats();
+}
+
+// the job's trims and still length apply to every composition
+const CLIP_LENGTH_FIELD_IDS = ["prop-trim-start", "prop-trim-end", "prop-still-length"];
+
+function refreshClipLengthFields() {
+  const fromTimelines = timelinesSetClipLengths(project.compositions);
+  for (const id of CLIP_LENGTH_FIELD_IDS) document.getElementById(id).disabled = fromTimelines;
+  document.getElementById("prop-clip-length-hint").hidden = !fromTimelines;
+}
 
 // === Multi-CPL Management ===
 let nextCplId = 2;
@@ -471,7 +490,7 @@ function switchCpl(idx) {
   if (idx < 0 || idx >= project.compositions.length) return;
   project.activeComposition = idx;
   renderCplTabs();
-  renderSegments();
+  showActiveTimeline();
   const cpl = project.compositions[idx];
   const kindEl = document.getElementById("prop-content-kind");
   if (kindEl && cpl.contentKind) kindEl.value = cpl.contentKind;
@@ -484,7 +503,7 @@ function removeCpl(idx) {
     project.activeComposition = project.compositions.length - 1;
   }
   renderCplTabs();
-  renderSegments();
+  showActiveTimeline();
 }
 
 document.getElementById("add-cpl")?.addEventListener("click", async () => {
@@ -498,7 +517,7 @@ document.getElementById("add-cpl")?.addEventListener("click", async () => {
     id: nextCplId++,
     name: name,
     contentKind: "feature",
-    segments: [{ id: 1, picture: null, sound: null, subtitle: null }],
+    timeline: emptyTimeline(DEFAULT_TIMELINE_FPS),
   });
   switchCpl(project.compositions.length - 1);
 });
@@ -607,6 +626,8 @@ let selectedPreview = null;
 // what the preview panel holds
 let previewShownPath = null;
 let previewPlaybackEnded = false;
+// the timeline clip whose picture the preview plays, null for any other file
+let previewedClipIndex = null;
 
 function selectPreview(kind, path) {
   selectedPreview = { kind, path };
@@ -635,9 +656,10 @@ function applyPreviewSelection() {
 }
 
 function previewTargetInput() {
+  const firstClip = activeTimeline().clips[0];
   return {
     selectedPreview,
-    firstPicturePath: project.segments[0]?.picture?.path,
+    firstPicturePath: firstClip ? assetPath(firstClip.picture) : undefined,
     openedPackage,
     outputPath: document.getElementById("prop-output")?.value,
   };
@@ -646,24 +668,64 @@ function previewTargetInput() {
 function previewCurrentTarget() {
   const target = previewTarget(previewTargetInput());
   if (!target) return;
-  if (target.kind === PREVIEW_KIND_SOURCE) previewProjectFile(target.path);
+  if (target.kind === PREVIEW_KIND_SOURCE) previewSourcePicture(target.path);
   else previewBuiltPackage(target.path);
 }
 
 document.getElementById("btn-preview")?.addEventListener("click", previewCurrentTarget);
 
-// The preview shows what the build will do to the picture, so a file a
-// composition takes as its picture carries the crop and that segment's timed
-// text, and any other file plays plain.
-function previewProjectFile(path) {
+// The preview shows what the build will do to the picture, so a file a clip
+// takes as its picture carries the crop and that clip's timed text, and any
+// other file plays plain.
+function previewSourcePicture(path, clipIndex = clipIndexShowing(path, null)) {
   previewGeneration += 1;
   const generation = previewGeneration;
-  previewFile(path);
-  const segment = project.segments.find(s => s.picture?.path === path);
-  previewShowsJobPicture = Boolean(segment);
-  setPreviewCrop(segment ? currentCrop() : null);
-  if (segment?.subtitle?.path) showPreviewSubtitle(segment.subtitle.path, generation);
+  const loaded = previewFile(path);
+  previewShowsJobPicture = clipIndex !== null;
+  previewedClipIndex = clipIndex;
+  setPreviewCrop(previewShowsJobPicture ? currentCrop() : null);
+  const subtitle = previewShowsJobPicture ? clipPreviewSubtitle(activeTimeline(), clipIndex) : null;
+  if (subtitle !== null) showPreviewSubtitle(assetPath(subtitle), generation);
+  return loaded;
 }
+
+function clipIndexShowing(path, likelyIndex) {
+  return clipIndexShowingInTimeline(activeTimeline(), path, likelyIndex, assetById);
+}
+
+function clipRate(clip) {
+  return parseFrameRate(assetById(clip.picture).fps) ?? activeTimeline().fps;
+}
+
+// a seek in another clip loads that clip's picture first, and nothing happens while the preview plays no clip
+async function seekTimelineFrame(frame) {
+  if (previewedClipIndex === null) return;
+  const timeline = activeTimeline();
+  const place = clipAtFrame(timeline, frame);
+  if (!place) return;
+  const clip = timeline.clips[place.index];
+  const path = assetPath(clip.picture);
+  if (path !== previewShownPath && !(await previewSourcePicture(path, place.index))) return;
+  previewedClipIndex = place.index;
+  const [numerator, denominator] = clipRate(clip);
+  await invoke("preview_seek_absolute", { seconds: ((clip.inFrame + place.frameInClip) * denominator) / numerator });
+}
+
+const TIMELINE_PLAYHEAD_POLL_MILLISECONDS = 250;
+
+// a playhead before the clip's in point still sets the in point from the source frame under it
+async function followPreviewOnTimeline() {
+  if (previewedClipIndex === null || !isPreviewVisible()) return;
+  // the player is not running
+  const positionSeconds = await invoke("preview_get_position").catch(() => null);
+  if (positionSeconds === null || previewedClipIndex === null) return;
+  const timeline = activeTimeline();
+  const [numerator, denominator] = clipRate(timeline.clips[previewedClipIndex]);
+  const sourceFrame = Math.round((positionSeconds * numerator) / denominator);
+  setEditorPlayhead(timelineFrameAtSourceFrame(timeline, previewedClipIndex, sourceFrame));
+}
+
+setInterval(followPreviewOnTimeline, TIMELINE_PLAYHEAD_POLL_MILLISECONDS);
 
 // The built IMP carries the crop in its pictures already, so only its packaged
 // timed text is loaded on top.
@@ -671,6 +733,7 @@ function previewBuiltPackage(outputDir) {
   previewGeneration += 1;
   const generation = previewGeneration;
   previewShowsJobPicture = false;
+  previewedClipIndex = null;
   previewDcp(outputDir);
   setPreviewCrop(null);
   showPreviewSubtitle(outputDir, generation);
@@ -728,7 +791,8 @@ document.getElementById("btn-supplement")?.addEventListener("click", () => {
 
 // === Source picture processing ===
 document.getElementById("prop-auto-crop")?.addEventListener("click", async () => {
-  const picture = project.segments[0]?.picture;
+  const clip = activeTimeline().clips[previewedClipIndex ?? 0];
+  const picture = clip ? assetById(clip.picture) : null;
   const plan = document.getElementById("prop-picture-plan");
   const button = document.getElementById("prop-auto-crop");
   if (!picture) { tauriMessage("Import a video asset first"); return; }
@@ -759,20 +823,26 @@ document.getElementById("prop-auto-crop")?.addEventListener("click", async () =>
 // holding that route's gain in dB, empty where the route is left out.
 let audioMapShape = null;
 let audioMapDrawn = Promise.resolve();
+// the sound path the matrix was last drawn for, so an edit that keeps the sound keeps the typed gains
+let audioMapSoundPath;
 
-async function renderAudioMap() {
+function refreshAudioMap() {
+  const soundPath = firstSoundAsset(activeTimeline(), assetById)?.path ?? null;
+  if (soundPath === audioMapSoundPath) return;
+  audioMapSoundPath = soundPath;
+  audioMapDrawn = renderAudioMap(soundPath);
+}
+
+async function renderAudioMap(soundPath) {
   const container = document.getElementById("prop-audio-map");
   if (!container) return;
-  const sound = project.segments[0]?.sound;
-  if (!sound) {
+  if (soundPath === null) {
     audioMapShape = null;
     container.innerHTML = '<div class="audio-map-empty">Drop a WAV on the Sound track to map its channels.</div>';
     return;
   }
-  if (audioMapShape?.path === sound.path) return;
   try {
-    const shape = await invoke("audio_map_shape", { audioPath: sound.path });
-    audioMapShape = { path: sound.path, ...shape };
+    audioMapShape = await invoke("audio_map_shape", { audioPath: soundPath });
   } catch (e) {
     audioMapShape = null;
     container.innerHTML = `<div class="audio-map-empty">${escapeHtml(e)}</div>`;
@@ -826,8 +896,10 @@ let currentJobId = null;
 const DURATION_SPEC = /^(\d+f|\d+(\.\d+)?s)$/i;
 
 // Read the Properties panel's source treatment. A bad duration throws here so a
-// build fails before the encode rather than partway through it.
-function readSourceSettings() {
+// build fails before the encode rather than partway through it. Clip trims
+// stand in for the Trim and Still Length fields while a timeline sets the
+// clips' lengths.
+function readSourceSettings(clipTrims) {
   const duration = (id, label) => {
     const value = document.getElementById(id)?.value?.trim();
     if (!value) return null;
@@ -836,13 +908,18 @@ function readSourceSettings() {
     }
     return value;
   };
+  const clipLengths = clipTrims
+    ? { ...clipTrims, stillLength: null }
+    : {
+        trimStart: duration("prop-trim-start", "Trim from start"),
+        trimEnd: duration("prop-trim-end", "Trim from end"),
+        stillLength: duration("prop-still-length", "Still length"),
+      };
   return {
     audioDelayMs: parseInt(document.getElementById("prop-audio-delay")?.value) || 0,
     sourceColourspace: document.getElementById("prop-source-colourspace")?.value || "rec709",
     hdr: document.getElementById("prop-hdr")?.value || null,
-    trimStart: duration("prop-trim-start", "Trim from start"),
-    trimEnd: duration("prop-trim-end", "Trim from end"),
-    stillLength: duration("prop-still-length", "Still length"),
+    ...clipLengths,
     burnSubtitle: document.getElementById("prop-burn-subtitle")?.value || null,
     burnSubtitleFont: document.getElementById("prop-burn-subtitle-font")?.value || null,
     burnFontSize: burnPercent("prop-burn-font-size", "Burn-in font size"),
@@ -910,34 +987,22 @@ function cropPixels(id, label) {
 }
 
 // one composition per CPL tab, each becomes a separate CPL in the IMP
-function buildCompositions(title) {
-  const multi = project.compositions.length > 1;
-  return project.compositions
-    .map((c) => {
-      const s = c.segments[0];
-      if (!s?.picture) return null;
-      return {
-        title: multi ? `${title} - ${c.name}` : title,
-        contentKind: c.contentKind || "feature",
-        videoPath: s.picture.path,
-        audioPath: s.sound?.path || null,
-        subtitles: s.subtitle?.path ? [s.subtitle.path] : [],
-      };
-    })
-    .filter(Boolean);
-}
-
 function currentJobRequest() {
   const title = document.getElementById("prop-title")?.value?.trim() || "";
+  const { compositions, clipTrims } = compositionsRequest(project.compositions, title, assetById);
   return {
     title,
     outputDir: document.getElementById("prop-output")?.value || "",
-    compositions: buildCompositions(title),
-    sourceSettings: readSourceSettings(),
+    compositions,
+    sourceSettings: readSourceSettings(timelinesSetClipLengths(project.compositions) ? clipTrims : null),
     framerate: document.getElementById("prop-framerate")?.value || "24/1",
     bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
   };
+}
+
+function hasPicture() {
+  return project.compositions.some((composition) => composition.timeline.clips.length > 0);
 }
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {
@@ -951,7 +1016,7 @@ document.getElementById("btn-build")?.addEventListener("click", async () => {
   }
   const anotherBuildInFlight = buildsInFlight.anyBuildInFlight();
 
-  if (!buildCompositions(title).length) { tauriMessage("Import a video asset first"); return; }
+  if (!hasPicture()) { tauriMessage("Import a video asset first"); return; }
 
   // re-derive an auto-filled output folder so it follows the current title
   const outputEl = document.getElementById("prop-output");
@@ -1454,11 +1519,12 @@ async function restoreBuildPanel(saved, projectPath) {
   delete document.getElementById("prop-output").dataset.autoFilled;
 
   renderCplTabs();
-  // a null shape matches no sound path, so the matrix is drawn again
-  audioMapShape = null;
-  renderSegments();
+  // undefined matches no sound path, not even none, so the matrix is drawn again
+  audioMapSoundPath = undefined;
+  previewedClipIndex = null;
+  showActiveTimeline();
+  probeUnprobedClips();
   renderAssets();
-  updateStatusStats();
   clearPreviewSelection();
   // the last project's film would otherwise stay loaded
   const previewWasShowing = isPreviewVisible();
@@ -1579,10 +1645,9 @@ function matchesFinishedBuild() {
 function updateBuildButton() {
   const buildBtn = document.getElementById("btn-build");
   if (!buildBtn) return;
-  const hasVideo = project.segments.some(s => s.picture);
   const title = document.getElementById("prop-title")?.value?.trim();
   const alreadyBuilt = matchesFinishedBuild();
-  buildBtn.disabled = !(hasVideo && title) || buildsInFlight.buildInFlight(title) || alreadyBuilt;
+  buildBtn.disabled = !(hasPicture() && title) || buildsInFlight.buildInFlight(title) || alreadyBuilt;
   buildBtn.textContent = alreadyBuilt ? BUILT_BUTTON_TEXT : BUILD_BUTTON_TEXT;
 }
 
@@ -1630,15 +1695,10 @@ async function removeAsset(assetId) {
   if (!(await tauriConfirm(`Remove "${asset.name}" from project?`))) return;
   project.assets = project.assets.filter(a => a.id !== assetId);
   if (selectedPreview?.kind === "source" && selectedPreview.path === asset.path) clearPreviewSelection();
-  project.segments.forEach(s => {
-    if (s.picture?.id === assetId) s.picture = null;
-    if (s.sound?.id === assetId) s.sound = null;
-    if (s.subtitle?.id === assetId) s.subtitle = null;
-  });
-  fillFirstSegmentFromUnplacedAssets();
+  for (const composition of project.compositions) composition.timeline = withoutAsset(composition.timeline, assetId);
+  fillTimelineFromUnplacedAssets();
   renderAssets();
-  renderSegments();
-  updateStatusStats();
+  showActiveTimeline();
 }
 
 ctxMenu?.querySelectorAll("button").forEach(btn => {
@@ -1647,7 +1707,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
     const asset = project.assets.find(a => a.id === ctxAssetId);
     if (!asset) return;
     if (action === "preview") {
-      previewProjectFile(asset.path);
+      previewSourcePicture(asset.path);
     } else if (action === "remove") {
       removeAsset(ctxAssetId);
     } else if (action === "reveal") {
@@ -1681,21 +1741,22 @@ async function probeVideo(path) {
     ]);
     const result = await cmd.execute();
     if (result.code !== 0) return null;
-    const info = JSON.parse(result.stdout);
-    const vs = info.streams?.find(s => s.codec_type === "video");
-    if (!vs) return null;
-    return {
-      width: vs.width,
-      height: vs.height,
-      fps: vs.r_frame_rate,
-      duration: parseFloat(info.format?.duration || vs.duration || "0"),
-    };
+    return ffprobeVideoInfo(JSON.parse(result.stdout));
   } catch { return null; }
 }
 
 // === Init ===
+initTimelineEditor(document.getElementById("timeline-editor"), {
+  fps: DEFAULT_TIMELINE_FPS,
+  reelWord: "segment",
+  assetName,
+  assetKind: (assetId) => TIMELINE_KIND_BY_ASSET_TYPE[assetById(assetId).type],
+  sourceFrames,
+  onChange: timelineEdited,
+  onSeek: seekTimelineFrame,
+});
 renderAssets();
-renderSegments();
+showActiveTimeline();
 const buildPanelDefaults = serializeBuildPanel();
 initProjects({
   wizard: "imfwizard",
@@ -1721,7 +1782,12 @@ initProjects({
 updateStatusStats();
 initPreview();
 preferencesLoaded.then(() => initPlayerControlsPanel({ preferences: getPrefs(), save: (controls) => savePrefs({ ...getPrefs(), ...controls }) }));
-watchPreviewShown((path, ended) => { previewShownPath = path; previewPlaybackEnded = ended; updateToolbarState(); });
+watchPreviewShown((path, ended) => {
+  previewShownPath = path;
+  previewPlaybackEnded = ended;
+  previewedClipIndex = path === null ? null : clipIndexShowing(path, previewedClipIndex);
+  updateToolbarState();
+});
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({

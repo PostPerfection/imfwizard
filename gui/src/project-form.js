@@ -1,10 +1,60 @@
+import {
+  DEFAULT_TIMELINE_FPS,
+  embeddedSound,
+  emptyTimeline,
+  parseFrameRate,
+  timelineWithKnownAssets,
+} from "../../extern/guikit/src/composition-timeline.js";
+
 const VALUE = "value";
 const CHECKED = "checked";
 
-export const PROJECT_FILE_VERSION = 1;
+export const PROJECT_FILE_VERSION = 2;
+
+// frames stay 0 until the restore probes the source
+function migratedClip(picture, sound, subtitle) {
+  const clipSound = sound === null ? embeddedSound() : { kind: "file", asset: sound };
+  return { picture, frames: 0, inFrame: 0, outFrame: 0, sound: clipSound, subtitle };
+}
+
+// a version 1 asset holds no rate, so the timeline takes the Frame Rate menu's until the first clip is probed
+function timelineFromSegments(composition, form, upgradeNotes, reelStartingClipIndices) {
+  const timeline = emptyTimeline(parseFrameRate(form.framerate) ?? DEFAULT_TIMELINE_FPS);
+  composition.segments.forEach((segment, index) => {
+    const segmentName = `${composition.name} segment ${index + 1}`;
+    const picture = segment.picture ?? null;
+    const sound = segment.sound ?? null;
+    const subtitle = segment.subtitle ?? null;
+    if (picture === null) {
+      if (index === 0) {
+        timeline.sound = sound;
+        timeline.subtitle = subtitle;
+        return;
+      }
+      if (sound !== null) upgradeNotes.push(`${segmentName} sound stays off the timeline: the segment has no picture`);
+      if (subtitle !== null) upgradeNotes.push(`${segmentName} timed text stays off the timeline: the segment has no picture`);
+      return;
+    }
+    timeline.clips.push(migratedClip(picture, sound, subtitle));
+    if (index === 0) return;
+    reelStartingClipIndices.push(timeline.clips.length - 1);
+    upgradeNotes.push(`${segmentName} is clip ${timeline.clips.length} of the timeline`);
+  });
+  return timeline;
+}
+
+function segmentsIntoTimeline(form, upgradeNotes) {
+  if (!form.project) return form;
+  const compositions = form.project.compositions.map(({ segments, ...composition }) => {
+    const reelStartingClipIndices = [];
+    const timeline = timelineFromSegments({ ...composition, segments }, form, upgradeNotes, reelStartingClipIndices);
+    return { ...composition, timeline, reelStartingClipIndices };
+  });
+  return { ...form, project: { ...form.project, compositions } };
+}
 
 // a rename or a meaning change gets a step and a version bump, a new field with a default does not
-export const PROJECT_FILE_MIGRATIONS = {};
+export const PROJECT_FILE_MIGRATIONS = { 2: segmentsIntoTimeline };
 
 // [form key, control id, control property], keyed like the submit_job payload
 export const FORM_CONTROLS = [
@@ -63,12 +113,6 @@ export const TEXT_FIELDS = [
   "burnEffectColour",
 ];
 
-const SEGMENT_SLOTS = ["picture", "sound", "subtitle"];
-
-function assetId(asset) {
-  return asset ? asset.id : null;
-}
-
 export function serializeForm({ elementById, project, audioMap }) {
   const form = {};
   for (const [key, id, property] of FORM_CONTROLS) form[key] = elementById(id)[property];
@@ -78,14 +122,9 @@ export function serializeForm({ elementById, project, audioMap }) {
     project: {
       title: project.title,
       assets: project.assets.map((asset) => ({ ...asset })),
-      compositions: project.compositions.map((composition) => ({
+      compositions: project.compositions.map(({ reelStartingClipIndices, ...composition }) => ({
         ...composition,
-        segments: composition.segments.map((segment) => ({
-          id: segment.id,
-          picture: assetId(segment.picture),
-          sound: assetId(segment.sound),
-          subtitle: assetId(segment.subtitle),
-        })),
+        timeline: structuredClone(composition.timeline),
       })),
       activeComposition: project.activeComposition,
     },
@@ -112,15 +151,7 @@ export function restoreFormState(savedForm, defaults, { elementById, project }) 
   project.assets = assets;
   project.compositions = form.project.compositions.map((composition) => ({
     ...composition,
-    segments: composition.segments.map((segment, index) => {
-      const restoredSegment = { id: segment.id };
-      for (const slot of SEGMENT_SLOTS) {
-        const savedId = segment[slot] ?? null;
-        restoredSegment[slot] = assetsById.get(savedId) || null;
-        if (savedId !== null && !restoredSegment[slot]) notRestored.push(`${composition.name} segment ${index + 1} ${slot}`);
-      }
-      return restoredSegment;
-    }),
+    timeline: timelineWithKnownAssets(composition, assetsById, notRestored),
   }));
   project.activeComposition = form.project.activeComposition;
   return { form, notRestored };

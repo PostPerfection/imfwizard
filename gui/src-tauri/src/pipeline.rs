@@ -501,6 +501,7 @@ fn timeline_imp_of(
     timeline: &postkit::timeline::Timeline,
     compression: imfwizard_core::timeline_imp::PictureCompression,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    pause: Arc<std::sync::atomic::AtomicBool>,
 ) -> imfwizard_core::timeline_imp::TimelineImp {
     imfwizard_core::timeline_imp::TimelineImp {
         timeline: timeline.clone(),
@@ -516,6 +517,7 @@ fn timeline_imp_of(
         timed_text_language: composition.audio_lang.clone(),
         soundfield: Default::default(),
         cancel,
+        pause,
     }
 }
 
@@ -764,6 +766,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
             composition,
             timeline,
             compression_of(&job),
+            Default::default(),
             Default::default(),
         );
         imfwizard_core::timeline_imp::check_timeline(&build)?;
@@ -1344,6 +1347,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                 ..compression_of(job)
             },
             cancel,
+            pause,
         );
         let total_elapsed = build_timeline_package(&build, &log_file, |progress| {
             emit_progress(
@@ -1944,6 +1948,8 @@ mod tests {
     };
     use postkit::timeline::{Clip, ClipSound, SoundTrack, Timeline, TIMELINE_FORMAT_VERSION};
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
 
     const CLIP_WIDTH: u32 = 256;
@@ -2619,6 +2625,7 @@ mod tests {
             timeline,
             compression_of(&job),
             Default::default(),
+            Default::default(),
         );
         let log_file = std::sync::Arc::new(std::sync::Mutex::new(
             std::fs::File::create(directory.join("job.log")).unwrap(),
@@ -2647,6 +2654,61 @@ mod tests {
             .expect("the package holds a CPL");
         let cpl = std::fs::read_to_string(cpl).unwrap();
         assert_eq!(cpl.matches("<Segment>").count(), 2, "{cpl}");
+        std::fs::remove_dir_all(&directory).ok();
+    }
+    // long enough for the unpaused build to encode its frames
+    const PAUSED_BUILD_WAIT: Duration = Duration::from_secs(3);
+
+    #[test]
+    fn a_paused_timeline_build_encodes_no_frame_until_it_is_cancelled() {
+        let directory = scratch_directory("paused-timeline-build");
+        let first = test_pattern_clip(&directory, "first");
+        let second = test_pattern_clip(&directory, "second");
+        let silent_clip = |picture: &Path, in_frame, out_frame| Clip {
+            sound: ClipSound::None,
+            ..timeline_clip(picture, in_frame, out_frame)
+        };
+        let timeline = timeline_of(vec![
+            silent_clip(&first, 0, FIRST_CLIP_FRAMES),
+            silent_clip(&second, 2, 6),
+        ]);
+        let job = job_config_of(
+            1,
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        )
+        .unwrap();
+        let (composition, timeline) = job
+            .multi_clip_timeline()
+            .expect("two clips build as a timeline");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(true));
+        let build = timeline_imp_of(
+            &job,
+            composition,
+            timeline,
+            compression_of(&job),
+            cancel.clone(),
+            pause,
+        );
+        let log_file = Arc::new(std::sync::Mutex::new(
+            std::fs::File::create(directory.join("job.log")).unwrap(),
+        ));
+        let furthest_frame = AtomicU64::new(0);
+
+        let (frames_while_paused, built) = std::thread::scope(|scope| {
+            let running = scope.spawn(|| {
+                build_timeline_package(&build, &log_file, |progress| {
+                    furthest_frame.fetch_max(progress.frame, Ordering::Relaxed);
+                })
+            });
+            std::thread::sleep(PAUSED_BUILD_WAIT);
+            let frames_while_paused = furthest_frame.load(Ordering::Relaxed);
+            cancel.store(true, Ordering::Relaxed);
+            (frames_while_paused, running.join().unwrap())
+        });
+
+        assert_eq!(frames_while_paused, 0, "the paused build encoded frames");
+        assert!(built.is_err(), "a build cancelled while paused has to stop");
         std::fs::remove_dir_all(&directory).ok();
     }
 }

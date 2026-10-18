@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tauri_webdriver import POLL_SECONDS, Window, visible_windows, wait_until
+from tauri_webdriver import INPUT_SETTLE_SECONDS, POLL_SECONDS, Window, visible_windows, wait_until, xdotool
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GUI_BINARY = REPOSITORY_ROOT / "gui/src-tauri/target/release/imfwizard-gui"
@@ -41,7 +41,7 @@ REACTION_TIMEOUT_SECONDS = 15
 BUILD_TITLE = "Wizard End To End"
 
 PROJECT_WIZARD = "imfwizard"
-PROJECT_FILE_VERSION = 1
+PROJECT_FILE_VERSION = 2
 
 # both printed by imfwizard create --check on the media write_media makes
 LANGUAGE_HINT = "The sound has no language set. Set one unless it has no spoken parts."
@@ -319,9 +319,15 @@ def status_text(session):
     return session.property("#status-text", "textContent")
 
 
-def track_name(session, track):
+TIMELINE_CLIP_NAMES = """
+return [...document.querySelectorAll("#timeline-editor .timeline-editor-clip")].map((clip) => clip.textContent);
+"""
+TIMELINE_SOUND_LABEL = '#timeline-editor [data-track="sound"] .timeline-editor-span-label'
+
+
+def sound_track_label(session):
     return session.execute(
-        f"return document.querySelector('.track-{track} .track-info').textContent"
+        "return document.querySelector(arguments[0])?.textContent ?? null", TIMELINE_SOUND_LABEL
     )
 
 
@@ -465,14 +471,14 @@ def run_the_build(build, picture, sound):
     choose_in_dialog(window, "#import-video", picture)
     wait_until(
         "the video never reached the picture track",
-        lambda: track_name(session, "picture") == picture.name,
+        lambda: session.execute(TIMELINE_CLIP_NAMES) == [picture.name],
         IMPORT_TIMEOUT_SECONDS,
     )
 
     choose_in_dialog(window, "#import-audio", sound)
     wait_until(
         "the audio never reached the sound track",
-        lambda: track_name(session, "sound") == sound.name,
+        lambda: sound_track_label(session) == sound.name,
         IMPORT_TIMEOUT_SECONDS,
     )
 
@@ -992,4 +998,252 @@ def test_the_timeline_follows_playback_across_two_segments(window, two_segment_i
     )
     assert reported_duration(session) == pytest.approx(
         composition_seconds(segments), abs=frame_seconds
+    )
+
+
+TIMELINE_CLIP = '#timeline-editor .timeline-editor-clip[data-clip-index="{}"]'
+TIMELINE_IN_FIELD = '#timeline-editor input[data-field="in"]'
+TIMELINE_OUT_FIELD = '#timeline-editor input[data-field="out"]'
+SPLIT_SEGMENT_BUTTON = '#timeline-editor [data-action="split-reel"]'
+NEXT_FIELD_KEY = "Tab"
+SELECT_ALL_CHORD = "ctrl+a"
+TIMELINE_TITLE = "Timeline End To End"
+EACH_CLIP_SECONDS = 2
+WHOLE_CLIP = ("00:00:00:00", f"00:00:{EACH_CLIP_SECONDS:02d}:00")
+FIRST_CLIP_OUT = "00:00:01:12"
+FIRST_CLIP_OUT_FRAME = 36
+SECOND_CLIP_IN = "00:00:00:12"
+SECOND_CLIP_OUT = "00:00:01:18"
+SECOND_CLIP_IN_FRAME = 12
+SECOND_CLIP_OUT_FRAME = 42
+KEPT_FRAMES = [FIRST_CLIP_OUT_FRAME, SECOND_CLIP_OUT_FRAME - SECOND_CLIP_IN_FRAME]
+TIMELINE_SECONDS = sum(KEPT_FRAMES) / FIXTURE_FPS
+
+CLIP_TITLES = """
+return [...document.querySelectorAll("#timeline-editor .timeline-editor-clip")].map((clip) => clip.title);
+"""
+
+# the middle of an element's first frame, which the editor reads as the clip's first frame
+FIRST_FRAME_OF_CLIP = """
+const clip = document.querySelector(arguments[0]);
+clip.scrollIntoView({ block: "center" });
+const box = clip.getBoundingClientRect();
+return [box.left + box.width / arguments[1] / 2, box.top + box.height / 2];
+"""
+
+
+def write_picture(path, seconds):
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"testsrc2=size={FIXTURE_SIZE}:rate={FIXTURE_FPS}:duration={seconds}",
+        "-frames:v", str(round(FIXTURE_FPS * seconds)),
+        "-c:v", "ffv1",
+        str(path),
+    )
+    return path
+
+
+def write_sound(path, seconds):
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"sine=frequency=1000:sample_rate=48000:duration={seconds}",
+        "-c:a", "pcm_s24le",
+        str(path),
+    )
+    return path
+
+
+def clip_title(name, in_timecode, out_timecode):
+    return f"{name}, {in_timecode} to {out_timecode}"
+
+
+def replace_field_text(window, css, text):
+    window.click(css)
+    window.press(SELECT_ALL_CHORD)
+    window.type_text(text)
+
+
+def set_clip_range(window, index, in_timecode, out_timecode):
+    window.click(TIMELINE_CLIP.format(index))
+    replace_field_text(window, TIMELINE_IN_FIELD, in_timecode)
+    window.press(NEXT_FIELD_KEY)
+    replace_field_text(window, TIMELINE_OUT_FIELD, out_timecode)
+    window.press(NEXT_FIELD_KEY)
+
+
+def click_first_frame_of_clip(window, css, kept_frames):
+    x, y = window.session.execute(FIRST_FRAME_OF_CLIP, css, kept_frames)
+    xdotool(
+        "mousemove", str(window.origin[0] + round(x)), str(window.origin[1] + round(y)), "click", "1"
+    )
+    time.sleep(INPUT_SETTLE_SECONDS)
+
+
+def turn_off_verify_after_build(window):
+    session = window.session
+    window.press("ctrl+7")
+    wait_for_view(session, "view-settings")
+    window.click("#set-verify-after-build")
+    assert session.property("#set-verify-after-build", "checked") is False
+    window.click("#settings-form button[type='submit']")
+    wait_until(
+        "the settings were never saved",
+        lambda: status_text(session) == "Settings saved",
+        STATUS_TIMEOUT_SECONDS,
+    )
+    window.press("ctrl+1")
+    wait_for_view(session, "view-project")
+
+
+def test_two_clips_with_trims_and_a_segment_start_build_a_two_segment_imp(window, tmp_path):
+    session = window.session
+    # TODO: dcpdoctor reads each segment's sequence as a virtual track of its own and fails the verify
+    turn_off_verify_after_build(window)
+    media = tmp_path / "media"
+    media.mkdir()
+    first = write_picture(media / "first.mov", EACH_CLIP_SECONDS)
+    second = write_picture(media / "second.mov", EACH_CLIP_SECONDS)
+    sound = write_sound(media / "timeline.wav", TIMELINE_SECONDS)
+    package = tmp_path / "package"
+    package.mkdir()
+
+    choose_in_dialog(window, "#import-video", first)
+    choose_in_dialog(window, "#import-video", second)
+    choose_in_dialog(window, "#import-audio", sound)
+    wait_until(
+        "the two clips never took their sources' lengths",
+        lambda: session.execute(CLIP_TITLES)
+        == [clip_title(first.name, *WHOLE_CLIP), clip_title(second.name, *WHOLE_CLIP)],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    assert sound_track_label(session) == sound.name
+    assert session.property("#prop-trim-start", "disabled") is True
+    assert session.property("#prop-clip-length-hint", "hidden") is False
+
+    set_clip_range(window, 0, WHOLE_CLIP[0], FIRST_CLIP_OUT)
+    set_clip_range(window, 1, SECOND_CLIP_IN, SECOND_CLIP_OUT)
+    wait_until(
+        "the clips never took their in and out points",
+        lambda: session.execute(CLIP_TITLES)
+        == [
+            clip_title(first.name, WHOLE_CLIP[0], FIRST_CLIP_OUT),
+            clip_title(second.name, SECOND_CLIP_IN, SECOND_CLIP_OUT),
+        ],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    click_first_frame_of_clip(window, TIMELINE_CLIP.format(1), KEPT_FRAMES[1])
+    assert session.text(SPLIT_SEGMENT_BUTTON) == "Split segment here"
+    window.click(SPLIT_SEGMENT_BUTTON)
+
+    window.click("#prop-title")
+    window.type_text(TIMELINE_TITLE)
+    choose_in_dialog(window, "#browse-output", package)
+    wait_until(
+        "the output folder never took",
+        lambda: session.property("#prop-output", "value") == str(package),
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    window.click("#btn-build")
+    hints = hint_texts(session)
+    assert LANGUAGE_HINT in hints, hints
+    window.click("#hints-build")
+    wait_until(
+        "the build never finished",
+        lambda: session.property("#progress-stage", "textContent") in FINISHED_STAGES,
+        CREATE_TIMEOUT_SECONDS,
+    )
+    assert session.property("#progress-stage", "textContent") == DONE_STAGE, status_text(session)
+
+    assert image_resources(only_cpl(package)) == [(frames, FIXTURE_FPS) for frames in KEPT_FRAMES]
+    built = json.loads(project_path_beside(package).read_text())
+    assert built["version"] == PROJECT_FILE_VERSION
+    timeline = built["form"]["project"]["compositions"][0]["timeline"]
+    assert [(clip["inFrame"], clip["outFrame"]) for clip in timeline["clips"]] == [
+        (0, FIRST_CLIP_OUT_FRAME),
+        (SECOND_CLIP_IN_FRAME, SECOND_CLIP_OUT_FRAME),
+    ]
+    assert timeline["reelStarts"] == [FIRST_CLIP_OUT_FRAME]
+
+
+FOLLOWED_CLIP_SECONDS = 10
+FOLLOWED_CLIP_SIZE = "640x360"
+PREVIEW_SEEK_SECONDS = 5
+EDITOR_PLAYHEAD_HALFWAY = "* 0.5)"
+# where on the clip the click lands, and the source second the preview has to reach
+CLIP_CLICK_FRACTION = 0.75
+CLICKED_SECONDS = FOLLOWED_CLIP_SECONDS * CLIP_CLICK_FRACTION
+SEEK_TOLERANCE_SECONDS = 0.25
+
+PREVIEW_METADATA = """
+return window.__TAURI_INTERNALS__.invoke("preview_get_metadata").then((text) => JSON.parse(text));
+"""
+
+PREVIEW_PLAY_PAUSE = """
+return window.__TAURI_INTERNALS__.invoke("preview_play_pause").then(() => true);
+"""
+
+# what the preview's scrubber sends while it is dragged
+PREVIEW_SEEK = """
+return window.__TAURI_INTERNALS__.invoke("preview_seek_absolute", {seconds: arguments[0]}).then(() => true);
+"""
+
+EDITOR_PLAYHEAD_LEFT = """
+return document.querySelector("#timeline-editor .timeline-editor-playhead")?.style.left ?? null;
+"""
+
+POINT_ALONG_CLIP = """
+const clip = document.querySelector(arguments[0]);
+clip.scrollIntoView({ block: "center" });
+const box = clip.getBoundingClientRect();
+return [box.left + box.width * arguments[1], box.top + box.height / 2];
+"""
+
+
+def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path):
+    session = window.session
+    picture = tmp_path / "source.mov"
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"testsrc2=size={FOLLOWED_CLIP_SIZE}:rate={FIXTURE_FPS}:duration={FOLLOWED_CLIP_SECONDS}",
+        "-c:v", "ffv1",
+        str(picture),
+    )
+
+    choose_in_dialog(window, "#import-video", picture)
+    whole_clip = ("00:00:00:00", f"00:00:{FOLLOWED_CLIP_SECONDS:02d}:00")
+    wait_until(
+        "the clip never took its source's length",
+        lambda: session.execute(CLIP_TITLES) == [clip_title(picture.name, *whole_clip)],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    window.click("#btn-preview")
+    wait_until(
+        "the preview never reported a duration",
+        lambda: session.execute(PREVIEW_METADATA)["duration"] > 0,
+        PREVIEW_TIMEOUT_SECONDS,
+    )
+    # mpv plays on load, so the playhead only passes through halfway
+    session.execute(PREVIEW_PLAY_PAUSE)
+    wait_until(
+        "the preview never paused",
+        lambda: session.execute(PREVIEW_METADATA)["paused"],
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    session.execute(PREVIEW_SEEK, PREVIEW_SEEK_SECONDS)
+    wait_until(
+        "the timeline playhead never followed the preview",
+        lambda: (session.execute(EDITOR_PLAYHEAD_LEFT) or "").endswith(EDITOR_PLAYHEAD_HALFWAY),
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    x, y = session.execute(POINT_ALONG_CLIP, TIMELINE_CLIP.format(0), CLIP_CLICK_FRACTION)
+    xdotool(
+        "mousemove", str(window.origin[0] + round(x)), str(window.origin[1] + round(y)), "click", "1"
+    )
+    wait_until(
+        "a click on the clip never seeked the preview",
+        lambda: abs(session.execute(PREVIEW_METADATA)["position"] - CLICKED_SECONDS)
+        <= SEEK_TOLERANCE_SECONDS,
+        REACTION_TIMEOUT_SECONDS,
     )

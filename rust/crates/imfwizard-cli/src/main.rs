@@ -2206,6 +2206,7 @@ fn run() {
                         audio_element_kind: soundfield.audio_element_kind,
                     },
                     cancel: Default::default(),
+                    pause: Default::default(),
                 };
                 create_from_timeline(&build, check, keep_intermediates, no_verify);
                 return;

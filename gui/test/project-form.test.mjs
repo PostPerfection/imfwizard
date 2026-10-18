@@ -14,6 +14,8 @@ import {
   audioMapCells,
 } from '../src/project-form.js';
 
+import { withProbedFrames, withReelStartingClipsPlaced } from '../../extern/guikit/src/composition-timeline.js';
+
 register('../../extern/guikit/test/tauri-plugins-hooks.mjs', import.meta.url);
 
 const { readProjectFile } = await import('../../extern/guikit/src/project.js');
@@ -40,12 +42,20 @@ function emptyPanel(fill) {
   };
 }
 
+function clip(picture, frames, inFrame, outFrame, sound = { kind: 'embedded', asset: null }, subtitle = null) {
+  return { picture, frames, inFrame, outFrame, sound, subtitle };
+}
+
+function timeline(fields) {
+  return { fps: [24, 1], clips: [], sound: null, subtitle: null, reelStarts: [], ...fields };
+}
+
 function editedPanel() {
   const panel = emptyPanel((id, property, index) => (property === 'checked' ? index % 2 === 0 : `${id} value`));
-  const picture = { id: 3, type: 'video', path: '/media/film.mov', name: 'film.mov', meta: '1920×1080 24/1' };
+  const picture = { id: 3, type: 'video', path: '/media/film.mov', name: 'film.mov', meta: '1920×1080 24/1', fps: '24/1', frames: 240 };
   const sound = { id: 5, type: 'audio', path: '/media/mix.wav', name: 'mix.wav', meta: '' };
   const subtitle = { id: 6, type: 'subtitle', path: '/media/subs.ttml', name: 'subs.ttml', meta: '' };
-  const trailerPicture = { id: 7, type: 'video', path: '/media/trailer.mov', name: 'trailer.mov', meta: '' };
+  const trailerPicture = { id: 7, type: 'video', path: '/media/trailer.mov', name: 'trailer.mov', meta: '', fps: '24/1', frames: 96 };
   panel.project = {
     title: 'Film',
     assets: [picture, sound, subtitle, trailerPicture],
@@ -54,12 +64,9 @@ function editedPanel() {
         id: 1,
         name: 'Main',
         contentKind: 'feature',
-        segments: [
-          { id: 1, picture, sound, subtitle },
-          { id: 2, picture: null, sound: null, subtitle: null },
-        ],
+        timeline: timeline({ clips: [clip(3, 240, 0, 240), clip(7, 96, 12, 84, { kind: 'file', asset: 5 })], subtitle: 6, reelStarts: [240] }),
       },
-      { id: 4, name: 'Teaser', contentKind: 'trailer', segments: [{ id: 1, picture: trailerPicture, sound: null, subtitle: null }] },
+      { id: 4, name: 'Teaser', contentKind: 'trailer', timeline: timeline({ clips: [clip(7, 96, 0, 96)] }) },
     ],
     activeComposition: 1,
   };
@@ -86,15 +93,14 @@ test('serialize then restore gives back every field of the properties panel', ()
   assert.deepEqual(restored.notRestored, []);
 });
 
-test('a restored segment holds the restored asset itself, so later edits to the asset reach it', () => {
-  const reopened = emptyPanel(() => '');
-  restoreFormState(JSON.parse(JSON.stringify(serialized(editedPanel()))), serialized(emptyPanel(() => ''), null), reopened);
+test('the saved project holds each timeline, and never the clips still waiting for a segment start', () => {
+  const edited = editedPanel();
+  edited.project.compositions[1].reelStartingClipIndices = [1];
 
-  const [picture, sound] = reopened.project.assets;
-  const firstSegment = reopened.project.compositions[0].segments[0];
-  assert.equal(firstSegment.picture, picture);
-  assert.equal(firstSegment.sound, sound);
-  assert.equal(reopened.project.compositions[1].segments[0].picture, reopened.project.assets[3]);
+  const saved = serialized(edited);
+
+  assert.deepEqual(saved.project.compositions[0].timeline, editedPanel().project.compositions[0].timeline);
+  assert.equal('reelStartingClipIndices' in saved.project.compositions[1], false);
 });
 
 test('a field missing from the file takes the panel default', () => {
@@ -111,14 +117,19 @@ test('a field missing from the file takes the panel default', () => {
   assert.deepEqual(reopened.project.compositions, []);
 });
 
+function openedFixture(name) {
+  const text = readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+  return readProjectFile(text, 'imfwizard', PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS);
+}
+
 test('a version 1 project file opens and restores its saved fields', () => {
-  const text = readFileSync(new URL('./fixtures/Film-version-1.imfwizard', import.meta.url), 'utf8');
-  const { form, version } = readProjectFile(text, 'imfwizard', PROJECT_FILE_VERSION, PROJECT_FILE_MIGRATIONS);
+  const { form, version, upgradeNotes } = openedFixture('Film-version-1.imfwizard');
   const reopened = emptyPanel(() => '');
 
   const { notRestored } = restoreFormState(form, serialized(emptyPanel(() => ''), null), reopened);
 
   assert.equal(version, 1);
+  assert.deepEqual(upgradeNotes, []);
   assert.deepEqual(notRestored, []);
   assert.equal(reopened.controls.get('prop-title').value, 'Film');
   assert.equal(reopened.controls.get('prop-preset').value, 'netflix');
@@ -127,9 +138,39 @@ test('a version 1 project file opens and restores its saved fields', () => {
   assert.equal(reopened.controls.get('prop-deinterlace').checked, true);
   assert.equal(reopened.controls.get('prop-output').value, '/home/user/IMF/Film');
   assert.equal(form.audioMap, '1:L,2:R@-3');
-  const [picture, sound, subtitle] = reopened.project.assets;
-  assert.equal(picture.path, '/media/film.mov');
-  assert.deepEqual(reopened.project.compositions[0].segments, [{ id: 1, picture, sound, subtitle }]);
+  assert.equal(reopened.project.assets[0].path, '/media/film.mov');
+  assert.deepEqual(reopened.project.compositions[0].timeline, timeline({
+    fps: [24000, 1001],
+    clips: [clip(1, 0, 0, 0, { kind: 'file', asset: 2 }, 3)],
+  }));
+});
+
+test('a version 1 project puts each later segment on the timeline as a clip that starts a segment, and says so', () => {
+  const { form, upgradeNotes } = openedFixture('Film-two-segments-version-1.imfwizard');
+  const reopened = emptyPanel(() => '');
+  restoreFormState(form, serialized(emptyPanel(() => ''), null), reopened);
+  const [composition] = reopened.project.compositions;
+
+  assert.deepEqual(upgradeNotes, [
+    'Main segment 2 is clip 2 of the timeline',
+    'Main segment 3 sound stays off the timeline: the segment has no picture',
+  ]);
+  assert.deepEqual(composition.timeline.clips, [
+    clip(1, 0, 0, 0, { kind: 'file', asset: 2 }, 3),
+    clip(4, 0, 0, 0, { kind: 'file', asset: 5 }, 6),
+  ]);
+  assert.deepEqual(composition.reelStartingClipIndices, [1]);
+
+  const probed = withReelStartingClipsPlaced({
+    ...composition,
+    timeline: withProbedFrames(withProbedFrames(composition.timeline, 1, 2400), 4, 480),
+  });
+  assert.deepEqual(probed.timeline.reelStarts, [2400]);
+  reopened.project.compositions = [probed];
+  const saved = JSON.parse(JSON.stringify(serialized(reopened, form.audioMap)));
+  const savedAgain = emptyPanel(() => '');
+  restoreFormState(saved, serialized(emptyPanel(() => ''), null), savedAgain);
+  assert.deepEqual(savedAgain.project.compositions, [probed]);
 });
 
 function selectOffering(label, values, value) {
@@ -150,16 +191,15 @@ test('a saved select value the panel does not offer is named and the select keep
   assert.equal(reopened.controls.get('prop-hdr').value, 'pq-bt2020');
 });
 
-test('a segment slot whose asset is gone from the file is named by composition and segment', () => {
+test('a clip whose asset is gone from the file is named by composition and clip', () => {
   const saved = JSON.parse(JSON.stringify(serialized(editedPanel())));
   saved.project.assets = saved.project.assets.filter((asset) => asset.id !== 5);
   const reopened = emptyPanel(() => '');
 
   const { notRestored } = restoreFormState(saved, serialized(emptyPanel(() => ''), null), reopened);
 
-  assert.deepEqual(notRestored, ['Main segment 1 sound']);
-  assert.equal(reopened.project.compositions[0].segments[0].sound, null);
-  assert.equal(reopened.project.compositions[0].segments[0].picture, reopened.project.assets[0]);
+  assert.deepEqual(notRestored, ['Main clip 2 sound']);
+  assert.deepEqual(reopened.project.compositions[0].timeline.clips[1].sound, { kind: 'embedded', asset: null });
 });
 
 test('every properties panel control is saved, and every saved control is on the panel', () => {

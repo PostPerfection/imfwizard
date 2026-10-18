@@ -44,6 +44,7 @@ pub struct TimelineImp {
     pub timed_text_language: Option<String>,
     pub soundfield: SoundfieldLabels,
     pub cancel: Arc<AtomicBool>,
+    pub pause: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -390,7 +391,6 @@ fn encode_clip_picture(
     let encode_dir = build
         .output_dir
         .join(format!("{ENCODE_SCRATCH_PREFIX}{index}"));
-    let pause = Arc::new(AtomicBool::new(false));
     let (encode, track) = crate::overlapped_picture::encode_and_wrap_picture(
         &clip.picture,
         &encode_dir,
@@ -402,7 +402,7 @@ fn encode_clip_picture(
             colour: crate::mxf_wrap::picture_colour(build.hdr.as_ref()),
         },
         &build.cancel,
-        &pause,
+        &build.pause,
         on_progress,
         |message| tracing::info!("{message}"),
     )?;

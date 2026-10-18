@@ -227,6 +227,7 @@ pub fn conform_to_imp(
         timed_text_language: None,
         soundfield: Default::default(),
         cancel: Default::default(),
+        pause: Default::default(),
     };
     let built = crate::timeline_imp::build_timeline_imp(&build, |_| {})?;
 
