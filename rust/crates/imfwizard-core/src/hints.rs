@@ -10,9 +10,11 @@ use postkit::encode::{InputType, detect_input_type};
 use postkit::hints::{
     AudioLevel, Hint, HintCue, SubtitleCues, audio_language_hint, audio_level_hint, subtitle_hints,
 };
+use postkit::timeline::{ClipSound, SoundTrack};
 
 use crate::preflight::CreatePlan;
 use crate::source_edits::TimedTextCue;
+use crate::timeline_imp::TimelineImp;
 
 /// What the hints are decided from. Kept apart from the probing so the rules can
 /// be driven directly.
@@ -31,6 +33,60 @@ pub struct HintFacts {
 /// Every hint the job raises, probing the source for the numbers it needs.
 pub fn gather_hints(plan: &CreatePlan) -> Vec<Hint> {
     hints_from(&probe_hint_facts(plan))
+}
+
+pub fn timeline_hints(build: &TimelineImp) -> Vec<String> {
+    let timeline = &build.timeline;
+    let shared_plan = CreatePlan {
+        audio_language: build.audio_language.clone(),
+        timed_text_language: build.timed_text_language.clone(),
+        fps_num: timeline.fps.numerator,
+        fps_den: timeline.fps.denominator,
+        ..Default::default()
+    };
+    let clip_plans = timeline.clips.iter().enumerate().map(|(index, clip)| {
+        (
+            Some(format!(
+                "clip {} ({})",
+                index + 1,
+                short_name(&clip.picture)
+            )),
+            CreatePlan {
+                picture: Some(clip.picture.clone()),
+                sound_from_picture: matches!(clip.sound, ClipSound::Embedded),
+                audio_files: match &clip.sound {
+                    ClipSound::File(path) => vec![path.clone()],
+                    ClipSound::Embedded | ClipSound::None => Vec::new(),
+                },
+                timed_text_files: clip.subtitle.iter().cloned().collect(),
+                ..shared_plan.clone()
+            },
+        )
+    });
+    let timeline_plan = CreatePlan {
+        audio_files: match &timeline.sound {
+            SoundTrack::Override(path) => vec![path.clone()],
+            SoundTrack::PerClip => Vec::new(),
+        },
+        timed_text_files: timeline.subtitle.iter().cloned().collect(),
+        ..shared_plan.clone()
+    };
+    let mut raised: Vec<String> = Vec::new();
+    let mut hints = Vec::new();
+    for (clip_label, plan) in clip_plans.chain([(None, timeline_plan)]) {
+        for hint in gather_hints(&plan) {
+            // one missing language would otherwise be raised once a clip
+            if raised.contains(&hint.text) {
+                continue;
+            }
+            raised.push(hint.text.clone());
+            hints.push(match &clip_label {
+                Some(label) => format!("{label}: {}", hint.text),
+                None => hint.text,
+            });
+        }
+    }
+    hints
 }
 
 fn hints_from(facts: &HintFacts) -> Vec<Hint> {

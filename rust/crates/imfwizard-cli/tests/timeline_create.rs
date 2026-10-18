@@ -248,6 +248,31 @@ fn one_clip_builds_what_the_trimmed_video_build_does() {
 }
 
 #[test]
+fn the_check_of_two_clips_raises_the_missing_language_on_the_first_clip() {
+    let dir = TempDir::new().unwrap();
+    let first = write_media(dir.path(), "first.mov", 440);
+    let second = write_media(dir.path(), "second.mov", 880);
+    let timeline = write_timeline(
+        dir.path(),
+        vec![
+            clip(&first, 0, FIRST_CLIP),
+            clip(&second, FIRST_CLIP.1 - FIRST_CLIP.0, SECOND_CLIP),
+        ],
+        vec![],
+    );
+    let imp = dir.path().join("imp");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy(), "-t", "Hinted"])
+        .args(["--timeline", &timeline.to_string_lossy(), "--check"])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "hint: clip 1 (first.mov): The sound has no language set.",
+        ))
+        .stdout(predicates::str::contains("with 1 hint(s)"));
+}
+
+#[test]
 fn a_timeline_beside_a_video_is_refused_naming_the_flag() {
     let dir = TempDir::new().unwrap();
     let timeline = write_timeline(

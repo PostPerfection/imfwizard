@@ -213,10 +213,15 @@ fn create_from_timeline(
 
     let timeline_plan =
         imfwizard_core::timeline_imp::check_timeline(build).unwrap_or_else(|e| fail(e));
+    let hints = imfwizard_core::hints::timeline_hints(build);
+    for hint in &hints {
+        tracing::warn!("hint: {hint}");
+    }
     if check {
         println!(
-            "Pre-build check passed for {} clips, nothing was encoded or written",
-            build.timeline.clips.len()
+            "Pre-build check passed for {} clips with {} hint(s); nothing was encoded or written",
+            build.timeline.clips.len(),
+            hints.len()
         );
         return;
     }

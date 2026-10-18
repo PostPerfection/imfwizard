@@ -532,69 +532,6 @@ fn content_kind_or_feature(composition: &CompositionInput) -> String {
     }
 }
 
-fn picture_file_name(picture: &Path) -> String {
-    picture
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| picture.display().to_string())
-}
-
-fn timeline_hints(build: &imfwizard_core::timeline_imp::TimelineImp) -> Vec<String> {
-    let timeline = &build.timeline;
-    let shared_plan = imfwizard_core::preflight::CreatePlan {
-        audio_language: build.audio_language.clone(),
-        timed_text_language: build.timed_text_language.clone(),
-        fps_num: timeline.fps.numerator,
-        fps_den: timeline.fps.denominator,
-        ..Default::default()
-    };
-    let clip_plans = timeline.clips.iter().enumerate().map(|(index, clip)| {
-        (
-            Some(format!(
-                "clip {} ({})",
-                index + 1,
-                picture_file_name(&clip.picture)
-            )),
-            imfwizard_core::preflight::CreatePlan {
-                picture: Some(clip.picture.clone()),
-                sound_from_picture: matches!(clip.sound, postkit::timeline::ClipSound::Embedded),
-                audio_files: match &clip.sound {
-                    postkit::timeline::ClipSound::File(path) => vec![path.clone()],
-                    postkit::timeline::ClipSound::Embedded | postkit::timeline::ClipSound::None => {
-                        Vec::new()
-                    }
-                },
-                timed_text_files: clip.subtitle.iter().cloned().collect(),
-                ..shared_plan.clone()
-            },
-        )
-    });
-    let timeline_plan = imfwizard_core::preflight::CreatePlan {
-        audio_files: match &timeline.sound {
-            postkit::timeline::SoundTrack::Override(path) => vec![path.clone()],
-            postkit::timeline::SoundTrack::PerClip => Vec::new(),
-        },
-        timed_text_files: timeline.subtitle.iter().cloned().collect(),
-        ..shared_plan.clone()
-    };
-    let mut raised: Vec<String> = Vec::new();
-    let mut hints = Vec::new();
-    for (clip_label, plan) in clip_plans.chain([(None, timeline_plan)]) {
-        for hint in imfwizard_core::hints::gather_hints(&plan) {
-            // one missing language would otherwise be raised once a clip
-            if raised.contains(&hint.text) {
-                continue;
-            }
-            raised.push(hint.text.clone());
-            hints.push(match &clip_label {
-                Some(label) => format!("{label}: {}", hint.text),
-                None => hint.text,
-            });
-        }
-    }
-    hints
-}
-
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
 #[derive(Default)]
@@ -776,7 +713,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
             Default::default(),
         );
         job.timeline_plan = Some(imfwizard_core::timeline_imp::check_timeline(&build)?);
-        job.hints = timeline_hints(&build);
+        job.hints = imfwizard_core::hints::timeline_hints(&build);
     }
     Ok(job)
 }
