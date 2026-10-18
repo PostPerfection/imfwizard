@@ -229,7 +229,11 @@ pub fn conform_to_imp(
         cancel: Default::default(),
         pause: Default::default(),
     };
-    let built = crate::timeline_imp::build_timeline_imp(&build, |_| {})?;
+    let built = crate::timeline_imp::build_timeline_imp(
+        &build,
+        |_| {},
+        |message| tracing::info!("{message}"),
+    )?;
 
     let mut manifest = plan.clone();
     let sound_track_file = built

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use postkit::dolby_vision::DolbyVisionSummary;
 use postkit::encode::{FrameRange, FrameRate, InputType, SourceColour, detect_input_type};
 use postkit::picture_processing::PictureProcessing;
 use postkit::pipeline::{EncodeRunOptions, PipelineProgress};
@@ -9,6 +10,8 @@ use postkit::timeline::{Clip, ClipSound, SingleClipBuild, SoundTrack, Timeline};
 
 use crate::MxfTrackFile;
 use crate::cpl::{CompositionSegment, SequenceResource};
+use crate::hdr_source::SourceHdr;
+use crate::hdr_wcg::HdrWcg;
 use crate::imp::{AudioRole, AudioTrack, Composition, ImpOptions, SoundfieldLabels};
 use crate::intermediates::ENCODE_SCRATCH_PREFIX;
 use crate::source_edits::{CONVERTED_SUBTITLE_PREFIX, FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX};
@@ -108,6 +111,7 @@ struct ClipPicture {
 struct TimelinePlan {
     raster: (u32, u32),
     clips: Vec<ClipPicture>,
+    hdr: Option<HdrWcg>,
 }
 
 /// Every refusal the build can make, before anything is encoded.
@@ -139,7 +143,37 @@ fn plan(build: &TimelineImp) -> Result<TimelinePlan, String> {
             plan_clip(build, clip, raster).map_err(|e| format!("{}: {e}", clip_name(index, clip)))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(TimelinePlan { raster, clips })
+    let hdr = match build.hdr.clone() {
+        Some(hdr) => Some(light_levels_from_clip_rpus(timeline, hdr)?),
+        None => None,
+    };
+    Ok(TimelinePlan { raster, clips, hdr })
+}
+
+// a clip without an RPU adds no light level
+fn light_levels_from_clip_rpus(timeline: &Timeline, hdr: HdrWcg) -> Result<HdrWcg, String> {
+    let summaries = timeline
+        .clips
+        .iter()
+        .enumerate()
+        .filter_map(|(index, clip)| {
+            clip_rpu_summary(clip)
+                .map_err(|e| format!("{}: {e}", clip_name(index, clip)))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    crate::hdr_source::light_levels_from_summaries(&summaries, hdr)
+}
+
+fn clip_rpu_summary(clip: &Clip) -> Result<Option<DolbyVisionSummary>, String> {
+    if crate::hdr_source::probe(&clip.picture)? != SourceHdr::DolbyVision {
+        return Ok(None);
+    }
+    let Some(summary) = postkit::dolby_vision::read_dolby_vision(&clip.picture)? else {
+        return Ok(None);
+    };
+    postkit::dolby_vision::refuse_undecodable_dolby_vision(&summary)?;
+    Ok(Some(summary))
 }
 
 fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<ClipPicture, String> {
@@ -216,6 +250,7 @@ fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<Cli
 pub fn build_timeline_imp(
     build: &TimelineImp,
     on_progress: impl Fn(&PipelineProgress),
+    on_log: impl Fn(&str),
 ) -> Result<TimelineImpResult, String> {
     let plan = plan(build)?;
     let timeline = &build.timeline;
@@ -236,7 +271,7 @@ pub fn build_timeline_imp(
     let mut composition = Composition {
         title: build.title.clone(),
         content_kind: build.content_kind.clone(),
-        hdr: build.hdr.clone(),
+        hdr: plan.hdr.clone(),
         ..Default::default()
     };
 
@@ -253,11 +288,10 @@ pub fn build_timeline_imp(
             return Err(crate::imp::CANCELLED_ERROR.to_string());
         }
         let name = clip_name(index, clip);
-        tracing::info!(
+        on_log(&format!(
             "Encoding {name} frames {}..{} at timeline frame {first_frame}",
-            clip.in_frame,
-            clip.out_frame
-        );
+            clip.in_frame, clip.out_frame
+        ));
         let clip_options = EncodeRunOptions {
             source_colour: clip_picture.source_colour.clone(),
             picture: clip_picture.processing.clone(),
@@ -274,8 +308,9 @@ pub fn build_timeline_imp(
                 ..progress.clone()
             })
         };
-        let track = encode_clip_picture(build, clip, index, &clip_options, on_clip_progress)
-            .map_err(|e| format!("{name}: {e}"))?;
+        let track =
+            encode_clip_picture(build, clip, index, &clip_options, on_clip_progress, &on_log)
+                .map_err(|e| format!("{name}: {e}"))?;
         picture_track_files.push(track);
     }
 
@@ -387,6 +422,7 @@ fn encode_clip_picture(
     index: usize,
     options: &EncodeRunOptions,
     on_progress: impl Fn(&PipelineProgress),
+    on_log: impl Fn(&str),
 ) -> Result<MxfTrackFile, String> {
     let encode_dir = build
         .output_dir
@@ -404,7 +440,7 @@ fn encode_clip_picture(
         &build.cancel,
         &build.pause,
         on_progress,
-        |message| tracing::info!("{message}"),
+        on_log,
     )?;
     for finding in encode.picture_findings.describe(options.fps.as_f64()) {
         tracing::warn!("{finding}");
@@ -551,6 +587,13 @@ fn segment_spans(clip_lengths: &[u64], reel_starts: &[u64]) -> Vec<SegmentSpan> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hdr_source::tests::dolby_vision_summary;
+    use std::cell::RefCell;
+    use std::path::Path;
+
+    const LOGGED_CLIP_FRAMES: u64 = 2;
+    const LOGGED_CLIP_RATE: u32 = 24;
+    const LOGGED_CLIP_RASTER: &str = "1920x1080";
 
     fn piece(clip: usize, entry_point: u64, length: u64) -> ClipPiece {
         ClipPiece {
@@ -650,5 +693,91 @@ mod tests {
         assert_eq!(refusals.len(), 2, "{refusals:?}");
         assert!(refusals[0].starts_with("--burn-subtitle"));
         assert!(refusals[1].contains(SOUND_IS_JOINED_FROM_THE_CLIPS));
+    }
+
+    #[test]
+    fn a_two_clip_timeline_takes_the_brightest_light_levels_of_its_clips_rpus() {
+        let hdr = HdrWcg::from_flags("pq-bt2020", None).unwrap();
+        let brighter_peak = dolby_vision_summary(8, Some(993.0), Some(200.0));
+        let brighter_average = dolby_vision_summary(8, Some(600.0), Some(362.4));
+        let filled =
+            crate::hdr_source::light_levels_from_summaries(&[brighter_peak, brighter_average], hdr)
+                .unwrap();
+        assert_eq!(filled.max_cll, Some(993));
+        assert_eq!(filled.max_fall, Some(362));
+    }
+
+    fn write_clip_media(dir: &Path, name: &str) -> PathBuf {
+        let media = dir.join(name);
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+            .arg(format!(
+                "testsrc2=size={LOGGED_CLIP_RASTER}:rate={LOGGED_CLIP_RATE}"
+            ))
+            .args(["-frames:v", &LOGGED_CLIP_FRAMES.to_string(), "-c:v", "ffv1"])
+            .arg(&media)
+            .output()
+            .expect("ffmpeg");
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        media
+    }
+
+    #[test]
+    fn every_clip_names_itself_in_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let clips = ["first.mov", "second.mov"].map(|name| Clip {
+            picture: write_clip_media(dir.path(), name),
+            in_frame: 0,
+            out_frame: LOGGED_CLIP_FRAMES,
+            sound: ClipSound::None,
+            subtitle: None,
+            source_colour: Default::default(),
+            picture_processing: Default::default(),
+        });
+        let build = TimelineImp {
+            timeline: Timeline {
+                version: postkit::timeline::TIMELINE_FORMAT_VERSION,
+                fps: FrameRate::whole(LOGGED_CLIP_RATE),
+                clips: clips.to_vec(),
+                sound: SoundTrack::PerClip,
+                subtitle: None,
+                reel_starts: Vec::new(),
+            },
+            output_dir: dir.path().join("imp"),
+            title: "Logged Clips".to_string(),
+            content_kind: "feature".to_string(),
+            picture_options: Default::default(),
+            source_colour: crate::source_colourspace::to_source_colour(
+                crate::source_colourspace::APP2E_SOURCE_SPACE,
+            )
+            .unwrap(),
+            compression: Default::default(),
+            hdr: None,
+            audio_language: None,
+            audio_role: None,
+            timed_text_language: None,
+            soundfield: Default::default(),
+            cancel: Default::default(),
+            pause: Default::default(),
+        };
+        let lines = RefCell::new(Vec::new());
+        build_timeline_imp(
+            &build,
+            |_| {},
+            |message| lines.borrow_mut().push(message.to_string()),
+        )
+        .unwrap();
+        let lines = lines.into_inner();
+        for (index, clip) in clips.iter().enumerate() {
+            let encoding = format!("Encoding {}", clip_name(index, clip));
+            assert!(
+                lines.iter().any(|line| line.starts_with(&encoding)),
+                "no {encoding:?} in {lines:?}"
+            );
+        }
     }
 }

@@ -1816,8 +1816,10 @@ fn build_timeline_package(
         ),
     );
     let build_started = Instant::now();
-    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, on_progress)
-        .inspect_err(|error| log_to(log_file, &format!("[PACKAGE] FAILED: {error}")))?;
+    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, on_progress, |message| {
+        log_to(log_file, message)
+    })
+    .inspect_err(|error| log_to(log_file, &format!("[PACKAGE] FAILED: {error}")))?;
     log_to(
         log_file,
         &format!("[PACKAGE] Done, CPL {}", built.cpl_path.display()),

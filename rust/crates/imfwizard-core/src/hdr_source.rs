@@ -190,13 +190,26 @@ fn light_levels_from_summary(
     hdr: HdrWcg,
 ) -> Result<HdrWcg, String> {
     postkit::dolby_vision::refuse_undecodable_dolby_vision(summary)?;
+    light_levels_from_summaries(std::slice::from_ref(summary), hdr)
+}
+
+// each level is already a maximum over its source's frames
+pub fn light_levels_from_summaries(
+    summaries: &[postkit::dolby_vision::DolbyVisionSummary],
+    hdr: HdrWcg,
+) -> Result<HdrWcg, String> {
+    let brightest = |level: fn(&postkit::dolby_vision::DolbyVisionSummary) -> Option<f32>| {
+        summaries.iter().filter_map(level).reduce(f32::max)
+    };
     let nits =
         |level: Option<f32>| level.map(|nits| nits.round().clamp(0.0, f32::from(u16::MAX)) as u16);
     // the flags are the operator's own measurement, so they win over the RPU
-    let max_cll = hdr.max_cll.or(nits(summary.max_content_light_level_nits));
-    let max_fall = hdr
-        .max_fall
-        .or(nits(summary.max_frame_average_light_level_nits));
+    let max_cll = hdr.max_cll.or(nits(brightest(|summary| {
+        summary.max_content_light_level_nits
+    })));
+    let max_fall = hdr.max_fall.or(nits(brightest(|summary| {
+        summary.max_frame_average_light_level_nits
+    })));
     hdr.with_content_light_levels(max_cll, max_fall)
 }
 
@@ -215,7 +228,7 @@ pub fn resolve(picture: Option<&Path>, hdr: Option<HdrWcg>) -> Result<Option<Hdr
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn stream_json(fields: &str) -> String {
@@ -280,7 +293,7 @@ mod tests {
         }
     }
 
-    fn dolby_vision_summary(
+    pub(crate) fn dolby_vision_summary(
         profile: u8,
         max_content_light_level_nits: Option<f32>,
         max_frame_average_light_level_nits: Option<f32>,

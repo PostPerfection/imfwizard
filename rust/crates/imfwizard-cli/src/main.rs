@@ -221,15 +221,20 @@ fn create_from_timeline(
     }
     let on_interrupt = build.cancel.clone();
     let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
-    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, |progress| {
-        eprint!(
-            "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
-            progress.frame,
-            progress.total_frames,
-            progress.frame as f64 * PERCENT_OF_A_WHOLE as f64 / progress.total_frames.max(1) as f64,
-            progress.fps
-        );
-    });
+    let built = imfwizard_core::timeline_imp::build_timeline_imp(
+        build,
+        |progress| {
+            eprint!(
+                "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
+                progress.frame,
+                progress.total_frames,
+                progress.frame as f64 * PERCENT_OF_A_WHOLE as f64
+                    / progress.total_frames.max(1) as f64,
+                progress.fps
+            );
+        },
+        |message| tracing::info!("{message}"),
+    );
     eprintln!();
     let built = built.unwrap_or_else(|e| fail(e));
     if !keep_intermediates {

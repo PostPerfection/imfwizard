@@ -15,6 +15,10 @@
 ### Changed
 - **`conform` builds through the timeline and writes it**: the plan is written as `timeline.json` beside the package, a clip per event with the media's own sound, and built through `create --timeline`'s path in one segment. The events' sound is now one sound track file the main audio track plays once, an event whose media is another size is fitted onto the first event's raster, and media with and without sound mix, where each was refused before. `conform_manifest.json` keeps its shape, every event naming the one sound track file. `cpl::write_sequenced_cpl` takes segments of picture, sound and timed text resources and writes them through postkit's `ImfCpl`, describing a track file once however many resources name it, in place of splicing its own XML into the SequenceList postkit left empty.
 
+### Fixed
+- **A timeline of Dolby Vision clips fills its light levels**: `create --timeline` and the desktop build of a longer timeline now read the RPU of every Dolby Vision clip when an HDR preset is set, as `--video` does, and write MaxCLL and MaxFALL into the CPL. Each is the highest the clips' RPUs give, a clip without an RPU adds nothing, `--max-cll` and `--max-fall` still win over the RPUs, and a profile 5 clip is refused by clip number and file name before anything is encoded. The CPL had no light levels.
+- **The clips of a timeline log to the job log**: the line naming each clip as its encode starts and the encoder's own messages now reach the desktop job log on a timeline built clip by clip, as they do on a single video build. They were missing from the job log.
+
 ## [1.5.2] - 2026-10-15
 
 ### Fixed
