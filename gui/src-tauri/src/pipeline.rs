@@ -232,6 +232,8 @@ pub struct JobConfig {
     /// What the pre-build check found, carried through so the job log lists it
     /// without measuring the source a second time.
     hints: Vec<String>,
+    // a multi-clip timeline's build runs from this instead of probing every clip again
+    timeline_plan: Option<imfwizard_core::timeline_imp::TimelinePlan>,
 }
 
 impl JobConfig {
@@ -759,6 +761,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
         picture: picture_options,
         audio_map,
         hints,
+        timeline_plan: None,
     };
     if let Some((composition, timeline)) = job.multi_clip_timeline() {
         let build = timeline_imp_of(
@@ -769,7 +772,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
             Default::default(),
             Default::default(),
         );
-        imfwizard_core::timeline_imp::check_timeline(&build)?;
+        job.timeline_plan = Some(imfwizard_core::timeline_imp::check_timeline(&build)?);
         job.hints = timeline_hints(&build);
     }
     Ok(job)
@@ -1337,6 +1340,10 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     );
 
     if let Some((composition, timeline)) = job.multi_clip_timeline() {
+        let timeline_plan = job
+            .timeline_plan
+            .as_ref()
+            .ok_or("this timeline job was queued by an older build, submit it again")?;
         let build = timeline_imp_of(
             job,
             composition,
@@ -1349,7 +1356,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             cancel,
             pause,
         );
-        let total_elapsed = build_timeline_package(&build, &log_file, |progress| {
+        let total_elapsed = build_timeline_package(&build, timeline_plan, &log_file, |progress| {
             emit_progress(
                 app,
                 job.id,
@@ -1804,6 +1811,7 @@ const PERCENT_OF_A_WHOLE: f64 = 100.0;
 
 fn build_timeline_package(
     build: &imfwizard_core::timeline_imp::TimelineImp,
+    timeline_plan: &imfwizard_core::timeline_imp::TimelinePlan,
     log_file: &Arc<Mutex<std::fs::File>>,
     on_progress: impl Fn(&postkit::pipeline::PipelineProgress),
 ) -> Result<f64, String> {
@@ -1816,9 +1824,12 @@ fn build_timeline_package(
         ),
     );
     let build_started = Instant::now();
-    let built = imfwizard_core::timeline_imp::build_timeline_imp(build, on_progress, |message| {
-        log_to(log_file, message)
-    })
+    let built = imfwizard_core::timeline_imp::build_timeline_imp(
+        build,
+        timeline_plan,
+        on_progress,
+        |message| log_to(log_file, message),
+    )
     .inspect_err(|error| log_to(log_file, &format!("[PACKAGE] FAILED: {error}")))?;
     log_to(
         log_file,
@@ -2618,6 +2629,9 @@ mod tests {
             request(&directory, timeline_composition(timeline), app2e_settings()),
         )
         .unwrap();
+        // a queued job is read back from the jobs file before it runs
+        let job: super::JobConfig =
+            serde_json::from_str(&serde_json::to_string(&job).unwrap()).unwrap();
         let (composition, timeline) = job
             .multi_clip_timeline()
             .expect("two clips build as a timeline");
@@ -2634,7 +2648,11 @@ mod tests {
         ));
         let furthest_frame = std::cell::Cell::new(0);
 
-        build_timeline_package(&build, &log_file, |progress| {
+        let timeline_plan = job
+            .timeline_plan
+            .as_ref()
+            .expect("submit plans the timeline");
+        build_timeline_package(&build, timeline_plan, &log_file, |progress| {
             assert_eq!(progress.total_frames, kept_frames);
             furthest_frame.set(furthest_frame.get().max(progress.frame));
         })
@@ -2696,10 +2714,14 @@ mod tests {
             std::fs::File::create(directory.join("job.log")).unwrap(),
         ));
         let furthest_frame = AtomicU64::new(0);
+        let timeline_plan = job
+            .timeline_plan
+            .as_ref()
+            .expect("submit plans the timeline");
 
         let (frames_while_paused, built) = std::thread::scope(|scope| {
             let running = scope.spawn(|| {
-                build_timeline_package(&build, &log_file, |progress| {
+                build_timeline_package(&build, timeline_plan, &log_file, |progress| {
                     furthest_frame.fetch_max(progress.frame, Ordering::Relaxed);
                 })
             });

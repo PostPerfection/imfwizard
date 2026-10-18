@@ -7,6 +7,7 @@ use postkit::encode::{FrameRange, FrameRate, InputType, SourceColour, detect_inp
 use postkit::picture_processing::PictureProcessing;
 use postkit::pipeline::{EncodeRunOptions, PipelineProgress};
 use postkit::timeline::{Clip, ClipSound, SingleClipBuild, SoundTrack, Timeline};
+use serde::{Deserialize, Serialize};
 
 use crate::MxfTrackFile;
 use crate::cpl::{CompositionSegment, SequenceResource};
@@ -103,23 +104,21 @@ fn clip_name(index: usize, clip: &Clip) -> String {
     format!("clip {} ({})", index + 1, clip.picture.display())
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 struct ClipPicture {
     processing: PictureProcessing,
     source_colour: SourceColour,
 }
 
-struct TimelinePlan {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TimelinePlan {
     raster: (u32, u32),
     clips: Vec<ClipPicture>,
     hdr: Option<HdrWcg>,
 }
 
 /// Every refusal the build can make, before anything is encoded.
-pub fn check_timeline(build: &TimelineImp) -> Result<(), String> {
-    plan(build).map(|_| ())
-}
-
-fn plan(build: &TimelineImp) -> Result<TimelinePlan, String> {
+pub fn check_timeline(build: &TimelineImp) -> Result<TimelinePlan, String> {
     let timeline = &build.timeline;
     timeline.check()?;
     postkit::timeline::refuse_two_subtitle_sources(timeline)?;
@@ -249,10 +248,10 @@ fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<Cli
 /// segment a reel. Scratch is left under the output directory.
 pub fn build_timeline_imp(
     build: &TimelineImp,
+    plan: &TimelinePlan,
     on_progress: impl Fn(&PipelineProgress),
     on_log: impl Fn(&str),
 ) -> Result<TimelineImpResult, String> {
-    let plan = plan(build)?;
     let timeline = &build.timeline;
     let output_dir = &build.output_dir;
     std::fs::create_dir_all(output_dir)
@@ -593,6 +592,7 @@ mod tests {
 
     const LOGGED_CLIP_FRAMES: u64 = 2;
     const LOGGED_CLIP_RATE: u32 = 24;
+    const OTHER_CLIP_RATE: u32 = 25;
     const LOGGED_CLIP_RASTER: &str = "1920x1080";
 
     fn piece(clip: usize, entry_point: u64, length: u64) -> ClipPiece {
@@ -707,13 +707,11 @@ mod tests {
         assert_eq!(filled.max_fall, Some(362));
     }
 
-    fn write_clip_media(dir: &Path, name: &str) -> PathBuf {
+    fn write_clip_media(dir: &Path, name: &str, rate: u32) -> PathBuf {
         let media = dir.join(name);
         let made = std::process::Command::new("ffmpeg")
             .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
-            .arg(format!(
-                "testsrc2=size={LOGGED_CLIP_RASTER}:rate={LOGGED_CLIP_RATE}"
-            ))
+            .arg(format!("testsrc2=size={LOGGED_CLIP_RASTER}:rate={rate}"))
             .args(["-frames:v", &LOGGED_CLIP_FRAMES.to_string(), "-c:v", "ffv1"])
             .arg(&media)
             .output()
@@ -726,11 +724,9 @@ mod tests {
         media
     }
 
-    #[test]
-    fn every_clip_names_itself_in_the_log() {
-        let dir = tempfile::tempdir().unwrap();
+    fn two_clip_build(dir: &Path) -> TimelineImp {
         let clips = ["first.mov", "second.mov"].map(|name| Clip {
-            picture: write_clip_media(dir.path(), name),
+            picture: write_clip_media(dir, name, LOGGED_CLIP_RATE),
             in_frame: 0,
             out_frame: LOGGED_CLIP_FRAMES,
             sound: ClipSound::None,
@@ -738,7 +734,7 @@ mod tests {
             source_colour: Default::default(),
             picture_processing: Default::default(),
         });
-        let build = TimelineImp {
+        TimelineImp {
             timeline: Timeline {
                 version: postkit::timeline::TIMELINE_FORMAT_VERSION,
                 fps: FrameRate::whole(LOGGED_CLIP_RATE),
@@ -747,7 +743,7 @@ mod tests {
                 subtitle: None,
                 reel_starts: Vec::new(),
             },
-            output_dir: dir.path().join("imp"),
+            output_dir: dir.join("imp"),
             title: "Logged Clips".to_string(),
             content_kind: "feature".to_string(),
             picture_options: Default::default(),
@@ -763,21 +759,45 @@ mod tests {
             soundfield: Default::default(),
             cancel: Default::default(),
             pause: Default::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn every_clip_names_itself_in_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let build = two_clip_build(dir.path());
+        let plan = check_timeline(&build).unwrap();
         let lines = RefCell::new(Vec::new());
         build_timeline_imp(
             &build,
+            &plan,
             |_| {},
             |message| lines.borrow_mut().push(message.to_string()),
         )
         .unwrap();
         let lines = lines.into_inner();
-        for (index, clip) in clips.iter().enumerate() {
+        for (index, clip) in build.timeline.clips.iter().enumerate() {
             let encoding = format!("Encoding {}", clip_name(index, clip));
             assert!(
                 lines.iter().any(|line| line.starts_with(&encoding)),
                 "no {encoding:?} in {lines:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_build_encodes_from_its_plan_without_probing_the_clips_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let build = two_clip_build(dir.path());
+        let plan = check_timeline(&build).unwrap();
+        write_clip_media(dir.path(), "second.mov", OTHER_CLIP_RATE);
+        let refusal = check_timeline(&build)
+            .err()
+            .expect("a clip at another rate is refused");
+        assert!(refusal.contains("clip 2"), "{refusal}");
+
+        let built = build_timeline_imp(&build, &plan, |_| {}, |_| {}).unwrap();
+
+        assert_eq!(built.frames, build.timeline.total_frames());
     }
 }

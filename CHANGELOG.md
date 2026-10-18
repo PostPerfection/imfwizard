@@ -18,6 +18,7 @@
 ### Fixed
 - **A timeline of Dolby Vision clips fills its light levels**: `create --timeline` and the desktop build of a longer timeline now read the RPU of every Dolby Vision clip when an HDR preset is set, as `--video` does, and write MaxCLL and MaxFALL into the CPL. Each is the highest the clips' RPUs give, a clip without an RPU adds nothing, `--max-cll` and `--max-fall` still win over the RPUs, and a profile 5 clip is refused by clip number and file name before anything is encoded. The CPL had no light levels.
 - **The clips of a timeline log to the job log**: the line naming each clip as its encode starts and the encoder's own messages now reach the desktop job log on a timeline built clip by clip, as they do on a single video build. They were missing from the job log.
+- **A timeline build probes its clips once**: the desktop app checks a timeline built clip by clip at submit and the build encodes from what that check found, where the build checked every clip again, reading each Dolby Vision clip's RPU a second time.
 
 ## [1.5.2] - 2026-10-15
 

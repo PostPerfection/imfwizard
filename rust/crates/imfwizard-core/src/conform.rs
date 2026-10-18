@@ -229,8 +229,10 @@ pub fn conform_to_imp(
         cancel: Default::default(),
         pause: Default::default(),
     };
+    let timeline_plan = crate::timeline_imp::check_timeline(&build)?;
     let built = crate::timeline_imp::build_timeline_imp(
         &build,
+        &timeline_plan,
         |_| {},
         |message| tracing::info!("{message}"),
     )?;

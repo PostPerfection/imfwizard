@@ -211,8 +211,9 @@ fn create_from_timeline(
 ) {
     use std::sync::atomic::Ordering;
 
-    if check {
+    let timeline_plan =
         imfwizard_core::timeline_imp::check_timeline(build).unwrap_or_else(|e| fail(e));
+    if check {
         println!(
             "Pre-build check passed for {} clips, nothing was encoded or written",
             build.timeline.clips.len()
@@ -223,6 +224,7 @@ fn create_from_timeline(
     let _ = ctrlc::set_handler(move || on_interrupt.store(true, Ordering::Relaxed));
     let built = imfwizard_core::timeline_imp::build_timeline_imp(
         build,
+        &timeline_plan,
         |progress| {
             eprint!(
                 "\r[encode] {}/{} frames ({:.0}%) {:.1} fps   ",
