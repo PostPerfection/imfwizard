@@ -92,6 +92,23 @@ build it. Closing it needs the user's Apple developer certificate, its
 password, the team id and an app-specific password in the repo secrets, and
 the `APPLE_*` variables the Tauri action reads set from them.
 
+## Open: Clipster 7 gaps (2026-10-17)
+
+The survey is under dcpwizard's DESIGN_TODO. The IMF-only items:
+
+- OPL handling: `validate --xsd` checks an OPL against ST 2067-100 and nothing reads
+  or writes one. Clipster applies an OPL on output.
+- A merge tool that folds a master and its versions into one IMP with several CPLs,
+  keeping only the differences, and thins unreferenced track files. `create-multi`
+  writes several CPLs from one manifest and `supplement` writes a version as the
+  files that changed, but nothing merges two finished IMPs and nothing thins one.
+- Linear EXR rendered to 12-bit PQ with ST 2086 metadata, and PQ to HLG. `--hdr`
+  declares what the picture already carries and every source conversion here lands
+  on Rec.709 (above), so an HDR composition has to arrive graded in its preset's
+  transfer.
+- Timeline follow-ups, shared with dcpwizard: alpha compositing for title
+  sequences, every clip is a cut. The list is under postkit's DESIGN_TODO.
+
 ## Deliberately skipped / standing limitations
 
 - SDI monitoring output. The old `sdi-preview` command set an mpv property
