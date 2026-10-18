@@ -367,11 +367,13 @@ async function probeUnprobedClips() {
     asset.frames = await sourceFrames(assetId);
     takeProbedFrames(asset);
   }
+  project.compositions = project.compositions.map(withReelStartingClipsPlaced);
+  showActiveTimeline();
 }
 
 // clips placed before their source was probed get its length and rate
 function takeProbedFrames(asset) {
-  project.compositions = project.compositions.map((composition) => withReelStartingClipsPlaced({
+  project.compositions = project.compositions.map((composition) => ({
     ...composition,
     timeline: withFirstClipRate(withProbedFrames(composition.timeline, asset.id, asset.frames), assetById),
   }));

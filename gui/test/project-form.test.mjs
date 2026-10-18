@@ -166,6 +166,12 @@ test('a version 1 project puts each later segment on the timeline as a clip that
     timeline: withProbedFrames(withProbedFrames(composition.timeline, 1, 2400), 4, 480),
   });
   assert.deepEqual(probed.timeline.reelStarts, [2400]);
+  const unreadableSecondSegmentFrames = 0;
+  const secondProbeFailed = withReelStartingClipsPlaced({
+    ...composition,
+    timeline: withProbedFrames(withProbedFrames(composition.timeline, 1, 2400), 4, unreadableSecondSegmentFrames),
+  });
+  assert.deepEqual(secondProbeFailed.timeline.reelStarts, [2400], 'the segment start outlives the failed probe');
   reopened.project.compositions = [probed];
   const saved = JSON.parse(JSON.stringify(serialized(reopened, form.audioMap)));
   const savedAgain = emptyPanel(() => '');
