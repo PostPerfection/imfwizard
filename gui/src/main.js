@@ -4,14 +4,14 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, setPreviewPlayStarter, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
-import { initTimelineEditor, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, baseClipsInOrder, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
+import { initTimelineEditor, playTimelineFromPlayhead, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, baseClipsInOrder, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
 import {
   DEFAULT_TIMELINE_FPS,
   TIMELINE_KIND_BY_ASSET_TYPE,
@@ -1921,6 +1921,8 @@ watchPreviewShown((path, ended) => {
   updateToolbarState();
 });
 watchPreviewTimelinePosition(followTimelinePosition);
+// play on a clip of the timeline plays the whole timeline from the playhead
+setPreviewPlayStarter(() => (previewedClipIndex === null ? null : playTimelineFromPlayhead()));
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({
