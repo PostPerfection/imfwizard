@@ -106,15 +106,11 @@ The survey is under dcpwizard's DESIGN_TODO. The IMF-only items:
   declares what the picture already carries and every source conversion here lands
   on Rec.709 (above), so an HDR composition has to arrive graded in its preset's
   transfer.
+- SDI monitoring output. It is the DeckLink output entry in postkit's DESIGN_TODO,
+  on glass2glass DeckLink elements fed by the embedded preview.
 
 ## Deliberately skipped / standing limitations
 
-- SDI monitoring output. The old `sdi-preview` command set an mpv property
-  (`vo-decklink-device`) that mpv does not have, so it played on screen while
-  claiming DeckLink output, and it was removed. A real path is ffmpeg built with
-  `--enable-decklink` writing `-f decklink`, or GStreamer's `decklinkvideosink`,
-  both against the Blackmagic desktop video SDK and driver, so it needs a machine
-  with the card to build and prove.
 - SL (sign language) accessibility: a video-overlay track, not audio, so it gets no
   MCA audio descriptor. Composition-level LocaleList still carries languages.
 - Honest-scope tools: slate is a black text slate only, preview plays JPEG 2000
