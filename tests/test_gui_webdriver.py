@@ -1580,3 +1580,87 @@ def test_play_timeline_plays_the_trimmed_clips_back_to_back(window, tmp_path):
         lambda: session.execute(PREVIEW_METADATA).get("timeline_clip_index") == 1,
         PLAYHEAD_TIMEOUT_SECONDS,
     )
+
+
+RENDER_STATUS_PREFIX = "Rendering layers:"
+PREVIEW_FAILED_PREFIX = "Preview failed:"
+RENDER_TIMEOUT_SECONDS = 300
+RENDERED_BASE_SECONDS = 4
+RENDERED_OVERLAY_START = "00:00:01:00"
+RENDERED_OVERLAY_START_SECONDS = 1
+RENDERED_STRETCHES_DIRECTORY = "cache/com.imfwizard.desktop/preview-timeline/timeline-stretches-mpv"
+
+
+def preview_position(session):
+    return session.execute(PREVIEW_METADATA)["position"]
+
+
+def test_play_timeline_renders_a_clip_with_alpha_on_layer_1_and_plays_through_it(window, tmp_path):
+    session = window.session
+    media = tmp_path / "media"
+    media.mkdir()
+    base, _ = write_media(media, RENDERED_BASE_SECONDS)
+    overlay = write_half_red_overlay(media / "titles.mov", OVERLAY_SECONDS)
+    base_title = clip_title(base.name, "00:00:00:00", f"00:00:{RENDERED_BASE_SECONDS:02d}:00")
+    overlay_title = clip_title(overlay.name, "00:00:00:00", f"00:00:{OVERLAY_SECONDS:02d}:00")
+
+    choose_in_dialog(window, "#import-video", base)
+    choose_in_dialog(window, "#import-video", overlay)
+    wait_until(
+        "the two clips never took their sources' lengths on layer 0",
+        lambda: session.execute(CLIP_LAYERS) == [[base_title, 0], [overlay_title, 0]],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    drag_clip_onto_row(window, TIMELINE_CLIP.format(1), LAYER_ROW.format(1))
+    wait_until(
+        "the dragged clip never moved onto layer 1",
+        lambda: session.execute(CLIP_LAYERS) == [[overlay_title, 1], [base_title, 0]],
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.click(TIMELINE_CLIP.format(1))
+    wait_until(
+        "a click never selected the clip on layer 1",
+        lambda: session.property(SELECTED_CLIP_NAME, "textContent") == overlay.name,
+        REACTION_TIMEOUT_SECONDS,
+    )
+    replace_field_text(window, TIMELINE_START_FIELD, RENDERED_OVERLAY_START)
+    window.press(NEXT_FIELD_KEY)
+    wait_until(
+        "the clip on layer 1 never took its start",
+        lambda: session.property(TIMELINE_START_FIELD, "value") == RENDERED_OVERLAY_START,
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    window.click(PLAY_TIMELINE_BUTTON)
+
+    def rendered_and_loaded():
+        status = status_text(session)
+        if status.startswith(PREVIEW_FAILED_PREFIX):
+            raise AssertionError(status)
+        return reported_duration(session) > 0 and not status.startswith(RENDER_STATUS_PREFIX)
+
+    wait_until("the layers never rendered and loaded", rendered_and_loaded, RENDER_TIMEOUT_SECONDS)
+    assert reported_duration(session) == pytest.approx(RENDERED_BASE_SECONDS)
+    rendered = list((tmp_path / RENDERED_STRETCHES_DIRECTORY).glob("*.mkv"))
+    assert len(rendered) == 1, rendered
+    stretch_start = RENDERED_OVERLAY_START_SECONDS
+    stretch_end = RENDERED_OVERLAY_START_SECONDS + OVERLAY_SECONDS
+
+    def inside_the_stretch():
+        position = preview_position(session)
+        return position is not None and stretch_start <= position < stretch_end
+
+    def past_the_stretch():
+        position = preview_position(session)
+        return position is not None and position >= stretch_end
+
+    wait_until(
+        "the timeline never played into the rendered stretch",
+        inside_the_stretch,
+        PLAYHEAD_TIMEOUT_SECONDS,
+    )
+    wait_until(
+        "the timeline never played past the rendered stretch",
+        past_the_stretch,
+        PLAYHEAD_TIMEOUT_SECONDS,
+    )
