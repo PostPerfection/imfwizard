@@ -353,8 +353,7 @@ fn write_half_red_stills(dir: &Path) -> PathBuf {
     stills
 }
 
-// the first frame's samples left and right of the centre
-fn first_frame_samples(mxf: &Path, unwrapped: &Path) -> [[i32; 3]; 2] {
+fn unwrapped_codestreams(mxf: &Path, unwrapped: &Path) -> Vec<PathBuf> {
     let info = postkit::mxf_unwrap::unwrap_picture_mxf(
         mxf,
         unwrapped,
@@ -369,7 +368,16 @@ fn first_frame_samples(mxf: &Path, unwrapped: &Path) -> [[i32; 3]; 2] {
         .collect();
     codestreams.sort();
     assert_eq!(codestreams.len() as u64, info.frames);
-    let frame = postkit::grok_decoder::decode(std::fs::read(&codestreams[0]).unwrap(), 0)
+    codestreams
+}
+
+// the first frame's samples left and right of the centre
+fn first_frame_samples(mxf: &Path, unwrapped: &Path) -> [[i32; 3]; 2] {
+    centre_samples(&unwrapped_codestreams(mxf, unwrapped)[0])
+}
+
+fn centre_samples(codestream: &Path) -> [[i32; 3]; 2] {
+    let frame = postkit::grok_decoder::decode(std::fs::read(codestream).unwrap(), 0)
         .expect("the codestream decodes");
     assert_eq!(frame.precision, 12);
     [WIDTH / 4, WIDTH * 3 / 4].map(|x| {
@@ -454,4 +462,171 @@ fn a_gap_and_an_overlay_with_alpha_build_a_track_file_a_stretch() {
             "stretch {index} samples {samples:?} left and right, not {want:?}"
         );
     }
+}
+
+const HELD_FRAMES: u64 = 48;
+const LIME: Option<usize> = Some(1);
+
+fn write_lime_still(dir: &Path) -> PathBuf {
+    let still = dir.join("lime.png");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+        .arg(format!("color=c=lime:size={WIDTH}x{HEIGHT}"))
+        .args(["-frames:v", "1", "-pix_fmt", "rgb24"])
+        .arg(&still)
+        .output()
+        .expect("ffmpeg");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    still
+}
+
+fn still_clip(still: &Path, start: u64, (in_frame, out_frame): (u64, u64)) -> Clip {
+    Clip {
+        sound: ClipSound::None,
+        ..clip(still, start, (in_frame, out_frame))
+    }
+}
+
+#[test]
+fn a_still_between_two_video_clips_wraps_a_track_file_of_its_hold() {
+    let dir = TempDir::new().unwrap();
+    let blue = write_media_of(
+        dir.path(),
+        "blue.mov",
+        &format!("color=c=blue:{}", media_picture()),
+        440,
+    );
+    let lime = write_lime_still(dir.path());
+    let video_frames = u64::from(MEDIA_FRAMES);
+    let timeline = write_timeline(
+        dir.path(),
+        vec![
+            clip(&blue, 0, (0, video_frames)),
+            still_clip(&lime, video_frames, (0, HELD_FRAMES)),
+            clip(&blue, video_frames + HELD_FRAMES, (0, video_frames)),
+        ],
+        vec![],
+    );
+    let imp = dir.path().join("imp");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy(), "-t", "Held Still"])
+        .args(["--timeline", &timeline.to_string_lossy()])
+        .assert()
+        .success();
+    let photon = imfwizard_core::photon::run_photon(&imp, None).expect("Photon analyses the IMP");
+    assert!(
+        photon.errors.is_empty() && photon.warnings.is_empty(),
+        "Photon errors {:?}, warnings {:?}",
+        photon.errors,
+        photon.warnings
+    );
+
+    let cpl = read_cpl(&imp);
+    let windows = resource_windows(&cpl, "MainImageSequence");
+    assert_eq!(
+        windows,
+        vec![(0, video_frames), (0, HELD_FRAMES), (0, video_frames)],
+        "{cpl}"
+    );
+    assert_eq!(
+        windows.iter().map(|(_, length)| length).sum::<u64>(),
+        Timeline::read(&timeline).unwrap().total_frames()
+    );
+    let still_track_id = &sequence_values(&cpl, "MainImageSequence", "TrackFileId")[1];
+    let still_track = imp.join(format!(
+        "VIDEO_{}.mxf",
+        still_track_id.trim_start_matches("urn:uuid:")
+    ));
+    let codestreams = unwrapped_codestreams(&still_track, &dir.path().join("unwrapped_still"));
+    assert_eq!(codestreams.len() as u64, HELD_FRAMES);
+    for codestream in &codestreams {
+        let samples = centre_samples(codestream);
+        assert!(
+            samples.iter().all(|&sample| only(sample, LIME)),
+            "{} samples {samples:?}, not lime",
+            codestream.display()
+        );
+    }
+}
+
+#[test]
+fn one_still_clip_builds_what_the_still_length_build_does() {
+    let dir = TempDir::new().unwrap();
+    let lime = write_lime_still(dir.path());
+    let timeline = write_timeline(
+        dir.path(),
+        vec![still_clip(&lime, 0, (0, HELD_FRAMES))],
+        vec![],
+    );
+
+    let from_timeline = dir.path().join("from_timeline");
+    cmd()
+        .args([
+            "create",
+            "-o",
+            &from_timeline.to_string_lossy(),
+            "-t",
+            "Still",
+        ])
+        .args(["--timeline", &timeline.to_string_lossy(), "--no-verify"])
+        .assert()
+        .success();
+    let from_still = dir.path().join("from_still");
+    cmd()
+        .args(["create", "-o", &from_still.to_string_lossy(), "-t", "Still"])
+        .args(["--video", &lime.to_string_lossy(), "--no-verify"])
+        .args(["--still-length", &format!("{HELD_FRAMES}f")])
+        .assert()
+        .success();
+
+    let durations = sequence_values(
+        &read_cpl(&from_timeline),
+        "MainImageSequence",
+        "SourceDuration",
+    );
+    assert_eq!(durations, vec![HELD_FRAMES.to_string()]);
+    assert_eq!(
+        durations,
+        sequence_values(
+            &read_cpl(&from_still),
+            "MainImageSequence",
+            "SourceDuration"
+        )
+    );
+}
+
+#[test]
+fn a_still_clip_with_an_in_point_is_refused_naming_the_clip() {
+    let dir = TempDir::new().unwrap();
+    let blue = write_media_of(
+        dir.path(),
+        "blue.mov",
+        &format!("color=c=blue:{}", media_picture()),
+        440,
+    );
+    let lime = write_lime_still(dir.path());
+    let video_frames = u64::from(MEDIA_FRAMES);
+    let timeline = write_timeline(
+        dir.path(),
+        vec![
+            clip(&blue, 0, (0, video_frames)),
+            still_clip(&lime, video_frames, (3, HELD_FRAMES)),
+        ],
+        vec![],
+    );
+    let imp = dir.path().join("imp");
+    cmd()
+        .args(["create", "-o", &imp.to_string_lossy(), "-t", "Refused"])
+        .args(["--timeline", &timeline.to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(format!(
+            "clip 2 ({}): the in point is 3, and a still is held from its first frame",
+            lime.display()
+        )));
+    assert!(!imp.exists(), "a refusal writes nothing");
 }

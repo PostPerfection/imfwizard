@@ -88,6 +88,8 @@ pub fn run() {
             guikit::preview::player_controls::preview_set_stereo_output,
             guikit::preview::player_controls::preview_set_level_meter,
             guikit::preview::player_controls::preview_loaded_picture,
+            guikit::source_length::picture_source_length,
+            guikit::source_raster::picture_source_raster,
             guikit::gpu::set_gpu,
             component_versions,
             pipeline::validate_imp,

@@ -1324,6 +1324,61 @@ def test_a_clip_with_alpha_dragged_onto_a_layer_builds_a_track_file_a_stretch(wi
     ]
 
 
+STILL_HOLD = ("00:00:00:00", "00:00:05:00")
+SEQUENCE_IMAGES = 12
+ASSET_METAS = """
+return [...document.querySelectorAll("#asset-list .asset-meta")].map((meta) => meta.textContent);
+"""
+
+
+def write_image_sequence(directory, images):
+    directory.mkdir()
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"testsrc2=size={FIXTURE_SIZE}:rate={FIXTURE_FPS}",
+        "-frames:v", str(images),
+        str(directory / "frame%04d.png"),
+    )
+    return directory
+
+
+def test_a_still_and_an_image_sequence_import_as_a_held_clip_and_a_counted_one(window, tmp_path):
+    session = window.session
+    media = tmp_path / "media"
+    media.mkdir()
+    still = media / "card.png"
+    run_ffmpeg("-f", "lavfi", "-i", f"testsrc2=size={FIXTURE_SIZE}", "-frames:v", "1", str(still))
+    sequence = write_image_sequence(media / "sequence", SEQUENCE_IMAGES)
+
+    choose_in_dialog(window, "#import-video", still)
+    choose_in_dialog(window, "#import-image-sequence", sequence)
+    wait_until(
+        "the still never took a 5 second hold and the sequence its image count",
+        lambda: session.execute(CLIP_TITLES)
+        == [
+            clip_title(still.name, *STILL_HOLD),
+            clip_title(sequence.name, "00:00:00:00", f"00:00:00:{SEQUENCE_IMAGES:02d}"),
+        ],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    asset_size = FIXTURE_SIZE.replace("x", "\u00d7")
+    wait_until(
+        "the sequence asset never showed its size beside its image count",
+        lambda: session.execute(ASSET_METAS)
+        == [asset_size, f"{asset_size} {SEQUENCE_IMAGES} frames"],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+
+    window.click(TIMELINE_CLIP.format(0))
+    wait_until(
+        "a click never selected the still",
+        lambda: session.property(SELECTED_CLIP_NAME, "textContent") == still.name,
+        REACTION_TIMEOUT_SECONDS,
+    )
+    assert session.property(TIMELINE_IN_FIELD, "disabled") is True
+    assert session.property(TIMELINE_OUT_FIELD, "disabled") is False
+
+
 FOLLOWED_CLIP_SECONDS = 10
 FOLLOWED_CLIP_SIZE = "640x360"
 PREVIEW_SEEK_SECONDS = 5

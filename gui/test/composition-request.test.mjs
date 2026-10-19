@@ -3,12 +3,17 @@ import test from 'node:test';
 
 import { emptyTimeline, timelineWire } from '../../extern/guikit/src/composition-timeline.js';
 import {
+  clipUnprobed,
   compositionsRequest,
   durationFrames,
   everySingleClipProbed,
+  sharedClipStillLength,
   sharedClipTrimSpecs,
   timelinesSetClipLengths,
+  waitsForClipLengths,
+  withClipStillLength,
   withClipTrims,
+  withProbedSource,
 } from '../src/composition-request.js';
 
 const ASSETS = [
@@ -18,6 +23,7 @@ const ASSETS = [
   { id: 4, type: 'subtitle', path: '/media/trailer.ttml', name: 'trailer.ttml' },
   { id: 5, type: 'audio', path: '/media/mix.wav', name: 'mix.wav' },
   { id: 6, type: 'subtitle', path: '/media/feature.ttml', name: 'feature.ttml' },
+  { id: 7, type: 'video', path: '/media/card.png', name: 'card.png', still: true },
 ];
 
 function assetById(assetId) {
@@ -26,6 +32,10 @@ function assetById(assetId) {
 
 function clip(picture, frames, inFrame, outFrame, sound = { kind: 'embedded', asset: null }, subtitle = null) {
   return { picture, frames, start: 0, layer: 0, opacity: 1, inFrame, outFrame, sound, subtitle };
+}
+
+function stillClip(picture, outFrame) {
+  return { ...clip(picture, null, 0, outFrame, { kind: 'none', asset: null }), still: true };
 }
 
 function composition(name, timeline) {
@@ -159,4 +169,81 @@ test('an unprobed clip waits for its frames before it takes the Trim fields, and
   assert.equal(sharedClipTrimSpecs([unprobed]), null);
   assert.equal(everySingleClipProbed([composition('Main', { clips: [clip(1, 240, 0, 240)] })]), true);
   assert.equal(sharedClipTrimSpecs([segmented]), null, 'the fields are off beside a segment start');
+});
+
+test('a one still timeline goes as the single picture request with its hold as the still length and no trims', () => {
+  const main = composition('Main', { clips: [stillClip(7, 120)] });
+
+  const { compositions, clipTrims, stillLength } = compositionsRequest([main], 'Card', assetById);
+
+  assert.equal(compositions[0].videoPath, '/media/card.png');
+  assert.equal(compositions[0].silent, true);
+  assert.equal('timeline' in compositions[0], false);
+  assert.equal(stillLength, '120f');
+  assert.deepEqual(clipTrims, { trimStart: null, trimEnd: null });
+  assert.equal(compositionsRequest([composition('Main', { clips: [clip(1, 240, 0, 240)] })], 'Film', assetById).stillLength, null);
+});
+
+test('the Still Length field sets the single still\'s out point and shows its hold, and a still takes no trims', () => {
+  const main = composition('Main', { clips: [stillClip(7, 120)] });
+  const textless = composition('Textless', { clips: [stillClip(7, 120)] });
+
+  const held = [main, textless].map((each) => withClipStillLength(each, durationFrames('10s', [24, 1])));
+
+  assert.deepEqual(held.map((each) => each.timeline.clips[0]), [stillClip(7, 240), stillClip(7, 240)]);
+  assert.equal(compositionsRequest(held, 'Card', assetById).stillLength, '240f');
+  assert.equal(sharedClipStillLength(held), '240f');
+  assert.deepEqual(sharedClipTrimSpecs(held), { trimStart: '', trimEnd: '' });
+  assert.equal(everySingleClipProbed(held), true);
+  assert.equal(withClipStillLength(main, null), main, 'an empty field leaves the hold as it is');
+  assert.equal(withClipTrims(main, 0, 0), main);
+  assert.throws(() => withClipTrims(main, 12, 0), { name: 'RangeError', message: "Main's clip is a still, and a still has no trims" });
+  assert.throws(
+    () => withClipStillLength(composition('Main', { clips: [clip(1, 240, 0, 240)] }), 48),
+    { name: 'RangeError', message: "Main's clip is not a single image, so a still length has nothing to hold" },
+  );
+  assert.equal(sharedClipStillLength([composition('Main', { clips: [clip(1, 240, 0, 240)] })]), '');
+});
+
+test('two compositions holding their stills for different lengths are refused by name, and the field shows neither', () => {
+  const main = composition('Main', { clips: [stillClip(7, 120)] });
+  const textless = composition('Textless', { clips: [stillClip(7, 48)] });
+
+  assert.equal(sharedClipStillLength([main, textless]), null);
+  assert.throws(
+    () => compositionsRequest([main, textless], 'Card', assetById),
+    { message: 'Main and Textless hold their stills for different lengths, and a still length applies to every composition: build them separately' },
+  );
+});
+
+test('the Still Length field is off on a timeline of more than one clip', () => {
+  const main = composition('Main', { clips: [stillClip(7, 120), { ...clip(1, 240, 0, 240), start: 120 }] });
+
+  assert.equal(timelinesSetClipLengths([main]), true);
+  assert.equal(sharedClipStillLength([main]), null);
+  assert.equal(compositionsRequest([main], 'Film', assetById).stillLength, null);
+});
+
+test("an old project's still clip of 0 frames is re-probed on open, marked a still and takes the Still Length field", () => {
+  const opened = composition('Main', { clips: [clip(7, 0, 0, 0)] });
+
+  assert.equal(clipUnprobed(opened.timeline.clips[0]), true);
+  assert.equal(waitsForClipLengths(opened, 7), true);
+  assert.equal(sharedClipStillLength([opened]), null, 'the field keeps the saved length until the clip is probed');
+  const probed = { ...opened, timeline: withProbedSource(opened.timeline, 7, { kind: 'still' }) };
+  assert.deepEqual(probed.timeline.clips, [stillClip(7, 120)]);
+  assert.equal(clipUnprobed(probed.timeline.clips[0]), false);
+  assert.equal(waitsForClipLengths(probed, 7), false);
+
+  const held = withClipStillLength(probed, 240);
+  assert.equal(held.timeline.clips[0].outFrame, 240);
+  assert.equal(compositionsRequest([held], 'Card', assetById).stillLength, '240f');
+});
+
+test('an old project\'s video clip of 0 frames is re-probed on open and counted', () => {
+  const opened = composition('Main', { clips: [clip(1, 0, 0, 0)] });
+
+  const probed = withProbedSource(opened.timeline, 1, { kind: 'counted', frames: 240 });
+
+  assert.deepEqual(probed.clips, [clip(1, 240, 0, 240)]);
 });

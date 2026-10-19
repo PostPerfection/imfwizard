@@ -26,11 +26,23 @@ import {
   withFirstClipRate,
   withImportedAsset,
   withoutAsset,
-  withProbedFrames,
   withReelStartingClipsPlaced,
   withUnplacedAssetsFilled,
 } from "../../extern/guikit/src/composition-timeline.js";
-import { DURATION_SPEC, compositionsRequest, durationFrames, everySingleClipProbed, sharedClipTrimSpecs, timelinesSetClipLengths, withClipTrims } from "./composition-request.js";
+import {
+  DURATION_SPEC,
+  clipUnprobed,
+  compositionsRequest,
+  durationFrames,
+  everySingleClipProbed,
+  sharedClipStillLength,
+  sharedClipTrimSpecs,
+  timelinesSetClipLengths,
+  waitsForClipLengths,
+  withClipStillLength,
+  withClipTrims,
+  withProbedSource,
+} from "./composition-request.js";
 import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
 import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
@@ -304,8 +316,17 @@ function guessType(name) {
 // === Asset import ===
 document.getElementById("import-video")?.addEventListener("click", async () => {
   const path = await open({ directory: false, multiple: false,
-    filters: [{ name: 'Video', extensions: ['mp4','mkv','mov','avi','mxf','webm'] }, { name: 'All', extensions: ['*'] }]
+    filters: [
+      { name: 'Video', extensions: ['mp4','mkv','mov','avi','mxf','webm'] },
+      { name: 'Image', extensions: ['png','jpg','jpeg','tif','tiff','bmp','dpx','exr'] },
+      { name: 'All', extensions: ['*'] },
+    ]
   });
+  if (path) importAssetFromPath(path, 'video');
+});
+
+document.getElementById("import-image-sequence")?.addEventListener("click", async () => {
+  const path = await open({ directory: true });
   if (path) importAssetFromPath(path, 'video');
 });
 
@@ -337,50 +358,57 @@ function importAssetFromPath(path, type) {
   showActiveTimeline();
   setStatus(`Imported: ${name}`);
 
-  // Auto-detect video properties
-  if (type === 'video') {
-    probeVideo(path).then(info => {
-      if (!info) {
-        setStatus(`Could not read the frame count of ${name}`);
-        return;
-      }
-      asset.meta = `${info.width}×${info.height} ${info.fps}`;
-      asset.fps = info.fps;
-      asset.frames = info.frames;
-      const fpsEl = document.getElementById("prop-framerate");
-      const probedRate = [...(fpsEl?.options ?? [])].find(opt => opt.value === info.fps);
-      if (project.assets.filter(a => a.type === 'video').length === 1 && probedRate) {
-        fpsEl.value = probedRate.value;
-      }
-      takeProbedFrames(asset);
-      renderAssets();
-    });
+  if (type === 'video') probeImportedPicture(asset);
+}
+
+// ffprobe reads 25 fps from a single image, which is no rate the still has
+async function probeImportedPicture(asset) {
+  const [length, info] = await Promise.all([probeSourceLength(asset), probeVideo(asset.path)]);
+  const counted = length.kind === "counted";
+  if (info) asset.meta = counted ? `${info.width}×${info.height} ${info.fps}` : `${info.width}×${info.height}`;
+  if (info && counted) {
+    asset.fps = info.fps;
+    const fpsEl = document.getElementById("prop-framerate");
+    const probedRate = [...(fpsEl?.options ?? [])].find(opt => opt.value === info.fps);
+    if (project.assets.filter(a => a.type === 'video').length === 1 && probedRate) {
+      fpsEl.value = probedRate.value;
+    }
   }
+  takeProbedLength(asset, length);
+  renderAssets();
+  if (info || !counted) return;
+  // ffprobe cannot open a folder, so an image sequence is measured from its first image
+  const raster = await probeSourceRaster(asset);
+  asset.meta = `${raster.width}×${raster.height} ${length.frames} frames`;
+  renderAssets();
 }
 
 // a clip from an older project file holds 0 frames until its source is probed
 async function probeUnprobedClips() {
   const clips = project.compositions.flatMap((composition) => composition.timeline.clips);
-  const pictures = new Set(clips.filter((clip) => clip.frames === 0).map((clip) => clip.picture));
-  for (const assetId of pictures) {
-    const asset = assetById(assetId);
-    asset.frames = await sourceFrames(assetId);
-    takeProbedFrames(asset);
+  const pictures = new Set(clips.filter(clipUnprobed).map((clip) => clip.picture));
+  const probes = await Promise.allSettled([...pictures].map(async (assetId) => [assetById(assetId), await sourceLength(assetId)]));
+  for (const probe of probes) {
+    if (probe.status === "fulfilled") takeProbedLength(...probe.value);
   }
   project.compositions = project.compositions.map(withReelStartingClipsPlaced);
   showActiveTimeline();
+  const failed = probes.find((probe) => probe.status === "rejected");
+  if (failed) throw failed.reason;
 }
 
 // clips placed before their source was probed get its length and rate
-function takeProbedFrames(asset) {
-  const waitingForTrims = new Set(project.compositions
-    .filter(({ timeline }) => timeline.clips.length === 1 && timeline.clips[0].picture === asset.id && timeline.clips[0].frames === 0)
+function takeProbedLength(asset, length) {
+  const waitingForClipLengths = new Set(project.compositions
+    .filter((composition) => waitsForClipLengths(composition, asset.id))
     .map((composition) => composition.id));
   project.compositions = project.compositions.map((composition) => ({
     ...composition,
-    timeline: withFirstClipRate(withProbedFrames(composition.timeline, asset.id, asset.frames), assetById),
+    timeline: withFirstClipRate(withProbedSource(composition.timeline, asset.id, length), assetById),
   }));
-  takeTrimFields((composition) => waitingForTrims.has(composition.id));
+  const takesFields = (composition) => waitingForClipLengths.has(composition.id);
+  if (length.kind === "still") takeStillLengthField(takesFields);
+  else takeTrimFields(takesFields);
   showActiveTimeline();
 }
 
@@ -430,12 +458,33 @@ function assetName(assetId) {
   return assetById(assetId).name;
 }
 
-async function sourceFrames(assetId) {
+async function sourceLength(assetId) {
   const asset = assetById(assetId);
-  if (asset.frames) return asset.frames;
-  const info = await probeVideo(asset.path);
-  if (!info) setStatus(`Could not read the frame count of ${asset.name}`);
-  return info?.frames ?? 0;
+  if (asset.still) return { kind: "still" };
+  if (asset.frames) return { kind: "counted", frames: asset.frames };
+  return probeSourceLength(asset);
+}
+
+async function probeSourceLength(asset) {
+  let length;
+  try {
+    length = await invoke("picture_source_length", { picture: asset.path });
+  } catch (error) {
+    setStatus(`Could not read the frame count of ${asset.name}: ${error}`);
+    throw error;
+  }
+  if (length.kind === "still") asset.still = true;
+  else asset.frames = length.frames;
+  return length;
+}
+
+async function probeSourceRaster(asset) {
+  try {
+    return await invoke("picture_source_raster", { picture: asset.path });
+  } catch (error) {
+    setStatus(`Could not read the size of ${asset.name}: ${error}`);
+    throw error;
+  }
 }
 
 function timelineEdited(timeline) {
@@ -462,12 +511,16 @@ const TRIM_START_FIELD_ID = "prop-trim-start";
 const TRIM_END_FIELD_ID = "prop-trim-end";
 const TRIM_START_LABEL = "Trim from start";
 const TRIM_END_LABEL = "Trim from end";
-const CLIP_LENGTH_FIELD_IDS = [TRIM_START_FIELD_ID, TRIM_END_FIELD_ID, "prop-still-length"];
+const STILL_LENGTH_FIELD_ID = "prop-still-length";
+const STILL_LENGTH_LABEL = "Still length";
+const CLIP_LENGTH_FIELD_IDS = [TRIM_START_FIELD_ID, TRIM_END_FIELD_ID, STILL_LENGTH_FIELD_ID];
 
 function refreshClipLengthFields() {
   const fromTimelines = timelinesSetClipLengths(project.compositions);
   for (const id of CLIP_LENGTH_FIELD_IDS) document.getElementById(id).disabled = fromTimelines;
   document.getElementById("prop-clip-length-hint").hidden = !fromTimelines;
+  const sharedStillLength = sharedClipStillLength(project.compositions);
+  if (sharedStillLength !== null) document.getElementById(STILL_LENGTH_FIELD_ID).value = sharedStillLength;
   const shared = sharedClipTrimSpecs(project.compositions);
   if (!shared) return;
   document.getElementById(TRIM_START_FIELD_ID).value = shared.trimStart;
@@ -483,10 +536,14 @@ function typedDuration(id, label) {
   return value;
 }
 
-function typedTrimFrames(id, label) {
+function typedFrames(id, label) {
   const spec = typedDuration(id, label);
   const jobRate = parseFrameRate(document.getElementById("prop-framerate")?.value) ?? DEFAULT_TIMELINE_FPS;
-  return spec === null ? 0 : durationFrames(spec, jobRate);
+  return spec === null ? null : durationFrames(spec, jobRate);
+}
+
+function typedTrimFrames(id, label) {
+  return typedFrames(id, label) ?? 0;
 }
 
 // false when a clip cannot take the typed trims, which the status names
@@ -509,6 +566,24 @@ for (const id of [TRIM_START_FIELD_ID, TRIM_END_FIELD_ID]) {
     if (takeTrimFields(() => true)) showActiveTimeline();
   });
 }
+
+// false when a still cannot take the typed length, which the status names
+function takeStillLengthField(takesStillLength) {
+  if (timelinesSetClipLengths(project.compositions)) return true;
+  try {
+    const holdFrames = typedFrames(STILL_LENGTH_FIELD_ID, STILL_LENGTH_LABEL);
+    project.compositions = project.compositions.map((composition) =>
+      takesStillLength(composition) ? withClipStillLength(composition, holdFrames) : composition);
+  } catch (error) {
+    setStatus(error.message);
+    return false;
+  }
+  return true;
+}
+
+document.getElementById(STILL_LENGTH_FIELD_ID).addEventListener("change", () => {
+  if (takeStillLengthField(() => true)) showActiveTimeline();
+});
 
 // === Multi-CPL Management ===
 let nextCplId = 2;
@@ -945,15 +1020,8 @@ function readAudioMap() {
 let currentJobId = null;
 
 // Read the Properties panel's source treatment. A bad duration throws here so a
-// build fails before the encode rather than partway through it. The clips'
-// trims stand in for the Trim fields once every single clip is probed, and
-// Still Length is off while a timeline sets the clips' lengths.
-function readSourceSettings(clipTrims, trimsFromClips, lengthsFromTimelines) {
-  const clipLengths = {
-    trimStart: trimsFromClips ? clipTrims.trimStart : typedDuration(TRIM_START_FIELD_ID, TRIM_START_LABEL),
-    trimEnd: trimsFromClips ? clipTrims.trimEnd : typedDuration(TRIM_END_FIELD_ID, TRIM_END_LABEL),
-    stillLength: lengthsFromTimelines ? null : typedDuration("prop-still-length", "Still length"),
-  };
+// build fails before the encode rather than partway through it.
+function readSourceSettings(clipLengths) {
   return {
     audioDelayMs: parseInt(document.getElementById("prop-audio-delay")?.value) || 0,
     sourceColourspace: document.getElementById("prop-source-colourspace")?.value || "rec709",
@@ -1028,20 +1096,25 @@ function cropPixels(id, label) {
 // one composition per CPL tab, each becomes a separate CPL in the IMP
 function currentJobRequest() {
   const title = document.getElementById("prop-title")?.value?.trim() || "";
-  const { compositions, clipTrims } = compositionsRequest(project.compositions, title, assetById);
-  const lengthsFromTimelines = timelinesSetClipLengths(project.compositions);
+  const { compositions, clipTrims, stillLength } = compositionsRequest(project.compositions, title, assetById);
+  const lengthsFromClips = timelinesSetClipLengths(project.compositions) || everySingleClipProbed(project.compositions);
   return {
     title,
     outputDir: document.getElementById("prop-output")?.value || "",
     compositions,
-    sourceSettings: readSourceSettings(
-      clipTrims,
-      lengthsFromTimelines || everySingleClipProbed(project.compositions),
-      lengthsFromTimelines,
-    ),
+    sourceSettings: readSourceSettings(lengthsFromClips ? { ...clipTrims, stillLength } : typedClipLengths()),
     framerate: document.getElementById("prop-framerate")?.value || "24/1",
     bandwidth: parseInt(document.getElementById("prop-bandwidth")?.value) || 250,
     qualityPsnr: parseFloat(document.getElementById("prop-quality-psnr")?.value) || null,
+  };
+}
+
+// the fields stand in for the clips' in and out points until every single clip is probed
+function typedClipLengths() {
+  return {
+    trimStart: typedDuration(TRIM_START_FIELD_ID, TRIM_START_LABEL),
+    trimEnd: typedDuration(TRIM_END_FIELD_ID, TRIM_END_LABEL),
+    stillLength: typedDuration(STILL_LENGTH_FIELD_ID, STILL_LENGTH_LABEL),
   };
 }
 
@@ -1795,7 +1868,7 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   reelWord: "segment",
   assetName,
   assetKind: (assetId) => TIMELINE_KIND_BY_ASSET_TYPE[assetById(assetId).type],
-  sourceFrames,
+  sourceLength,
   onChange: timelineEdited,
   onSeek: seekTimelineFrame,
   playTimeline: (timeline) => previewTimeline(timelineWire(timeline, assetById)),

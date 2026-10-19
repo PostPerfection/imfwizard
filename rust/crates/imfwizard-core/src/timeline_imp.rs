@@ -273,8 +273,8 @@ fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<Cli
     let input_type = detect_input_type(&clip.picture);
     if matches!(input_type, InputType::J2kSequence | InputType::PictureMxf) {
         return Err(
-            "it is already JPEG 2000, and a timeline built clip by clip takes video or image \
-             sequence clips"
+            "it is already JPEG 2000, and a timeline built clip by clip takes video, image \
+             sequence or still image clips"
                 .to_string(),
         );
     }
@@ -318,7 +318,7 @@ fn plan_clip(build: &TimelineImp, clip: &Clip, raster: (u32, u32)) -> Result<Cli
             &clip.picture,
             width,
             height,
-            input_type == InputType::ImageSequence,
+            input_type == InputType::ImageSequence && clip.picture.is_dir(),
         )?;
         return Ok(ClipPicture {
             processing: resolved.processing,
@@ -780,6 +780,7 @@ mod tests {
             subtitle: None,
             subtitle_from_clip: false,
             reel_split_frames: Vec::new(),
+            still_hold_frames: None,
         };
         let mut timeline = Timeline {
             version: postkit::timeline::TIMELINE_FORMAT_VERSION,

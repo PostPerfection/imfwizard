@@ -374,6 +374,7 @@ enum TimelineRoute {
         fps: postkit::encode::FrameRate,
         trim_start_frames: u64,
         trim_end_frames: u64,
+        still_hold_frames: Option<u64>,
     },
     MultiClip {
         fps: postkit::encode::FrameRate,
@@ -487,6 +488,7 @@ fn timeline_route(
         fps,
         trim_start_frames: build.trim_start_frames,
         trim_end_frames: build.trim_end_frames,
+        still_hold_frames: build.still_hold_frames,
     }))
 }
 
@@ -635,11 +637,17 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
         trim_start_frames,
         trim_end_frames,
     };
-    let still_frames = match settings.still_length.as_deref() {
-        Some(spec) => Some(imfwizard_core::duration_spec::parse_duration_frames(
-            spec, fps_num, fps_den,
-        )?),
-        None => None,
+    let still_frames = match &timeline_route {
+        Some(TimelineRoute::SingleClip {
+            still_hold_frames, ..
+        }) => *still_hold_frames,
+        _ => settings
+            .still_length
+            .as_deref()
+            .map(|spec| {
+                imfwizard_core::duration_spec::parse_duration_frames(spec, fps_num, fps_den)
+            })
+            .transpose()?,
     };
     let picture_options = settings.picture()?;
     // a bad size or colour has to stop the build here, not part way through the encode
@@ -827,7 +835,8 @@ pub async fn detect_source_crop(
         &picture,
         source_width,
         source_height,
-        postkit::encode::detect_input_type(&picture) == postkit::encode::InputType::ImageSequence,
+        postkit::encode::detect_input_type(&picture) == postkit::encode::InputType::ImageSequence
+            && picture.is_dir(),
     )?;
     Ok(DetectedCrop {
         left: resolved.plan.crop.left,
@@ -1357,7 +1366,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
                     &video_path,
                     source_width,
                     source_height,
-                    input_type == postkit::encode::InputType::ImageSequence,
+                    input_type == postkit::encode::InputType::ImageSequence && video_path.is_dir(),
                 )?;
                 log_to(&log_file, &format!("[ENCODE] {}", resolved.plan.describe()));
                 // the wrapper refuses an illegal raster too, but only after the
@@ -2472,6 +2481,53 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&from_timeline).unwrap(),
             serde_json::to_value(&from_video).unwrap()
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_one_still_timeline_maps_to_the_job_the_still_length_maps_to() {
+        let directory = scratch_directory("one-still-timeline");
+        let still = directory.join("card.png");
+        run_ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("color=c=lime:s={CLIP_WIDTH}x{CLIP_HEIGHT}"),
+            "-frames:v",
+            "1",
+            &still.to_string_lossy(),
+        ]);
+        let timeline = timeline_of(vec![Clip {
+            sound: ClipSound::None,
+            ..timeline_clip(&still, 0, 0, 48)
+        }]);
+
+        let from_timeline = job_config_of(
+            1,
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        )
+        .unwrap();
+        let from_still = job_config_of(
+            1,
+            request(
+                &directory,
+                CompositionInput {
+                    silent: true,
+                    ..composition(&still)
+                },
+                SourceSettings {
+                    still_length: Some("48f".to_string()),
+                    ..app2e_settings()
+                },
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(from_timeline.still_frames, Some(48));
+        assert_eq!(
+            serde_json::to_value(&from_timeline).unwrap(),
+            serde_json::to_value(&from_still).unwrap()
         );
         std::fs::remove_dir_all(&directory).ok();
     }

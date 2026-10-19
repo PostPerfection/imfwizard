@@ -2286,7 +2286,10 @@ fn run() {
                     None => frames_from_spec(&trim_end).unwrap_or(0),
                 },
             };
-            let still_frames = frames_from_spec(&still_length);
+            let still_frames = match &single_clip {
+                Some((_, build)) => build.still_hold_frames,
+                None => frames_from_spec(&still_length),
+            };
 
             let still_input = video
                 .as_deref()
