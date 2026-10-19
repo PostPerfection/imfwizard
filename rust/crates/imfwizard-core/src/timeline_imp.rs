@@ -369,11 +369,7 @@ pub fn build_timeline_imp(
         ..Default::default()
     };
 
-    let encode = with_clip_defaults(
-        picture_encode_options(&build.compression, plan.raster, timeline.fps)?,
-        build,
-        plan.raster,
-    );
+    let encode = timeline_encode(build, plan)?;
     let mut picture_track_files = Vec::new();
     for (index, planned) in plan.stretches.iter().enumerate() {
         if build.cancel.load(Ordering::Relaxed) {
@@ -382,7 +378,7 @@ pub fn build_timeline_imp(
         let stretch = planned.timeline_stretch(plan.raster);
         on_log(&format!(
             "Encoding {} at timeline frames {}..{}",
-            stretch_name(&plan.planned_timeline, &stretch),
+            stretch_name(encode.timeline, &stretch),
             stretch.frames.start,
             stretch.frames.end
         ));
@@ -395,10 +391,10 @@ pub fn build_timeline_imp(
         };
         let track = encode_stretch_picture(
             build,
-            &plan.planned_timeline,
+            encode.timeline,
             &stretch,
             index,
-            &encode,
+            &encode.options,
             on_stretch_progress,
             &on_log,
         )?;
@@ -471,6 +467,27 @@ pub fn build_timeline_imp(
         picture_track_files,
         sound_track_file,
         frames,
+    })
+}
+
+pub struct TimelineEncode<'a> {
+    pub timeline: &'a Timeline,
+    pub options: EncodeRunOptions,
+}
+
+// the build encodes and the preview renders the planned timeline with these options
+pub fn timeline_encode<'a>(
+    build: &TimelineImp,
+    plan: &'a TimelinePlan,
+) -> Result<TimelineEncode<'a>, String> {
+    let options = with_clip_defaults(
+        picture_encode_options(&build.compression, plan.raster, build.timeline.fps)?,
+        build,
+        plan.raster,
+    );
+    Ok(TimelineEncode {
+        timeline: &plan.planned_timeline,
+        options,
     })
 }
 
@@ -943,6 +960,44 @@ mod tests {
                 .all(|clip| clip.source_colour == build.source_colour),
             "every clip carries the colour it was planned with"
         );
+    }
+
+    #[test]
+    fn the_preview_cuts_the_builds_stretches_from_the_encoded_timeline_and_options() {
+        const FITTED_RASTER: (u32, u32) = (2048, 1080);
+        let dir = tempfile::tempdir().unwrap();
+        let mut build = layered_build(dir.path());
+        build.picture_options.raster = Some(FITTED_RASTER);
+        let plan = check_timeline(&build).unwrap();
+
+        let encode = timeline_encode(&build, &plan).unwrap();
+
+        assert_eq!(encode.timeline, &plan.planned_timeline);
+        let raster_of = |picture: &PictureProcessing| {
+            picture.fit.map(|fit| (fit.raster_width, fit.raster_height))
+        };
+        assert!(
+            encode
+                .timeline
+                .clips
+                .iter()
+                .all(|clip| raster_of(&clip.picture_processing) == Some(FITTED_RASTER)),
+            "every clip is fitted into the build's raster"
+        );
+        assert_eq!(raster_of(&encode.options.picture), Some(FITTED_RASTER));
+        assert!(encode.options.source_colour == build.source_colour);
+        let stretches =
+            postkit::pipeline::timeline_stretches(encode.timeline, &encode.options).unwrap();
+        assert_eq!(
+            stretches[0].base,
+            StretchBase::Black {
+                width: FITTED_RASTER.0,
+                height: FITTED_RASTER.1
+            }
+        );
+        let stretches: Vec<PlannedStretch> =
+            stretches.into_iter().map(PlannedStretch::of).collect();
+        assert_eq!(stretches, plan.stretches);
     }
 
     #[test]
