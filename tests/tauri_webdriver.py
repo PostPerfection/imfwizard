@@ -24,6 +24,7 @@ MIN_WINDOW_SIDE = 200
 WINDOW_TIMEOUT_SECONDS = 60
 TYPE_DELAY_MILLISECONDS = 20
 INPUT_SETTLE_SECONDS = 0.3
+COVERING_WINDOW_TIMEOUT_SECONDS = 5
 
 FILE_DIALOG_TIMEOUT_SECONDS = 60
 # the picker opens on its recent list, where confirming a typed path does nothing
@@ -235,15 +236,30 @@ class Window:
         spot = self.session.execute(CENTRE_OF_ELEMENT, css)
         if spot is None:
             raise AssertionError(f"{css} has no box on the page to click")
+        x = self.origin[0] + round(spot[0])
+        y = self.origin[1] + round(spot[1])
         # no --sync: a move to where the pointer already sits reports no motion
-        xdotool(
-            "mousemove",
-            str(self.origin[0] + round(spot[0])),
-            str(self.origin[1] + round(spot[1])),
-            "click",
-            "1",
+        xdotool("mousemove", str(x), str(y))
+        # a tooltip from the last spot can cover the next one
+        wait_until(
+            f"a window still covers the click point {x},{y}",
+            lambda: not self._other_window_covers(x, y),
+            COVERING_WINDOW_TIMEOUT_SECONDS,
         )
+        xdotool("click", "1")
         time.sleep(INPUT_SETTLE_SECONDS)
+
+    def _other_window_covers(self, x, y):
+        for window_id in visible_windows() - {self.window_id}:
+            try:
+                geometry = self._geometry(window_id)
+            except WebDriverError:
+                continue
+            inside_x = geometry["X"] <= x < geometry["X"] + geometry["WIDTH"]
+            inside_y = geometry["Y"] <= y < geometry["Y"] + geometry["HEIGHT"]
+            if inside_x and inside_y:
+                return True
+        return False
 
     # with no window manager under Xvfb the picker reads keys only once focused
     def answer_file_dialog(self, path, windows_before):
