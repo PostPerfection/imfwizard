@@ -536,8 +536,9 @@ fn content_kind_or_feature(composition: &CompositionInput) -> String {
 
 // ─── Tauri commands ────────────────────────────────────────────────────────
 
-#[derive(Default)]
-struct SubmitRequest {
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitRequest {
     video_path: Option<String>,
     title: String,
     output_dir: String,
@@ -804,6 +805,81 @@ pub async fn submit_job(
         title: submitted_title,
         output_dir: submitted_output_dir,
     })
+}
+
+struct TimelinePreviewLoad {
+    timeline: postkit::timeline::Timeline,
+    options: Option<postkit::pipeline::EncodeRunOptions>,
+}
+
+// never queued
+const TIMELINE_PREVIEW_JOB_ID: u64 = 0;
+
+fn timeline_preview_load(
+    timeline: postkit::timeline::Timeline,
+    request: SubmitRequest,
+) -> Result<TimelinePreviewLoad, String> {
+    if !postkit::timeline::preview_renders_any_stretch(&timeline) {
+        return Ok(TimelinePreviewLoad {
+            timeline,
+            options: None,
+        });
+    }
+    let settings = request.source_settings.unwrap_or_default();
+    let composition = CompositionInput {
+        title: request.title.clone(),
+        content_kind: String::new(),
+        video_path: String::new(),
+        audio_path: None,
+        audio_lang: None,
+        subtitles: Vec::new(),
+        hdr: None,
+        silent: false,
+        timeline: Some(timeline.clone()),
+    };
+    let job = job_config_of(
+        TIMELINE_PREVIEW_JOB_ID,
+        SubmitRequest {
+            compositions: Some(vec![composition]),
+            // the request's trims and still length come from its single-clip compositions
+            source_settings: Some(SourceSettings {
+                trim_start: None,
+                trim_end: None,
+                still_length: None,
+                ..settings
+            }),
+            ..request
+        },
+    )?;
+    let build = timeline_imp_of(
+        &job,
+        &job.compositions[0],
+        &timeline,
+        compression_of(&job),
+        Default::default(),
+        Default::default(),
+    );
+    // a timeline the build makes as one clip has no timeline plan in its job
+    let plan = match job.timeline_plan {
+        Some(plan) => plan,
+        None => imfwizard_core::timeline_imp::check_timeline(&build)?,
+    };
+    let encode = imfwizard_core::timeline_imp::timeline_encode(&build, &plan)?;
+    Ok(TimelinePreviewLoad {
+        timeline: encode.timeline.clone(),
+        options: Some(encode.options),
+    })
+}
+
+#[tauri::command(async)]
+pub fn preview_load_timeline(
+    timeline: postkit::timeline::Timeline,
+    request: SubmitRequest,
+    app: AppHandle,
+    state: tauri::State<'_, guikit::preview::PreviewPlayer>,
+) -> Result<guikit::preview::TimelinePreview, String> {
+    let load = timeline_preview_load(timeline, request)?;
+    guikit::preview::load_timeline_preview(&app, &state, load.timeline, load.options)
 }
 
 /// The black borders of a source, and the plan cropping them away resolves to.
@@ -1906,7 +1982,8 @@ mod tests {
     use super::{
         build_timeline_package, composition_sound_files, compression_of, encode_threads_status,
         format_encode_breakdown, format_stage_timing, job_config_of, timeline_imp_of,
-        verification_log, verify_package, CompositionInput, SourceSettings, SubmitRequest,
+        timeline_preview_load, verification_log, verify_package, CompositionInput, SourceSettings,
+        SubmitRequest,
     };
     use postkit::timeline::{Clip, ClipSound, SoundTrack, Timeline, TIMELINE_FORMAT_VERSION};
     use std::path::{Path, PathBuf};
@@ -2485,9 +2562,7 @@ mod tests {
         std::fs::remove_dir_all(&directory).ok();
     }
 
-    #[test]
-    fn a_one_still_timeline_maps_to_the_job_the_still_length_maps_to() {
-        let directory = scratch_directory("one-still-timeline");
+    fn still_card(directory: &Path) -> PathBuf {
         let still = directory.join("card.png");
         run_ffmpeg(&[
             "-f",
@@ -2498,6 +2573,13 @@ mod tests {
             "1",
             &still.to_string_lossy(),
         ]);
+        still
+    }
+
+    #[test]
+    fn a_one_still_timeline_maps_to_the_job_the_still_length_maps_to() {
+        let directory = scratch_directory("one-still-timeline");
+        let still = still_card(&directory);
         let timeline = timeline_of(vec![Clip {
             sound: ClipSound::None,
             ..timeline_clip(&still, 0, 0, 48)
@@ -2732,6 +2814,100 @@ mod tests {
 
         assert_eq!(frames_while_paused, 0, "the paused build encoded frames");
         assert!(built.is_err(), "a build cancelled while paused has to stop");
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    fn fitted_raster(
+        picture: &postkit::picture_processing::PictureProcessing,
+    ) -> Option<(u32, u32)> {
+        picture.fit.map(|fit| (fit.raster_width, fit.raster_height))
+    }
+
+    #[test]
+    fn a_plain_video_timeline_previews_without_build_options() {
+        let directory = scratch_directory("preview-plain-timeline");
+        let picture = test_pattern_clip(&directory, "picture");
+        let timeline = timeline_of(vec![
+            timeline_clip(&picture, 0, 0, 3),
+            timeline_clip(&picture, 3, 3, 6),
+        ]);
+
+        let load = timeline_preview_load(
+            timeline.clone(),
+            request(
+                &directory,
+                timeline_composition(timeline.clone()),
+                app2e_settings(),
+            ),
+        )
+        .unwrap();
+
+        assert!(load.options.is_none());
+        assert_eq!(load.timeline, timeline);
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_clip_above_layer_0_previews_fitted_with_the_build_options() {
+        let directory = scratch_directory("preview-layered-timeline");
+        let picture = test_pattern_clip(&directory, "picture");
+        let timeline = timeline_of(vec![
+            timeline_clip(&picture, 0, 0, 6),
+            Clip {
+                layer: 1,
+                opacity: 0.5,
+                sound: ClipSound::None,
+                ..timeline_clip(&picture, 2, 0, 2)
+            },
+        ]);
+
+        let load = timeline_preview_load(
+            timeline.clone(),
+            request(&directory, timeline_composition(timeline), app2e_settings()),
+        )
+        .unwrap();
+
+        let options = load
+            .options
+            .expect("an upper layer renders with build options");
+        assert_eq!(fitted_raster(&options.picture), Some(APP2E_RASTER));
+        assert!(load
+            .timeline
+            .clips
+            .iter()
+            .all(|clip| fitted_raster(&clip.picture_processing) == Some(APP2E_RASTER)));
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_held_still_alone_on_layer_0_previews_fitted_from_the_builds_request() {
+        let directory = scratch_directory("preview-held-still");
+        let still = still_card(&directory);
+        let timeline = timeline_of(vec![Clip {
+            sound: ClipSound::None,
+            ..timeline_clip(&still, 0, 0, 48)
+        }]);
+        // the page sends a one-still timeline as the still and its length
+        let build_request = request(
+            &directory,
+            CompositionInput {
+                silent: true,
+                ..composition(&still)
+            },
+            SourceSettings {
+                still_length: Some("48f".to_string()),
+                ..app2e_settings()
+            },
+        );
+
+        let load = timeline_preview_load(timeline, build_request).unwrap();
+
+        assert!(load.options.is_some(), "a still renders with build options");
+        assert_eq!(load.timeline.clips.len(), 1);
+        assert_eq!(
+            fitted_raster(&load.timeline.clips[0].picture_processing),
+            Some(APP2E_RASTER)
+        );
         std::fs::remove_dir_all(&directory).ok();
     }
 }

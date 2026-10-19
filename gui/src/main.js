@@ -4,7 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, previewFile, previewDcp, previewTimeline, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
@@ -488,10 +488,23 @@ async function probeSourceRaster(asset) {
 }
 
 function timelineEdited(timeline) {
+  cancelTimelineRender();
   const rated = withFirstClipRate(timeline, assetById);
   storeActiveTimeline(rated);
   if (rated !== timeline) showTimelineInEditor(rated);
   afterTimelineChange();
+}
+
+// the preview fits and renders the layers with the build's settings
+function playTimeline(timeline) {
+  let request;
+  try {
+    request = currentJobRequest();
+  } catch (error) {
+    setStatus(`Preview failed: ${error.message}`);
+    return null;
+  }
+  return previewTimeline(timelineWire(timeline, assetById), request);
 }
 
 function showActiveTimeline() {
@@ -1871,7 +1884,7 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   sourceLength,
   onChange: timelineEdited,
   onSeek: seekTimelineFrame,
-  playTimeline: (timeline) => previewTimeline(timelineWire(timeline, assetById)),
+  playTimeline,
   seekTimeline: previewSeekAbsolute,
 });
 renderAssets();

@@ -106,8 +106,6 @@ The survey is under dcpwizard's DESIGN_TODO. The IMF-only items:
   declares what the picture already carries and every source conversion here lands
   on Rec.709 (above), so an HDR composition has to arrive graded in its preset's
   transfer.
-- Timeline follow-ups: a composited preview. The list is under postkit's
-  DESIGN_TODO.
 
 ## Deliberately skipped / standing limitations
 

@@ -17,6 +17,8 @@
 
 - **A timeline clip can be a held still**: a clip whose picture is one image file holds it for its out point's frames, on any layer, in `create --timeline` and the desktop build. A one-clip still timeline builds as `--video` with `--still-length`, and a still whose in point is not 0 is refused by clip number and file name. With picture findings on, a black still held for 2 seconds or more is reported as one black run over its hold, and a still is never reported frozen.
 
+- **Play timeline shows the upper layers**: a timeline with a clip above layer 0, or a still or image sequence on layer 0, renders those stretches with the build's compositor and the panel's picture, colour and bandwidth settings before it plays, at a raster no wider than 2048. The status line counts the frames rendered and the time left, rendered stretches are kept for the next play, and a timeline edit cancels a render in flight. What the build refuses, the preview refuses with the same message.
+
 - **The desktop app imports stills and image sequences**: + Image sequence picks a folder of images as one picture, as a folder dropped from the file manager now does. The asset list shows its first image's size and its image count, from the `picture_source_raster` command. Every picture's frame count comes from the build's own probe, so a sequence clip is as long as its image count and an image file arrives as a 5 second still with its In point off. On a one-clip timeline Still Length sets the still's Out point and shows it, and a still clip in a project saved before this is probed again on open.
 
 ### Changed
