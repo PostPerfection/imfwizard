@@ -1527,7 +1527,6 @@ def test_enter_on_the_properties_handle_hides_and_shows_the_panel(window):
     }
 
 
-PLAY_TIMELINE_BUTTON = '#timeline-editor [data-action="play-timeline"]'
 FRAME_SECONDS = 1 / FIXTURE_FPS
 
 
@@ -1562,7 +1561,7 @@ def test_play_timeline_plays_the_trimmed_clips_back_to_back(window, tmp_path):
     )
     playhead_before = session.execute(EDITOR_PLAYHEAD_LEFT)
 
-    window.click(PLAY_TIMELINE_BUTTON)
+    window.click("#btn-preview")
     wait_until(
         "the preview never reported the timeline's duration",
         lambda: reported_duration(session) > 0,
@@ -1631,7 +1630,7 @@ def test_play_timeline_renders_a_clip_with_alpha_on_layer_1_and_plays_through_it
         REACTION_TIMEOUT_SECONDS,
     )
 
-    window.click(PLAY_TIMELINE_BUTTON)
+    window.click("#btn-preview")
 
     def rendered_and_loaded():
         status = status_text(session)
