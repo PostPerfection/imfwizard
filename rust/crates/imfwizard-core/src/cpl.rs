@@ -25,7 +25,6 @@ pub fn write_cpl(
 ) -> std::io::Result<()> {
     let mut sequences = Vec::new();
     let mut descriptors = Vec::new();
-    let mut iab_sequences = String::new();
     let edit_rate = asdcplib::Rational::new(opts.fps_num as i32, opts.fps_den as i32);
     let iab_prefix = format!(
         "{}_",
@@ -33,16 +32,9 @@ pub fn write_cpl(
     );
     for tf in track_files {
         let fname = tf.path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-        if fname.starts_with(&iab_prefix) {
-            let descriptor = ImfEssenceDescriptor {
-                id: uuid::Uuid::new_v4().to_string(),
-                body: iab_descriptor_body(&tf.path)?,
-            };
-            iab_sequences.push_str(&iab_sequence_xml(tf, &descriptor.id, opts));
-            descriptors.push(descriptor);
-            continue;
-        }
-        let kind = if fname.starts_with("VIDEO_") {
+        let kind = if fname.starts_with(&iab_prefix) {
+            ImfTrackKind::Iab
+        } else if fname.starts_with("VIDEO_") {
             ImfTrackKind::Image
         } else if fname.starts_with("AUDIO_") {
             ImfTrackKind::Audio
@@ -71,47 +63,7 @@ pub fn write_cpl(
         vec![ImfSegment { sequences }],
         descriptors,
     );
-    let xml = cpl.to_xml();
-    if iab_sequences.is_empty() {
-        return std::fs::write(path, xml);
-    }
-    if xml.matches(SEQUENCE_LIST_END).count() != 1 {
-        return Err(std::io::Error::other(
-            "postkit's CPL writer no longer writes the one SequenceList the IAB sequence joins",
-        ));
-    }
-    std::fs::write(
-        path,
-        xml.replace(
-            SEQUENCE_LIST_END,
-            &format!("{iab_sequences}{SEQUENCE_LIST_END}"),
-        ),
-    )
-}
-
-// postkit's CPL writer has no IAB sequence kind
-const SEQUENCE_LIST_END: &str = "      </SequenceList>\n";
-const IAB_SEQUENCE_NAMESPACE: &str = "http://www.smpte-ra.org/ns/2067-201/2019";
-
-fn iab_sequence_xml(track_file: &MxfTrackFile, source_encoding: &str, opts: &ImpOptions) -> String {
-    let resource = SequenceResource {
-        track_file: track_file.clone(),
-        entry_point: 0,
-        source_duration: track_file.duration,
-    };
-    let mut xml = format!("        <iab:IABSequence xmlns:iab=\"{IAB_SEQUENCE_NAMESPACE}\">\n");
-    xml.push_str(&format!(
-        "          <Id>urn:uuid:{}</Id>\n",
-        uuid::Uuid::new_v4()
-    ));
-    xml.push_str(&format!(
-        "          <TrackId>urn:uuid:{}</TrackId>\n",
-        uuid::Uuid::new_v4()
-    ));
-    xml.push_str("          <ResourceList>\n");
-    xml.push_str(&resource_xml(&resource, Some(source_encoding), opts));
-    xml.push_str("          </ResourceList>\n        </iab:IABSequence>\n");
-    xml
+    std::fs::write(path, cpl.to_xml())
 }
 
 fn imf_cpl(
@@ -229,47 +181,6 @@ pub fn write_sequenced_cpl(
     std::fs::write(path, cpl.to_xml())
 }
 
-fn resource_xml(
-    resource: &SequenceResource,
-    source_encoding: Option<&str>,
-    opts: &ImpOptions,
-) -> String {
-    let mut xml = String::new();
-    // BaseResourceType is abstract, so a track file resource names its type
-    xml.push_str("            <Resource xsi:type=\"TrackFileResourceType\">\n");
-    xml.push_str(&format!(
-        "              <Id>urn:uuid:{}</Id>\n",
-        uuid::Uuid::new_v4()
-    ));
-    xml.push_str(&format!(
-        "              <EditRate>{} {}</EditRate>\n",
-        opts.fps_num, opts.fps_den
-    ));
-    xml.push_str(&format!(
-        "              <IntrinsicDuration>{}</IntrinsicDuration>\n",
-        resource.track_file.duration
-    ));
-    xml.push_str(&format!(
-        "              <EntryPoint>{}</EntryPoint>\n",
-        resource.entry_point
-    ));
-    xml.push_str(&format!(
-        "              <SourceDuration>{}</SourceDuration>\n",
-        resource.source_duration
-    ));
-    if let Some(id) = source_encoding {
-        xml.push_str(&format!(
-            "              <SourceEncoding>urn:uuid:{id}</SourceEncoding>\n"
-        ));
-    }
-    xml.push_str(&format!(
-        "              <TrackFileId>urn:uuid:{}</TrackFileId>\n",
-        resource.track_file.uuid
-    ));
-    xml.push_str("            </Resource>\n");
-    xml
-}
-
 /// One EssenceDescriptorList entry, read back out of the track file it describes
 /// under a fresh id, since a validator compares the entry with the MXF and every
 /// item has to be the MXF's own. `None` for a kind that names no descriptor.
@@ -282,6 +193,7 @@ pub(crate) fn track_file_descriptor(
         ImfTrackKind::Image => picture_descriptor_body(track_file)?,
         ImfTrackKind::Audio => sound_descriptor_body(track_file, edit_rate)?,
         ImfTrackKind::Subtitle => subtitle_descriptor_body(track_file)?,
+        ImfTrackKind::Iab => iab_descriptor_body(track_file)?,
     };
     Ok(Some(ImfEssenceDescriptor {
         id: uuid::Uuid::new_v4().to_string(),
@@ -478,20 +390,6 @@ mod tests {
         let xml = std::fs::read_to_string(path).unwrap();
         assert!(xml.contains("<IssueDate>"));
         assert!(xml.contains("<cc:ApplicationIdentification>http://www.smpte-ra.org/ns/2067-21/2020</cc:ApplicationIdentification>"));
-    }
-
-    // the IAB sequence is put before this line, so a change to its indentation has to show here
-    #[test]
-    fn a_resourceless_cpl_writes_the_one_sequence_list_end_the_iab_sequence_joins() {
-        let xml = imf_cpl(
-            "cpl",
-            &ImpOptions::default(),
-            &Composition::default(),
-            vec![ImfSegment::default()],
-            Vec::new(),
-        )
-        .to_xml();
-        assert_eq!(xml.matches(SEQUENCE_LIST_END).count(), 1, "{xml}");
     }
 
     // Photon picks its constraints validator off this string, and only the 2020

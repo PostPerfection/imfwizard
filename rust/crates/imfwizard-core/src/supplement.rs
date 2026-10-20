@@ -86,6 +86,7 @@ fn essence_for(kind: ImfTrackKind) -> EssenceType {
         ImfTrackKind::Image => EssenceType::J2k,
         ImfTrackKind::Audio => EssenceType::Wav,
         ImfTrackKind::Subtitle => EssenceType::TimedText,
+        ImfTrackKind::Iab => EssenceType::Atmos,
     }
 }
 
