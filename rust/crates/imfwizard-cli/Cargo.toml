@@ -25,7 +25,7 @@ postkit-ffmpeg-link-search = { path = "../../../extern/postkit/ffmpeg-link-searc
 
 [dev-dependencies]
 # the App 2E test reads the picture MXF `create` wrote back off disk
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "084fd449cd90408078ee53b6b097522226e01153" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "0a7bdb5a78d4bc7928012d73ecdd6f4273677a97" }
 assert_cmd = "2"
 # the Dolby Vision fixture takes the level 6 block that carries MaxCLL and MaxFALL
 dolby_vision = "3.4"

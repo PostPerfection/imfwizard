@@ -255,7 +255,7 @@ fn sound_descriptor_body(sound: &Path, edit_rate: asdcplib::Rational) -> std::io
 }
 
 fn iab_descriptor_body(iab: &Path) -> std::io::Result<String> {
-    let mut reader = asdcplib::as02::iab::MxfReader::new();
+    let mut reader = asdcplib::as02::iab::MxfReader::new(postkit::iab::LARGEST_IMF_FRAME_BYTES);
     read(reader.open_read(&iab.to_string_lossy()), "IAB MXF", iab)?;
     let descriptor = read(
         reader.iab_essence_descriptor(),

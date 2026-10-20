@@ -6,7 +6,7 @@ license.workspace = true
 description = "IMF (Interoperable Master Format) creation and packaging library"
 
 [dependencies]
-asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "084fd449cd90408078ee53b6b097522226e01153" }
+asdcplib = { git = "https://github.com/PostPerfection/asdcplib-rs.git", rev = "0a7bdb5a78d4bc7928012d73ecdd6f4273677a97" }
 base64 = "0.22"
 dcpdoctor-core.workspace = true
 hound = "3.5.1"

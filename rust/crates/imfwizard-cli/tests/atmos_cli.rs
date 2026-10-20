@@ -187,7 +187,7 @@ fn create_wraps_an_ia_bitstream_directory_as_an_iab_sequence() {
         .to_string_lossy()
         .trim_start_matches("IAB_")
         .to_string();
-    let mut reader = asdcplib::as02::iab::MxfReader::new();
+    let mut reader = asdcplib::as02::iab::MxfReader::new(postkit::iab::LARGEST_IMF_FRAME_BYTES);
     reader.open_read(&track_file.to_string_lossy()).unwrap();
     assert_eq!(reader.frame_count().unwrap(), IAB_PICTURE_FRAMES);
     for (index, expected) in frames.iter().enumerate() {
