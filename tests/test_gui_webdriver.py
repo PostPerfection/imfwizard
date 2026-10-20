@@ -1708,7 +1708,11 @@ def test_ticking_and_unticking_play_whole_timeline_swaps_the_preview_at_the_play
         lambda: shows_timeline_at(session, SWAP_PLAYHEAD_FRAME / FIXTURE_FPS),
         PREVIEW_TIMEOUT_SECONDS,
     )
-    assert reported_duration(session) == pytest.approx(SWAP_TIMELINE_FRAMES / FIXTURE_FPS)
+    wait_until(
+        "the preview never reported the timeline's duration",
+        lambda: reported_duration(session) == pytest.approx(SWAP_TIMELINE_FRAMES / FIXTURE_FPS),
+        REACTION_TIMEOUT_SECONDS,
+    )
     assert_transport_holds(session, paused=True)
 
     untick_play_whole_timeline(window)
