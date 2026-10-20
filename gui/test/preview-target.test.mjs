@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { previewButtonEnabled, previewTarget, PREVIEW_KIND_PACKAGE, PREVIEW_KIND_SOURCE } from '../src/preview-target.js';
+import { previewButtonEnabled, previewTarget, sourcePreviewTarget, PREVIEW_KIND_PACKAGE, PREVIEW_KIND_SOURCE, PREVIEW_KIND_TIMELINE } from '../src/preview-target.js';
 
 const EVERY_TIER = {
   selectedPreview: { kind: PREVIEW_KIND_SOURCE, path: '/assets/picked.mov' },
@@ -40,6 +40,22 @@ test('the output path is the last resort', () => {
 
 test('an empty project has nothing to open', () => {
   assert.equal(previewTarget({ selectedPreview: null, firstPicturePath: undefined, openedPackage: null, outputPath: '' }), null);
+});
+
+const CLIP_AT_FRAME_240 = { picture: 2, start: 240, layer: 0, inFrame: 20, outFrame: 100 };
+
+test('with Play whole timeline ticked Preview on a clip plays the whole timeline from the clip start', () => {
+  assert.deepEqual(sourcePreviewTarget('/assets/second.mov', CLIP_AT_FRAME_240, true), { kind: PREVIEW_KIND_TIMELINE, startFrame: 240 });
+});
+
+test('with Play whole timeline unticked Preview on a clip plays the clip source', () => {
+  assert.deepEqual(sourcePreviewTarget('/assets/second.mov', CLIP_AT_FRAME_240, false), { kind: PREVIEW_KIND_SOURCE, path: '/assets/second.mov' });
+});
+
+test('Preview on a picture no clip shows plays it alone whatever the box says', () => {
+  for (const playsWholeTimeline of [true, false]) {
+    assert.deepEqual(sourcePreviewTarget('/assets/unplaced.mov', null, playsWholeTimeline), { kind: PREVIEW_KIND_SOURCE, path: '/assets/unplaced.mov' });
+  }
 });
 
 test('the button is on when the target differs from what the panel shows', () => {
