@@ -4,14 +4,14 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, setPreviewPlayStarter, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
-import { previewTarget, previewButtonEnabled, PREVIEW_KIND_SOURCE } from "./preview-target.js";
+import { initPreview, loadKeepingTransport, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { previewTarget, previewButtonEnabled, sourcePreviewTarget, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";
 import * as buildsInFlight from "../../extern/guikit/src/builds-in-flight.js";
 import { initTimeline, loadTimelineFromCpl } from "./timeline.js";
-import { initTimelineEditor, playTimelineFromPlayhead, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, baseClipsInOrder, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
+import { initTimelineEditor, playTimelineFromPlayhead, playsWholeTimeline, setTimeline as showTimelineInEditor, setPlayhead as setEditorPlayhead, baseClipsInOrder, clipAtFrame, followTimelinePosition } from "../../extern/guikit/src/timeline-editor.js";
 import {
   DEFAULT_TIMELINE_FPS,
   TIMELINE_KIND_BY_ASSET_TYPE,
@@ -504,7 +504,8 @@ function playTimeline(timeline) {
     setStatus(`Preview failed: ${error.message}`);
     return null;
   }
-  return previewTimeline(timelineWire(timeline, assetById), request);
+  const compositionName = project.compositions[project.activeComposition].name;
+  return previewTimeline(timelineWire(timeline, assetById), request, compositionName);
 }
 
 function showActiveTimeline() {
@@ -807,8 +808,20 @@ function previewTargetInput() {
 function previewCurrentTarget() {
   const target = previewTarget(previewTargetInput());
   if (!target) return;
-  if (target.kind === PREVIEW_KIND_SOURCE) previewSourcePicture(target.path);
+  if (target.kind === PREVIEW_KIND_SOURCE) previewSource(target.path);
   else previewBuiltPackage(target.path);
+}
+
+function previewSource(path) {
+  const clipIndex = clipIndexShowing(path, null);
+  const clip = clipIndex === null ? null : activeTimeline().clips[clipIndex];
+  const target = sourcePreviewTarget(path, clip, playsWholeTimeline());
+  if (target.kind === PREVIEW_KIND_SOURCE) {
+    previewSourcePicture(path, clipIndex);
+    return;
+  }
+  setEditorPlayhead(target.startFrame);
+  playTimelineFromPlayhead();
 }
 
 document.getElementById("btn-preview")?.addEventListener("click", previewCurrentTarget);
@@ -836,18 +849,18 @@ function clipRate(clip) {
   return parseFrameRate(assetById(clip.picture).fps) ?? activeTimeline().fps;
 }
 
-// a seek in another clip loads that clip's picture first, and nothing happens while the preview plays no clip
-async function seekTimelineFrame(frame) {
-  if (previewedClipIndex === null) return;
+// a frame in another clip loads that clip's picture first
+async function previewClipSourceAt(frame) {
   const timeline = activeTimeline();
   const place = clipAtFrame(timeline, frame);
-  if (!place) return;
+  if (!place) return false;
   const clip = timeline.clips[place.index];
   const path = assetPath(clip.picture);
-  if (path !== previewShownPath && !(await previewSourcePicture(path, place.index))) return;
+  if (path !== previewShownPath && !(await previewSourcePicture(path, place.index))) return false;
   previewedClipIndex = place.index;
   const [numerator, denominator] = clipRate(clip);
   await invoke("preview_seek_absolute", { seconds: ((clip.inFrame + place.frameInClip) * denominator) / numerator });
+  return true;
 }
 
 const TIMELINE_PLAYHEAD_POLL_MILLISECONDS = 250;
@@ -1837,7 +1850,7 @@ ctxMenu?.querySelectorAll("button").forEach(btn => {
     const asset = project.assets.find(a => a.id === ctxAssetId);
     if (!asset) return;
     if (action === "preview") {
-      previewSourcePicture(asset.path);
+      previewSource(asset.path);
     } else if (action === "remove") {
       removeAsset(ctxAssetId);
     } else if (action === "reveal") {
@@ -1883,9 +1896,11 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   assetKind: (assetId) => TIMELINE_KIND_BY_ASSET_TYPE[assetById(assetId).type],
   sourceLength,
   onChange: timelineEdited,
-  onSeek: seekTimelineFrame,
+  previewShowsClipSource: () => previewedClipIndex !== null,
+  previewClipSource: previewClipSourceAt,
   playTimeline,
   seekTimeline: previewSeekAbsolute,
+  loadKeepingTransport,
 });
 renderAssets();
 showActiveTimeline();
@@ -1921,8 +1936,6 @@ watchPreviewShown((path, ended) => {
   updateToolbarState();
 });
 watchPreviewTimelinePosition(followTimelinePosition);
-// play on a clip of the timeline plays the whole timeline from the playhead
-setPreviewPlayStarter(() => (previewedClipIndex === null ? null : playTimelineFromPlayhead()));
 initTimeline();
 initPlaylist(document.getElementById("playlist"), { loadPackage: previewBuiltPackage });
 initJobsPanel({
