@@ -4,7 +4,7 @@ import { Command } from "@tauri-apps/plugin-shell";
 import { open as _open, confirm as tauriConfirm, message as tauriMessage } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
-import { initPreview, loadKeepingTransport, previewFile, previewDcp, previewTimeline, cancelTimelineRender, previewSeekAbsolute, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
+import { initPreview, loadKeepingTransport, previewSeekOnceLoaded, previewFile, previewDcp, previewTimeline, cancelTimelineRender, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
 import { previewTarget, previewButtonEnabled, sourcePreviewTarget, PREVIEW_KIND_SOURCE } from "./preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
@@ -859,7 +859,7 @@ async function previewClipSourceAt(frame) {
   if (path !== previewShownPath && !(await previewSourcePicture(path, place.index))) return false;
   previewedClipIndex = place.index;
   const [numerator, denominator] = clipRate(clip);
-  await invoke("preview_seek_absolute", { seconds: ((clip.inFrame + place.frameInClip) * denominator) / numerator });
+  await previewSeekOnceLoaded(((clip.inFrame + place.frameInClip) * denominator) / numerator);
   return true;
 }
 
@@ -1899,7 +1899,7 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   previewShowsClipSource: () => previewedClipIndex !== null,
   previewClipSource: previewClipSourceAt,
   playTimeline,
-  seekTimeline: previewSeekAbsolute,
+  seekTimeline: previewSeekOnceLoaded,
   loadKeepingTransport,
 });
 renderAssets();
