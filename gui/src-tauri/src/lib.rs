@@ -82,6 +82,7 @@ pub fn run() {
             guikit::preview::player_controls::preview_set_picture,
             guikit::preview::player_controls::preview_set_sound_device,
             guikit::preview::player_controls::preview_set_sound_layout,
+            guikit::preview::player_controls::preview_set_sound_source,
             guikit::preview::player_controls::preview_set_sound_delay,
             guikit::preview::player_controls::preview_set_subtitle_presentation,
             guikit::preview::player_controls::preview_sound_devices,
