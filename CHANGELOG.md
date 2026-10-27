@@ -22,6 +22,10 @@
 
 - **The desktop app imports stills and image sequences**: + Image sequence picks a folder of images as one picture, as a folder dropped from the file manager now does. The asset list shows its first image's size and its image count, from the `picture_source_raster` command. Every picture's frame count comes from the build's own probe, so a sequence clip is as long as its image count and an image file arrives as a 5 second still with its In point off. On a one-clip timeline Still Length sets the still's Out point and shows it, and a still clip in a project saved before this is probed again on open.
 
+- **The QC report checks IAB tracks frame by frame**: every frame of an IMP's IAB track is checked against ST 2098-2 and ST 2067-201. Each finding is a note naming the constraint set, the clause, how often it occurs and the first frame it occurs in, beside a summary of the track's frame count, format, beds and objects. The report lists an IAB track as immersive audio, where it listed it as picture.
+
+- **A picture dropped on empty timeline track snaps**: it snaps to a clip edge or the playhead the way a dragged clip does.
+
 ### Changed
 - **Play whole timeline decides what the preview plays**: the timeline's Play timeline button is now a Play whole timeline checkbox, unticked each time the app starts and disabled while the timeline has no clips. Ticked, Preview on a picture the timeline uses puts the playhead at that clip's start and plays the whole timeline from there, and a click on the timeline seeks the whole timeline, loading it in place of a clip's picture. Unticked, both load the clip's own picture as before. Ticking or unticking it while the preview shows a clip's picture or the timeline swaps to the other at the playhead and keeps it playing or paused. The transport's play no longer loads the whole timeline in place of a clip, and the preview's title names the composition whose timeline plays.
 - **postkit writes the IAB sequence of a CPL**: an IAB resource no longer writes `<EntryPoint>0</EntryPoint>`, the ST 2067-3 default, and the rest of the CPL is the same as before.
