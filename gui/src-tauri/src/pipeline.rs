@@ -876,10 +876,11 @@ pub fn preview_load_timeline(
     timeline: postkit::timeline::Timeline,
     request: SubmitRequest,
     app: AppHandle,
+    play_state: guikit::preview::PlayState,
     state: tauri::State<'_, guikit::preview::PreviewPlayer>,
 ) -> Result<guikit::preview::TimelinePreview, String> {
     let load = timeline_preview_load(timeline, request)?;
-    guikit::preview::load_timeline_preview(&app, &state, load.timeline, load.options)
+    guikit::preview::load_timeline_preview(&app, &state, load.timeline, load.options, play_state)
 }
 
 /// The black borders of a source, and the plan cropping them away resolves to.
