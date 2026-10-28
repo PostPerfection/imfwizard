@@ -25,6 +25,7 @@ import {
   timelineWire,
   withFirstClipRate,
   withImportedAsset,
+  withNoAudioStream,
   withoutAsset,
   withReelStartingClipsPlaced,
   withUnplacedAssetsFilled,
@@ -375,6 +376,7 @@ async function probeImportedPicture(asset) {
     }
   }
   takeProbedLength(asset, length);
+  if (info && !info.hasAudio) takeNoAudioStream(asset);
   renderAssets();
   if (info || !counted) return;
   // ffprobe cannot open a folder, so an image sequence is measured from its first image
@@ -409,6 +411,15 @@ function takeProbedLength(asset, length) {
   const takesFields = (composition) => waitingForClipLengths.has(composition.id);
   if (length.kind === "still") takeStillLengthField(takesFields);
   else takeTrimFields(takesFields);
+  showActiveTimeline();
+}
+
+function takeNoAudioStream(asset) {
+  asset.noAudioStream = true;
+  project.compositions = project.compositions.map((composition) => ({
+    ...composition,
+    timeline: withNoAudioStream(composition.timeline, asset.id),
+  }));
   showActiveTimeline();
 }
 
@@ -1895,6 +1906,7 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   assetName,
   assetKind: (assetId) => TIMELINE_KIND_BY_ASSET_TYPE[assetById(assetId).type],
   sourceLength,
+  noAudioStream: (assetId) => assetById(assetId).noAudioStream,
   onChange: timelineEdited,
   previewShowsClipSource: () => previewedClipIndex !== null,
   previewClipSource: previewClipSourceAt,
