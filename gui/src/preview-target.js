@@ -2,12 +2,10 @@ export const PREVIEW_KIND_SOURCE = "source";
 export const PREVIEW_KIND_PACKAGE = "package";
 export const PREVIEW_KIND_TIMELINE = "timeline";
 
-export function previewTarget({ selectedPreview, firstPicturePath, openedPackage, outputPath }) {
-  if (selectedPreview?.kind === PREVIEW_KIND_SOURCE) return { kind: PREVIEW_KIND_SOURCE, path: selectedPreview.path };
-  if (selectedPreview?.kind === PREVIEW_KIND_PACKAGE) return { kind: PREVIEW_KIND_PACKAGE, path: selectedPreview.path };
-  if (firstPicturePath) return { kind: PREVIEW_KIND_SOURCE, path: firstPicturePath };
-  if (openedPackage) return { kind: PREVIEW_KIND_PACKAGE, path: openedPackage };
-  if (outputPath) return { kind: PREVIEW_KIND_PACKAGE, path: outputPath };
+// the picked asset or package, else the package the last build wrote, else nothing to preview
+export function previewTarget({ selectedPreview, builtPackage }) {
+  if (selectedPreview) return { kind: selectedPreview.kind, path: selectedPreview.path };
+  if (builtPackage) return { kind: PREVIEW_KIND_PACKAGE, path: builtPackage };
   return null;
 }
 

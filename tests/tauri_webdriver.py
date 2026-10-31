@@ -233,9 +233,14 @@ class Window:
 
     # WebKitWebDriver refuses element click, value and actions in a wry webview
     def click(self, css):
+        self.point_at(css)
+        xdotool("click", "1")
+        time.sleep(INPUT_SETTLE_SECONDS)
+
+    def point_at(self, css):
         spot = self.session.execute(CENTRE_OF_ELEMENT, css)
         if spot is None:
-            raise AssertionError(f"{css} has no box on the page to click")
+            raise AssertionError(f"{css} has no box on the page to point at")
         x = self.origin[0] + round(spot[0])
         y = self.origin[1] + round(spot[1])
         # no --sync: a move to where the pointer already sits reports no motion
@@ -246,8 +251,6 @@ class Window:
             lambda: not self._other_window_covers(x, y),
             COVERING_WINDOW_TIMEOUT_SECONDS,
         )
-        xdotool("click", "1")
-        time.sleep(INPUT_SETTLE_SECONDS)
 
     def _other_window_covers(self, x, y):
         for window_id in visible_windows() - {self.window_id}:

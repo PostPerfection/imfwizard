@@ -332,6 +332,22 @@ def sound_track_label(session):
 
 
 # the real GTK file picker, driven through its location bar
+ASSET_ID_NAMED = """
+const items = [...document.querySelectorAll("#asset-list .asset-item")];
+return items.find((item) => item.querySelector(".asset-name").textContent === arguments[0])?.dataset.assetId ?? null;
+"""
+
+
+# Preview plays the picked asset, the built package or nothing
+def pick_asset(window, name):
+    asset_id = wait_until(
+        f"{name} never reached the asset list",
+        lambda: window.session.execute(ASSET_ID_NAMED, name),
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.click(f'#asset-list .asset-item[data-asset-id="{asset_id}"]')
+
+
 def choose_in_dialog(window, button, path):
     windows_before = visible_windows()
     window.click(button)
@@ -1435,6 +1451,7 @@ def test_the_timeline_editor_and_the_preview_follow_each_other(window, tmp_path)
         lambda: session.execute(CLIP_TITLES) == [clip_title(picture.name, *whole_clip)],
         IMPORT_TIMEOUT_SECONDS,
     )
+    pick_asset(window, picture.name)
     window.click("#btn-preview")
     wait_until(
         "the preview never reported a duration",
@@ -1681,6 +1698,7 @@ def test_ticking_and_unticking_play_whole_timeline_swaps_the_preview_at_the_play
     )
     assert session.property(PLAY_WHOLE_TIMELINE_BOX, "checked") is False
 
+    pick_asset(window, first.name)
     window.click("#btn-preview")
     wait_until(
         "Preview never showed the first clip's source",
@@ -1853,6 +1871,11 @@ LOUDNESS_CURVE_CHOICES = 'return [...document.querySelectorAll("#prop-loudness-c
 CHANNEL_CURVE_PATH = 'return document.querySelector(`#prop-loudness-chart path.loudness-chart-channel[data-channel="${arguments[0]}"]`)?.getAttribute("d") ?? null;'
 AUDIO_MAP_ROW_NAMES = 'return [...document.querySelectorAll("#prop-audio-map tbody th")].map((th) => th.textContent);'
 AUDIO_MAP_FIRST_ROW_LANES = 'return [...document.querySelectorAll("#prop-audio-map input[data-input=\\"1\\"]")].map((cell) => cell.dataset.lane);'
+CHANNEL_PEAK_PATH = 'return document.querySelector(`#prop-loudness-chart path.loudness-chart-channel-peak[data-channel="${arguments[0]}"]`)?.getAttribute("d") ?? null;'
+LOUDNESS_CHART = "#prop-loudness-chart svg.loudness-chart"
+LOUDNESS_READOUT = "#prop-loudness-chart .loudness-chart-readout"
+READOUT_TIME = re.compile(r"\d\d:\d\d\.\d: ")
+RIGHT_PEAK_DBTP = -20
 PROPERTIES_LEGENDS = 'return [...document.querySelectorAll("#properties fieldset > legend")].map((legend) => legend.textContent);'
 SEVEN_ONE_LANES = ["L", "R", "C", "LFE", "Ls", "Rs", "Lrs", "Rrs"]
 
@@ -1911,7 +1934,7 @@ def test_measure_shows_the_delivered_level_and_a_curve_per_ticked_channel(window
 
     source, delivered = measure_integrated_lufs(window, UNCHANGED_SOURCE_STEPS)
     assert source == delivered
-    assert session.execute(LOUDNESS_CURVE_CHOICES) == ["mix", "L", "R"]
+    assert session.execute(LOUDNESS_CURVE_CHOICES) == ["mix", "peaks", "L", "R"]
     assert session.execute(CHANNEL_CURVE_PATH, RIGHT_CHANNEL) is None
     window.click('#prop-loudness-curves input[value="R"]')
     wait_until(
@@ -1919,6 +1942,24 @@ def test_measure_shows_the_delivered_level_and_a_curve_per_ticked_channel(window
         lambda: (session.execute(CHANNEL_CURVE_PATH, RIGHT_CHANNEL) or "").startswith("M"),
         REACTION_TIMEOUT_SECONDS,
     )
+    assert session.execute(CHANNEL_PEAK_PATH, RIGHT_CHANNEL) is None
+    window.click('#prop-loudness-curves input[value="peaks"]')
+    wait_until(
+        "ticking Channel peaks never drew R's peaks",
+        lambda: (session.execute(CHANNEL_PEAK_PATH, RIGHT_CHANNEL) or "").startswith("M"),
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.point_at(LOUDNESS_CHART)
+    wait_until(
+        "pointing at the chart never showed the readout",
+        lambda: session.text(LOUDNESS_READOUT),
+        REACTION_TIMEOUT_SECONDS,
+    )
+    readout = session.text(LOUDNESS_READOUT)
+    assert READOUT_TIME.match(readout), readout
+    # the R tone is 0.1 of full scale, -20 dBTP
+    assert f"R peak {RIGHT_PEAK_DBTP:.1f} dBTP" in readout, readout
+    window.click(NEUTRAL_TARGET)
 
     window.click(MEASURE_GAIN_FIELD)
     window.type_text(MEASURE_GAIN_TYPED)

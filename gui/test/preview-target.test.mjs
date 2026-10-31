@@ -3,43 +3,24 @@ import test from 'node:test';
 
 import { previewButtonEnabled, previewTarget, sourcePreviewTarget, PREVIEW_KIND_PACKAGE, PREVIEW_KIND_SOURCE, PREVIEW_KIND_TIMELINE } from '../src/preview-target.js';
 
-const EVERY_TIER = {
-  selectedPreview: { kind: PREVIEW_KIND_SOURCE, path: '/assets/picked.mov' },
-  firstPicturePath: '/assets/first.mov',
-  openedPackage: '/packages/Opened',
-  outputPath: '/packages/Output',
-};
+const PICKED_ASSET = { kind: PREVIEW_KIND_SOURCE, path: '/assets/picked.mov' };
+const PICKED_PACKAGE = { kind: PREVIEW_KIND_PACKAGE, path: '/packages/Picked' };
+const BUILT = '/packages/Built';
 
-test('a picked asset wins over everything below it', () => {
-  assert.deepEqual(previewTarget(EVERY_TIER), { kind: PREVIEW_KIND_SOURCE, path: '/assets/picked.mov' });
+test('a picked asset wins over the built package', () => {
+  assert.deepEqual(previewTarget({ selectedPreview: PICKED_ASSET, builtPackage: BUILT }), PICKED_ASSET);
 });
 
-test('a picked package wins over the first picture', () => {
-  const target = previewTarget({ ...EVERY_TIER, selectedPreview: { kind: PREVIEW_KIND_PACKAGE, path: '/packages/Picked' } });
-
-  assert.deepEqual(target, { kind: PREVIEW_KIND_PACKAGE, path: '/packages/Picked' });
+test('a picked package wins over the built package', () => {
+  assert.deepEqual(previewTarget({ selectedPreview: PICKED_PACKAGE, builtPackage: BUILT }), PICKED_PACKAGE);
 });
 
-test('with nothing picked the first picture wins over both packages', () => {
-  const target = previewTarget({ ...EVERY_TIER, selectedPreview: null });
-
-  assert.deepEqual(target, { kind: PREVIEW_KIND_SOURCE, path: '/assets/first.mov' });
+test('with nothing picked Preview plays the built package', () => {
+  assert.deepEqual(previewTarget({ selectedPreview: null, builtPackage: BUILT }), { kind: PREVIEW_KIND_PACKAGE, path: BUILT });
 });
 
-test('the opened package wins over the output path', () => {
-  const target = previewTarget({ ...EVERY_TIER, selectedPreview: null, firstPicturePath: undefined });
-
-  assert.deepEqual(target, { kind: PREVIEW_KIND_PACKAGE, path: '/packages/Opened' });
-});
-
-test('the output path is the last resort', () => {
-  const target = previewTarget({ ...EVERY_TIER, selectedPreview: null, firstPicturePath: undefined, openedPackage: null });
-
-  assert.deepEqual(target, { kind: PREVIEW_KIND_PACKAGE, path: '/packages/Output' });
-});
-
-test('an empty project has nothing to open', () => {
-  assert.equal(previewTarget({ selectedPreview: null, firstPicturePath: undefined, openedPackage: null, outputPath: '' }), null);
+test('with nothing picked and nothing built there is nothing to preview', () => {
+  assert.equal(previewTarget({ selectedPreview: null, builtPackage: null }), null);
 });
 
 const CLIP_AT_FRAME_240 = { picture: 2, start: 240, layer: 0, inFrame: 20, outFrame: 100 };

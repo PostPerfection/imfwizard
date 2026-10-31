@@ -447,7 +447,11 @@ function renderAssets() {
       setDragLabel(e, el.querySelector('.asset-name').textContent);
     });
     el.addEventListener('contextmenu', (e) => { showContextMenu(e, parseInt(el.dataset.assetId)); });
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (event) => {
+      if ((event.ctrlKey || event.metaKey) && el.classList.contains("selected")) {
+        clearPreviewSelection();
+        return;
+      }
       const asset = project.assets.find(a => a.id === parseInt(el.dataset.assetId));
       if (asset) selectPreview("source", asset.path);
     });
@@ -754,7 +758,7 @@ async function openImp(dir) {
 }
 
 document.getElementById("btn-open-imp")?.addEventListener("click", async () => {
-  const dir = await open({ directory: true });
+  const dir = await open({ directory: true, defaultPath: finishedBuild?.packagePath });
   if (dir) openImp(dir);
 });
 
@@ -809,13 +813,7 @@ function applyPreviewSelection() {
 }
 
 function previewTargetInput() {
-  const firstClip = baseClipsInOrder(activeTimeline())[0]?.clip;
-  return {
-    selectedPreview,
-    firstPicturePath: firstClip ? assetPath(firstClip.picture) : undefined,
-    openedPackage,
-    outputPath: document.getElementById("prop-output")?.value,
-  };
+  return { selectedPreview, builtPackage: finishedBuild?.packagePath ?? null };
 }
 
 function previewCurrentTarget() {
@@ -1821,7 +1819,7 @@ async function refreshFinishedBuild() {
     forgetFinishedBuild(FINISHED_BUILDS_KEY, finishedBuild.packagePath);
     finishedBuild = null;
   }
-  updateBuildButton();
+  updateToolbarState();
 }
 
 setInterval(refreshFinishedBuild, FINISHED_BUILD_CHECK_MILLISECONDS);
@@ -1920,6 +1918,10 @@ initTimelineEditor(document.getElementById("timeline-editor"), {
   onChange: timelineEdited,
   previewShowsClipSource: () => previewedClipIndex !== null,
   previewClipSource: previewClipSourceAt,
+  pickClipSource: (assetId) => selectPreview("source", assetPath(assetId)),
+  unpickClipSource: (assetId) => {
+    if (selectedPreview?.path === assetPath(assetId)) clearPreviewSelection();
+  },
   playTimeline,
   seekTimeline: previewSeekOnceLoaded,
   loadKeepingTransport,
