@@ -48,6 +48,8 @@ import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
 import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
+import { initLoudnessPanel, optionalNumber } from "../../extern/guikit/src/loudness-panel.js";
+import { audioMapTable } from "../../extern/guikit/src/audio-map-matrix.js";
 import { PROJECT_BUTTON_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
 import { askForText } from "../../extern/guikit/src/text-dialog.js";
@@ -1012,15 +1014,13 @@ async function renderAudioMap(soundPath) {
     container.innerHTML = `<div class="audio-map-empty">${escapeHtml(e)}</div>`;
     return;
   }
-  const header = audioMapShape.destination_names.map((name) => `<th>${name}</th>`).join("");
-  const rows = [];
-  for (let channel = 1; channel <= audioMapShape.input_channels; channel++) {
-    const cells = audioMapShape.destination_names
-      .map((name) => `<td><input type="text" data-input="${channel}" data-output="${name}" title="Input ${channel} to ${name}, in dB"></td>`)
-      .join("");
-    rows.push(`<tr><th>${channel}</th>${cells}</tr>`);
-  }
-  container.innerHTML = `<table><thead><tr><th></th>${header}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  const channelNumbers = Array.from({ length: audioMapShape.input_channels }, (_, index) => index + 1);
+  container.innerHTML = audioMapTable({
+    lanes: audioMapShape.destination_names,
+    channelNames: channelNumbers.map((channel) => `Channel ${channel}`),
+    autoRoutes: channelNumbers.map(() => null),
+    upmixLanes: [],
+  });
   container.querySelectorAll("input[data-input]").forEach((cell) => {
     cell.addEventListener("click", () => { if (!cell.value) cell.value = "0"; });
   });
@@ -1030,7 +1030,7 @@ async function renderAudioMap(soundPath) {
 function audioMapSpec() {
   const entries = [...document.querySelectorAll("#prop-audio-map input[data-input]")]
     .filter((cell) => cell.value.trim())
-    .map((cell) => `${cell.dataset.input}:${cell.dataset.output}@${cell.value.trim()}`);
+    .map((cell) => `${cell.dataset.input}:${cell.dataset.lane}@${cell.value.trim()}`);
   return entries.length ? entries.join(",") : null;
 }
 
@@ -1047,7 +1047,7 @@ function readAudioMap() {
     if (!Number.isFinite(gain)) {
       throw new Error(`Channel map gain "${value}" is not a number of decibels`);
     }
-    const route = `${cell.dataset.input}:${cell.dataset.output}`;
+    const route = `${cell.dataset.input}:${cell.dataset.lane}`;
     entries.push(gain === 0 ? route : `${route}@${gain}`);
   });
   return entries.length ? entries.join(",") : null;
@@ -1086,6 +1086,11 @@ function readSourceSettings(clipLengths) {
     flip: document.getElementById("prop-flip")?.value || null,
     raster: document.getElementById("prop-raster")?.value || null,
     audioMap: readAudioMap(),
+    audioGainDb: optionalNumber(document.getElementById("prop-audio-gain")?.value),
+    audioFadeInSeconds: optionalNumber(document.getElementById("prop-audio-fade-in")?.value),
+    audioFadeOutSeconds: optionalNumber(document.getElementById("prop-audio-fade-out")?.value),
+    loudnessTarget: document.getElementById("prop-loudness")?.value?.trim() || null,
+    truePeakCeiling: optionalNumber(document.getElementById("prop-true-peak")?.value),
   };
 }
 
@@ -1158,6 +1163,11 @@ function typedClipLengths() {
 function hasPicture() {
   return project.compositions.some((composition) => composition.timeline.clips.length > 0);
 }
+
+initLoudnessPanel({
+  measureSound: () => invoke("measure_sound", { request: currentJobRequest() }),
+  soundMissing: () => (hasPicture() || firstSoundAsset(activeTimeline(), assetById) ? null : "Import a video or sound asset first"),
+});
 
 document.getElementById("btn-build")?.addEventListener("click", async () => {
   let title = document.getElementById("prop-title")?.value?.trim();
@@ -1689,7 +1699,7 @@ async function restoreBuildPanel(saved, projectPath) {
   await audioMapDrawn;
   let unroutedCells = 0;
   for (const { input, output, gain } of audioMapCells(form.audioMap)) {
-    const cell = document.querySelector(`#prop-audio-map input[data-input="${input}"][data-output="${output}"]`);
+    const cell = document.querySelector(`#prop-audio-map input[data-input="${input}"][data-lane="${output}"]`);
     if (cell) cell.value = gain;
     else unroutedCells += 1;
   }

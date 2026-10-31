@@ -16,7 +16,9 @@ use crate::hdr_source::SourceHdr;
 use crate::hdr_wcg::HdrWcg;
 use crate::imp::{AudioRole, AudioTrack, Composition, ImpOptions, SoundfieldLabels};
 use crate::intermediates::ENCODE_SCRATCH_PREFIX;
-use crate::source_edits::{CONVERTED_SUBTITLE_PREFIX, FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX};
+use crate::source_edits::{
+    CONVERTED_SUBTITLE_PREFIX, FINISHED_AUDIO_PREFIX, FITTED_AUDIO_PREFIX, WIDENED_AUDIO_PREFIX,
+};
 use crate::source_picture::SourcePictureOptions;
 use crate::subtitle_convert::SubtitleFormat;
 
@@ -48,6 +50,7 @@ pub struct TimelineImp {
     pub audio_role: Option<AudioRole>,
     pub timed_text_language: Option<String>,
     pub soundfield: SoundfieldLabels,
+    pub sound_finish: postkit::audio_adjust::SoundFinish,
     pub cancel: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
 }
@@ -404,7 +407,7 @@ pub fn build_timeline_imp(
     if build.cancel.load(Ordering::Relaxed) {
         return Err(crate::imp::CANCELLED_ERROR.to_string());
     }
-    let sound_track_file = wrap_timeline_sound(build, &options, &mut composition, frames)?;
+    let sound_track_file = wrap_timeline_sound(build, &options, &mut composition, frames, &on_log)?;
     let timed_text_track_file = wrap_timeline_subtitle(build, &options, frames)?;
 
     let stretch_lengths: Vec<u64> = plan
@@ -595,12 +598,19 @@ fn wrap_timeline_sound(
     options: &ImpOptions,
     composition: &mut Composition,
     frames: u64,
+    on_log: impl Fn(&str),
 ) -> Result<Option<MxfTrackFile>, String> {
     let output_dir = &build.output_dir;
     let rendered = output_dir.join(format!("{ENCODE_SCRATCH_PREFIX}{TIMELINE_SOUND_FILE}"));
-    let Some(rendered) = postkit::timeline::render_sound(&build.timeline, &rendered)? else {
+    let Some(joined) = postkit::timeline::render_sound(&build.timeline, &rendered)? else {
         return Ok(None);
     };
+    let rendered = postkit::audio_adjust::finish_kept_sound(
+        &joined,
+        &output_dir.join(format!("{FINISHED_AUDIO_PREFIX}timeline")),
+        &build.sound_finish,
+        on_log,
+    )?;
     let widened = crate::imp::widened_sound(
         &rendered,
         &output_dir.join(format!("{WIDENED_AUDIO_PREFIX}0.wav")),
@@ -904,6 +914,7 @@ mod tests {
             audio_role: None,
             timed_text_language: None,
             soundfield: Default::default(),
+            sound_finish: Default::default(),
             cancel: Default::default(),
             pause: Default::default(),
         }

@@ -17,12 +17,13 @@ const INTERMEDIATE_DIRECTORIES: [&str; 3] = [
 const INTERMEDIATE_FILES: [&str; 2] = [DEMUXED_AUDIO_NAME, crate::audio_map::MAPPED_AUDIO_NAME];
 
 // scratch named one per composition, per sound file or per subtitle file
-const INTERMEDIATE_PREFIXES: [&str; 7] = [
+const INTERMEDIATE_PREFIXES: [&str; 8] = [
     ENCODE_SCRATCH_PREFIX,
     crate::source_edits::DELAYED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_AUDIO_PREFIX,
     crate::source_edits::FITTED_AUDIO_PREFIX,
     crate::source_edits::WIDENED_AUDIO_PREFIX,
+    crate::source_edits::FINISHED_AUDIO_PREFIX,
     crate::source_edits::TRIMMED_SUBTITLE_PREFIX,
     crate::source_edits::CONVERTED_SUBTITLE_PREFIX,
 ];

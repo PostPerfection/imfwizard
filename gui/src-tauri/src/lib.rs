@@ -111,6 +111,7 @@ pub fn run() {
             pipeline::detect_source_crop,
             pipeline::subtitle_file_for_preview,
             pipeline::audio_map_shape,
+            pipeline::measure_sound,
             timeline_cmd::list_cpls,
             timeline_cmd::get_timeline,
         ])

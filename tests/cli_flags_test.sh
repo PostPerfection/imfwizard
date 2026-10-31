@@ -118,6 +118,11 @@ CREATE_CONTROLS=(
   "prop-raster=--raster"
   "prop-hdr=--hdr"
   "prop-audio-map=--audio-map"
+  "prop-loudness=--loudness-target"
+  "prop-true-peak=--true-peak-ceiling"
+  "prop-audio-gain=--audio-gain"
+  "prop-audio-fade-in=--audio-fade-in"
+  "prop-audio-fade-out=--audio-fade-out"
 )
 
 echo "Checking Properties panel controls against 'create' flags"

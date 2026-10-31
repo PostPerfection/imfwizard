@@ -314,6 +314,44 @@ struct CompressionArguments {
     quality_psnr: Option<f64>,
 }
 
+/// The level and fades of the sound, set after the trim.
+#[derive(clap::Args)]
+struct SoundLevelArguments {
+    /// Bring the sound to a loudness: leqm=<db> (ISO 21727 Leq(m)) or
+    /// lufs=<value> (EBU R128 integrated). Not applied when --audio-gain is
+    /// given.
+    #[arg(long)]
+    loudness_target: Option<String>,
+    /// True-peak ceiling in dBTP for --loudness-target (default -1.0). The
+    /// build stops if the gain would go past it.
+    #[arg(long, allow_negative_numbers = true)]
+    true_peak_ceiling: Option<f64>,
+    /// Gain in dB, applied to the trimmed sound before the fades. With a gain
+    /// given, the loudness target is not applied.
+    #[arg(long, allow_negative_numbers = true)]
+    audio_gain: Option<f64>,
+    /// Fade the sound up from silence over this many seconds.
+    #[arg(long)]
+    audio_fade_in: Option<f64>,
+    /// Fade the sound down to silence over this many seconds at the end.
+    #[arg(long)]
+    audio_fade_out: Option<f64>,
+}
+
+impl SoundLevelArguments {
+    fn sound_finish(&self) -> Result<postkit::audio_adjust::SoundFinish, String> {
+        postkit::audio_adjust::SoundFinish::from_typed(
+            postkit::audio_adjust::AudioAdjust {
+                gain_db: self.audio_gain,
+                fade_in_seconds: self.audio_fade_in,
+                fade_out_seconds: self.audio_fade_out,
+            },
+            self.loudness_target.as_deref(),
+            self.true_peak_ceiling,
+        )
+    }
+}
+
 /// What `create` cuts and converts before the encode. Boxed for the same reason
 /// `PictureArguments` is.
 #[derive(clap::Args)]
@@ -907,6 +945,9 @@ struct CreateArguments {
     /// decibels, e.g. "1:L,2:R,1:C@-6".
     #[arg(long = "audio-map")]
     audio_map: Option<String>,
+
+    #[command(flatten)]
+    sound_level: Box<SoundLevelArguments>,
 
     #[command(flatten)]
     atmos: Box<AtmosArguments>,
@@ -2065,11 +2106,13 @@ fn run() {
                 source_edits,
                 picture: picture_arguments,
                 audio_map,
+                sound_level,
                 atmos,
                 check,
                 keep_intermediates,
                 no_verify,
             } = *create_arguments;
+            let sound_finish = sound_level.sound_finish().unwrap_or_else(|e| fail(e));
             for component in postkit::component_versions::installed_components(
                 "IMF Wizard",
                 env!("CARGO_PKG_VERSION"),
@@ -2217,6 +2260,7 @@ fn run() {
                         audio_content_kind: soundfield.audio_content_kind,
                         audio_element_kind: soundfield.audio_element_kind,
                     },
+                    sound_finish,
                     cancel: Default::default(),
                     pause: Default::default(),
                 };
@@ -2730,9 +2774,15 @@ fn run() {
                 encode_window,
             )
             .unwrap_or_else(|e| fail(e));
+            let audio_files = imfwizard_core::source_edits::finish_sound_files(
+                &source.audio_files,
+                &output,
+                &sound_finish,
+                |line| tracing::info!("{line}"),
+            )
+            .unwrap_or_else(|e| fail(e));
 
-            let audio_tracks = source
-                .audio_files
+            let audio_tracks = audio_files
                 .into_iter()
                 .map(|path| imfwizard_core::imp::AudioTrack {
                     path,

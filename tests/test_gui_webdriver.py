@@ -1826,3 +1826,116 @@ def test_play_timeline_renders_a_clip_with_alpha_on_layer_1_and_plays_through_it
         past_the_stretch,
         PLAYHEAD_TIMEOUT_SECONDS,
     )
+
+
+MEASURE_MEDIA_SECONDS = 4
+MEASURE_BUTTON = "#prop-measure-sound"
+MEASURE_SOURCE = "#prop-loudness-source"
+MEASURE_DELIVERED = "#prop-loudness-delivered"
+MEASURE_STEPS = "#prop-loudness-steps"
+SET_GAIN_BUTTON = "#prop-gain-to-target"
+LOUDNESS_TARGET_FIELD = "#prop-loudness"
+LOUDNESS_TARGET = "lufs=-20"
+LOUDNESS_TARGET_LUFS = -20
+TARGET_TOLERANCE_LU = 0.2
+LOUDNESS_TOLERANCE_LU = 0.1
+MEASURE_GAIN_FIELD = "#prop-audio-gain"
+MEASURE_GAIN_TYPED = "-6"
+MEASURE_GAIN_DB = -6
+SOURCE_PREFIX = "Source: Integrated "
+DELIVERED_PREFIX = "Delivered: Integrated "
+UNCHANGED_SOURCE_STEPS = ["Source track as is"]
+GAIN_STEP = "Applied gain/fades"
+UNAPPLIED_TARGET_STEP = f"Loudness target {LOUDNESS_TARGET} not applied: the gain sets the level"
+RIGHT_CHANNEL = 1
+LOUDNESS_CHART_CURVE = "#prop-loudness-chart svg.loudness-chart path.loudness-chart-curve"
+LOUDNESS_CURVE_CHOICES = 'return [...document.querySelectorAll("#prop-loudness-curves input")].map((box) => box.value);'
+CHANNEL_CURVE_PATH = 'return document.querySelector(`#prop-loudness-chart path.loudness-chart-channel[data-channel="${arguments[0]}"]`)?.getAttribute("d") ?? null;'
+AUDIO_MAP_ROW_NAMES = 'return [...document.querySelectorAll("#prop-audio-map tbody th")].map((th) => th.textContent);'
+AUDIO_MAP_FIRST_ROW_LANES = 'return [...document.querySelectorAll("#prop-audio-map input[data-input=\\"1\\"]")].map((cell) => cell.dataset.lane);'
+PROPERTIES_LEGENDS = 'return [...document.querySelectorAll("#properties fieldset > legend")].map((legend) => legend.textContent);'
+SEVEN_ONE_LANES = ["L", "R", "C", "LFE", "Ls", "Rs", "Lrs", "Rrs"]
+
+
+# L louder than R so each channel has a curve of its own
+def write_stereo_sound(path, seconds):
+    run_ffmpeg(
+        "-f", "lavfi",
+        "-i", f"aevalsrc=0.5*sin(2*PI*1000*t)|0.1*sin(2*PI*1000*t):s=48000:d={seconds}",
+        "-c:a", "pcm_s24le",
+        str(path),
+    )
+    return path
+
+
+def integrated_lufs_after(session, css, prefix):
+    return float(session.property(css, "textContent").removeprefix(prefix).split()[0])
+
+
+# the source and delivered integrated loudness of one press of Measure
+def measure_integrated_lufs(window, expected_steps):
+    session = window.session
+    window.click(MEASURE_BUTTON)
+    wait_until(
+        "the sound measurement never came back",
+        lambda: session.property(MEASURE_SOURCE, "textContent").startswith(SOURCE_PREFIX)
+        and session.property(MEASURE_DELIVERED, "textContent").startswith(DELIVERED_PREFIX),
+        STATUS_TIMEOUT_SECONDS,
+    )
+    assert session.property(MEASURE_STEPS, "textContent").split(", ") == expected_steps
+    curve = session.attribute(LOUDNESS_CHART_CURVE, "d")
+    assert curve.startswith("M") and "L" in curve, curve
+    return (
+        integrated_lufs_after(session, MEASURE_SOURCE, SOURCE_PREFIX),
+        integrated_lufs_after(session, MEASURE_DELIVERED, DELIVERED_PREFIX),
+    )
+
+
+def test_measure_shows_the_delivered_level_and_a_curve_per_ticked_channel(window, tmp_path):
+    session = window.session
+    legends = session.execute(PROPERTIES_LEGENDS)
+    assert legends.index("Output") == legends.index("IMP") + 1, legends
+    media = tmp_path / "media"
+    media.mkdir()
+    picture = write_picture(media / "picture.mov", MEASURE_MEDIA_SECONDS)
+    sound = write_stereo_sound(media / "stereo.wav", MEASURE_MEDIA_SECONDS)
+
+    choose_in_dialog(window, "#import-video", picture)
+    choose_in_dialog(window, "#import-audio", sound)
+    wait_until(
+        "the channel map never drew a row for each channel",
+        lambda: session.execute(AUDIO_MAP_ROW_NAMES) == ["Channel 1", "Channel 2"],
+        IMPORT_TIMEOUT_SECONDS,
+    )
+    assert session.execute(AUDIO_MAP_FIRST_ROW_LANES) == SEVEN_ONE_LANES
+
+    source, delivered = measure_integrated_lufs(window, UNCHANGED_SOURCE_STEPS)
+    assert source == delivered
+    assert session.execute(LOUDNESS_CURVE_CHOICES) == ["mix", "L", "R"]
+    assert session.execute(CHANNEL_CURVE_PATH, RIGHT_CHANNEL) is None
+    window.click('#prop-loudness-curves input[value="R"]')
+    wait_until(
+        "ticking R never drew its curve",
+        lambda: (session.execute(CHANNEL_CURVE_PATH, RIGHT_CHANNEL) or "").startswith("M"),
+        REACTION_TIMEOUT_SECONDS,
+    )
+
+    window.click(MEASURE_GAIN_FIELD)
+    window.type_text(MEASURE_GAIN_TYPED)
+    window.click(NEUTRAL_TARGET)
+    _, quieter = measure_integrated_lufs(window, [GAIN_STEP])
+    assert (session.execute(CHANNEL_CURVE_PATH, RIGHT_CHANNEL) or "").startswith("M"), "the R tick was lost"
+    assert abs(source + MEASURE_GAIN_DB - quieter) < LOUDNESS_TOLERANCE_LU, (source, quieter)
+
+    window.click(LOUDNESS_TARGET_FIELD)
+    window.type_text(LOUDNESS_TARGET)
+    window.click(NEUTRAL_TARGET)
+    wait_until(
+        "Set gain to reach target stayed disabled",
+        lambda: session.property(SET_GAIN_BUTTON, "disabled") is False,
+        REACTION_TIMEOUT_SECONDS,
+    )
+    window.click(SET_GAIN_BUTTON)
+    gain_db = float(session.property(MEASURE_GAIN_FIELD, "value"))
+    _, on_target = measure_integrated_lufs(window, [UNAPPLIED_TARGET_STEP, GAIN_STEP])
+    assert abs(on_target - LOUDNESS_TARGET_LUFS) < TARGET_TOLERANCE_LU, (gain_db, on_target)

@@ -122,9 +122,35 @@ pub struct SourceSettings {
     /// grammar.
     #[serde(default)]
     pub audio_map: Option<String>,
+    #[serde(default)]
+    pub audio_gain_db: Option<f64>,
+    #[serde(default)]
+    pub audio_fade_in_seconds: Option<f64>,
+    #[serde(default)]
+    pub audio_fade_out_seconds: Option<f64>,
+    /// leqm=85 or lufs=-23, not applied while a gain is set.
+    #[serde(default)]
+    pub loudness_target: Option<String>,
+    #[serde(default)]
+    pub true_peak_ceiling: Option<f64>,
 }
 
 impl SourceSettings {
+    fn sound_finish(&self) -> Result<postkit::audio_adjust::SoundFinish, String> {
+        postkit::audio_adjust::SoundFinish::from_typed(
+            postkit::audio_adjust::AudioAdjust {
+                gain_db: self.audio_gain_db,
+                fade_in_seconds: self.audio_fade_in_seconds,
+                fade_out_seconds: self.audio_fade_out_seconds,
+            },
+            self.loudness_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|spec| !spec.is_empty()),
+            self.true_peak_ceiling,
+        )
+    }
+
     fn hdr(&self) -> Result<Option<imfwizard_core::hdr_wcg::HdrWcg>, String> {
         match self.hdr.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(preset) => imfwizard_core::hdr_wcg::HdrWcg::from_flags(preset, None).map(Some),
@@ -229,6 +255,8 @@ pub struct JobConfig {
     burn_style: postkit::subtitle_raster::BurnStyleOverrides,
     picture: imfwizard_core::source_picture::SourcePictureOptions,
     audio_map: Option<String>,
+    #[serde(default)]
+    sound_finish: postkit::audio_adjust::SoundFinish,
     /// What the pre-build check found, carried through so the job log lists it
     /// without measuring the source a second time.
     hints: Vec<String>,
@@ -521,6 +549,7 @@ fn timeline_imp_of(
         audio_role: None,
         timed_text_language: composition.audio_lang.clone(),
         soundfield: Default::default(),
+        sound_finish: job.sound_finish.clone(),
         cancel,
         pause,
     }
@@ -651,6 +680,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
             .transpose()?,
     };
     let picture_options = settings.picture()?;
+    let sound_finish = settings.sound_finish()?;
     // a bad size or colour has to stop the build here, not part way through the encode
     let burn_style = settings.burn_style()?;
     imfwizard_core::subtitle_burn::resolve_burn_style(&burn_style)?;
@@ -709,6 +739,7 @@ fn job_config_of(id: u64, request: SubmitRequest) -> Result<JobConfig, String> {
         burn_style,
         picture: picture_options,
         audio_map,
+        sound_finish,
         hints,
         timeline_plan: None,
     };
@@ -974,6 +1005,134 @@ fn parse_framerate(framerate: &str) -> Result<f64, String> {
 pub struct AudioMapShape {
     pub input_channels: usize,
     pub destination_names: Vec<String>,
+}
+
+const SOUND_MEASUREMENT_DIRECTORY: &str = "sound-measurement";
+const AUDIO_LOG_PREFIX: &str = "[AUDIO] ";
+
+#[tauri::command]
+pub async fn measure_sound(
+    app: AppHandle,
+    request: SubmitRequest,
+) -> Result<postkit::loudness::SoundMeasurement, String> {
+    let scratch_parent = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("no cache folder to build the sound in: {e}"))?
+        .join(SOUND_MEASUREMENT_DIRECTORY);
+    tokio::task::spawn_blocking(move || {
+        let job = job_config_of(0, request)?;
+        measure_job_sound(&job, &scratch_parent)
+    })
+    .await
+    .map_err(|e| format!("the sound measurement stopped: {e}"))?
+}
+
+// the first composition's sound through the steps its build runs, in a scratch folder removed afterwards
+fn measure_job_sound(
+    job: &JobConfig,
+    scratch_parent: &Path,
+) -> Result<postkit::loudness::SoundMeasurement, String> {
+    std::fs::create_dir_all(scratch_parent).map_err(|e| e.to_string())?;
+    let scratch = tempfile::tempdir_in(scratch_parent).map_err(|e| e.to_string())?;
+    let steps = std::cell::RefCell::new(Vec::new());
+    let log = |line: &str| {
+        if let Some(step) = line.strip_prefix(AUDIO_LOG_PREFIX) {
+            steps.borrow_mut().push(step.to_string());
+        }
+    };
+    let kept = match job.multi_clip_timeline() {
+        Some((_, timeline)) => {
+            let joined = postkit::timeline::render_sound(
+                timeline,
+                &scratch.path().join("timeline_sound.wav"),
+            )?;
+            if joined.is_some() {
+                log(&format!("{AUDIO_LOG_PREFIX}Joined the sound of the clips"));
+            }
+            joined
+        }
+        None => {
+            let composition = job
+                .compositions
+                .first()
+                .ok_or("There is no composition to measure")?;
+            kept_composition_sound(job, composition, scratch.path(), &log)?
+        }
+    };
+    let kept = kept.ok_or(
+        "There is no sound to measure: drop a WAV on the Sound track or use a video that carries one",
+    )?;
+    let delivered = postkit::audio_adjust::finish_kept_sound(
+        &kept,
+        &scratch.path().join("finish"),
+        &job.sound_finish,
+        |line| log(&format!("{AUDIO_LOG_PREFIX}{line}")),
+    )?;
+    let channels = postkit::wav_io::channel_count(&delivered)?;
+    postkit::loudness::measure_before_and_delivered(
+        &kept,
+        &delivered,
+        steps.into_inner(),
+        imfwizard_core::imp::channel_names(channels, job.audio_map.is_some()),
+    )
+}
+
+// the map, the delay and the trim a build runs ahead of the level step
+fn kept_composition_sound(
+    job: &JobConfig,
+    composition: &CompositionInput,
+    scratch: &Path,
+    log: &impl Fn(&str),
+) -> Result<Option<PathBuf>, String> {
+    let video_path = PathBuf::from(&composition.video_path);
+    let input_type = postkit::encode::detect_input_type(&video_path);
+    let source_is_video = input_type == postkit::encode::InputType::Video;
+    let Some(sound) = composition_sound_files(composition, source_is_video, scratch, log)?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    let mapped = match &job.audio_map {
+        Some(spec) => {
+            let mapped = imfwizard_core::audio_map::map_audio_file(spec, &sound, scratch, |_| {})?;
+            log(&format!("{AUDIO_LOG_PREFIX}Applied the channel map"));
+            mapped
+        }
+        None => sound,
+    };
+    let encode_window = imfwizard_core::source_edits::trimmed_encode_window(
+        &job.edits,
+        &video_path,
+        input_type,
+        job.fps_num,
+        job.fps_den,
+    )?;
+    let codestreams = input_type == postkit::encode::InputType::J2kSequence;
+    let edited = imfwizard_core::source_edits::apply_source_edits(
+        &job.edits,
+        &imfwizard_core::source_edits::CompositionSource {
+            j2k_dir: codestreams.then_some(video_path),
+            audio_files: vec![mapped],
+            timed_text_files: Vec::new(),
+            timed_text_language: None,
+        },
+        scratch,
+        job.fps_num,
+        job.fps_den,
+        encode_window,
+    )?;
+    if job.edits.audio_delay_ms != 0 {
+        log(&format!(
+            "{AUDIO_LOG_PREFIX}Delayed by {} ms",
+            job.edits.audio_delay_ms
+        ));
+    }
+    if job.edits.trims() {
+        log(&format!("{AUDIO_LOG_PREFIX}Trimmed with the picture"));
+    }
+    Ok(edited.audio_files.into_iter().next())
 }
 
 /// How many channels a WAV carries, for sizing the mapping matrix.
@@ -1765,15 +1924,19 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
             ),
         );
 
-        let audio_files = source
-            .audio_files
-            .into_iter()
-            .map(|path| imfwizard_core::imp::AudioTrack {
-                path,
-                language: ci.audio_lang.clone(),
-                role: None,
-            })
-            .collect();
+        let audio_files = imfwizard_core::source_edits::finish_sound_files(
+            &source.audio_files,
+            &enc_dir,
+            &job.sound_finish,
+            |line| log_to(&log_file, &format!("[AUDIO] {line}")),
+        )?
+        .into_iter()
+        .map(|path| imfwizard_core::imp::AudioTrack {
+            path,
+            language: ci.audio_lang.clone(),
+            role: None,
+        })
+        .collect();
         comps.push(imfwizard_core::imp::Composition {
             title: ci.title.clone(),
             content_kind: content_kind_or_feature(ci),
@@ -2641,6 +2804,77 @@ mod tests {
         assert!(
             refusal.starts_with("Audio delay is not supported on a timeline of more than one clip"),
             "{refusal}"
+        );
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_composition_is_measured_after_its_gain_with_a_curve_for_each_channel() {
+        const GAIN_DB: f64 = -6.0;
+        let directory = scratch_directory("measure-sound");
+        let picture = test_pattern_clip(&directory, "picture");
+        let sound = directory.join("mix.wav");
+        // 4 s fills the 3 s short term window, L at 0.5 and Ls at 0.1
+        run_ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            "aevalsrc=0.5*sin(2*PI*1000*t)|0.5*sin(2*PI*1000*t)|0.3*sin(2*PI*1000*t)|0.05*sin(2*PI*50*t)|0.1*sin(2*PI*1000*t)|0.1*sin(2*PI*1000*t):s=48000:d=4",
+            "-c:a",
+            "pcm_s24le",
+            &sound.to_string_lossy(),
+        ]);
+        let job = job_config_of(
+            0,
+            request(
+                &directory,
+                CompositionInput {
+                    audio_path: Some(sound.to_string_lossy().into_owned()),
+                    ..composition(&picture)
+                },
+                SourceSettings {
+                    audio_gain_db: Some(GAIN_DB),
+                    loudness_target: Some("lufs=-23".to_string()),
+                    ..app2e_settings()
+                },
+            ),
+        )
+        .unwrap();
+        let scratch_parent = directory.join("scratch");
+
+        let measured = super::measure_job_sound(&job, &scratch_parent).unwrap();
+
+        assert!(
+            (measured.delivered.integrated_lufs - measured.before.integrated_lufs - GAIN_DB).abs()
+                < 0.05,
+            "delivered {} LUFS against {} LUFS before",
+            measured.delivered.integrated_lufs,
+            measured.before.integrated_lufs
+        );
+        assert_eq!(
+            measured.steps,
+            [
+                "Loudness target lufs=-23 not applied: the gain sets the level",
+                "Applied gain/fades"
+            ]
+        );
+        assert_eq!(measured.channel_labels, ["L", "R", "C", "LFE", "Ls", "Rs"]);
+        let last_short_term = |channel: usize| {
+            measured.delivered.channel_short_term_lufs[channel]
+                .last()
+                .copied()
+                .flatten()
+                .unwrap()
+        };
+        let left_over_left_surround = last_short_term(0) - last_short_term(4);
+        assert!(
+            (left_over_left_surround - 14.0).abs() < 0.2,
+            "L is {left_over_left_surround} dB above Ls"
+        );
+        assert_eq!(
+            std::fs::read_dir(&scratch_parent).unwrap().count(),
+            0,
+            "the scratch folder is removed"
         );
         std::fs::remove_dir_all(&directory).ok();
     }

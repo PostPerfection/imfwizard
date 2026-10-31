@@ -126,6 +126,20 @@ pub fn mca_labels(channels: usize, role: Option<AudioRole>) -> String {
     }
 }
 
+const STEREO_CHANNELS: usize = 2;
+const FIVE_ONE_CHANNELS: usize = 6;
+
+// the loudness panel's name for each channel, the lane an audio map put it on or the label the wrap writes
+pub fn channel_names(channels: usize, mapped: bool) -> Vec<String> {
+    let lanes = crate::audio_map::destination_names();
+    let named_by_lane = channels <= lanes.len()
+        && (mapped || matches!(channels, STEREO_CHANNELS | FIVE_ONE_CHANNELS));
+    if named_by_lane {
+        return lanes.into_iter().take(channels).collect();
+    }
+    (1..=channels).map(|n| format!("Channel {n}")).collect()
+}
+
 /// A CPL written into the IMP, referenced by the shared PKL and ASSETMAP.
 #[derive(Debug, Clone)]
 pub struct CplEntry {
@@ -641,6 +655,22 @@ mod tests {
         assert_eq!(mca_labels(6, None), "51(L,R,C,LFE,Ls,Rs)");
         assert_eq!(mca_labels(1, None), "DNS(NSC001)");
         assert_eq!(mca_labels(3, None), "DNS(NSC001,NSC002,NSC003)");
+    }
+
+    #[test]
+    fn the_channel_names_follow_the_labels_or_the_mapped_lanes() {
+        assert_eq!(channel_names(2, false), ["L", "R"]);
+        assert_eq!(channel_names(6, false), ["L", "R", "C", "LFE", "Ls", "Rs"]);
+        assert_eq!(
+            channel_names(3, false),
+            ["Channel 1", "Channel 2", "Channel 3"]
+        );
+        assert_eq!(channel_names(3, true), ["L", "R", "C"]);
+        assert_eq!(
+            channel_names(8, true),
+            ["L", "R", "C", "LFE", "Ls", "Rs", "Lrs", "Rrs"]
+        );
+        assert_eq!(channel_names(9, true).last().unwrap(), "Channel 9");
     }
 
     #[test]

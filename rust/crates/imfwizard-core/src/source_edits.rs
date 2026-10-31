@@ -23,6 +23,7 @@ pub const DELAYED_AUDIO_PREFIX: &str = "delayed_audio_";
 pub const TRIMMED_AUDIO_PREFIX: &str = "trimmed_audio_";
 pub const FITTED_AUDIO_PREFIX: &str = "fitted_audio_";
 pub const WIDENED_AUDIO_PREFIX: &str = "widened_audio_";
+pub const FINISHED_AUDIO_PREFIX: &str = "finished_audio_";
 pub const TRIMMED_SUBTITLE_PREFIX: &str = "trimmed_subtitle_";
 pub const CONVERTED_SUBTITLE_PREFIX: &str = "converted_subtitle_";
 
@@ -476,6 +477,27 @@ fn edit_one_wav(
         current = trimmed;
     }
     Ok(current)
+}
+
+// after the trim, so a loudness target measures the sound that ships
+pub fn finish_sound_files(
+    files: &[PathBuf],
+    work_dir: &Path,
+    finish: &postkit::audio_adjust::SoundFinish,
+    log: impl Fn(&str),
+) -> Result<Vec<PathBuf>, String> {
+    files
+        .iter()
+        .enumerate()
+        .map(|(index, wav)| {
+            postkit::audio_adjust::finish_kept_sound(
+                wav,
+                &work_dir.join(format!("{FINISHED_AUDIO_PREFIX}{index}")),
+                finish,
+                &log,
+            )
+        })
+        .collect()
 }
 
 /// What fitting one sound file to the picture changed, in sample frames. Only

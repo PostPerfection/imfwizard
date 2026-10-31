@@ -179,6 +179,17 @@
                 </fieldset>
 
                 <fieldset>
+                  <legend>Output</legend>
+                  <div class="prop-field">
+                    <label for="prop-output">Directory</label>
+                    <div class="input-with-btn">
+                      <input id="prop-output" type="text" placeholder="/path/to/output" readonly>
+                      <button id="browse-output" class="btn-sm">…</button>
+                    </div>
+                  </div>
+                </fieldset>
+
+                <fieldset>
                   <legend>Picture</legend>
                   <div class="prop-field">
                     <label for="prop-framerate">Frame Rate</label>
@@ -337,6 +348,38 @@
                     <div class="field-hint">Rows are the WAV's channels, columns the output lanes. A cell holds its gain in dB; empty leaves the route out, and clicking an empty cell routes it at 0.</div>
                     <div id="prop-audio-map" class="audio-map"></div>
                   </div>
+                  <div class="prop-field">
+                    <label for="prop-loudness">Loudness target</label>
+                    <div class="input-with-btn loudness-row">
+                      <input id="prop-loudness" type="text" placeholder="leqm=85 or lufs=-23">
+                      <div class="loudness-actions">
+                        <button id="prop-measure-sound" class="btn-sm" type="button" data-shared-action="measure">Measure</button>
+                        <button id="prop-gain-to-target" class="btn-sm" type="button" disabled data-key="g">Set gain to reach target</button>
+                      </div>
+                    </div>
+                    <p class="field-hint" id="prop-loudness-source"></p>
+                    <p class="field-hint" id="prop-loudness-delivered"></p>
+                    <p class="field-hint" id="prop-loudness-steps"></p>
+                    <div id="prop-loudness-chart"></div>
+                    <div id="prop-loudness-curves" class="loudness-curve-choices"></div>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-true-peak">True-peak ceiling (dBTP)</label>
+                    <input id="prop-true-peak" type="number" step="0.1" placeholder="-1.0">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-audio-gain">Gain (dB)</label>
+                    <input id="prop-audio-gain" type="number" step="0.1" placeholder="0">
+                    <p class="field-hint">With a gain typed, the loudness target is a reference for Set gain and is not applied automatically.</p>
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-audio-fade-in">Fade in (seconds)</label>
+                    <input id="prop-audio-fade-in" type="number" step="0.1" min="0" placeholder="0">
+                  </div>
+                  <div class="prop-field">
+                    <label for="prop-audio-fade-out">Fade out (seconds)</label>
+                    <input id="prop-audio-fade-out" type="number" step="0.1" min="0" placeholder="0">
+                  </div>
                 </fieldset>
 
                 <fieldset>
@@ -353,16 +396,6 @@
                   <p class="field-hint" id="prop-clip-length-hint" hidden>A clip's In and Out on the timeline set its length, so Trim and Still Length are off while any composition has more than one clip or a segment start.</p>
                 </fieldset>
 
-                <fieldset>
-                  <legend>Output</legend>
-                  <div class="prop-field">
-                    <label for="prop-output">Directory</label>
-                    <div class="input-with-btn">
-                      <input id="prop-output" type="text" placeholder="/path/to/output" readonly>
-                      <button id="browse-output" class="btn-sm">…</button>
-                    </div>
-                  </div>
-                </fieldset>
               </div>
             </aside>
           </div>

@@ -232,6 +232,7 @@ pub fn conform_to_imp(
         audio_role: None,
         timed_text_language: None,
         soundfield: Default::default(),
+        sound_finish: Default::default(),
         cancel: Default::default(),
         pause: Default::default(),
     };

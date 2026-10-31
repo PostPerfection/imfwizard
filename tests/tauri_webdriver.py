@@ -282,7 +282,8 @@ class Window:
         xdotool("windowfocus", "--sync", self.window_id)
 
     def type_text(self, text):
-        xdotool("type", "--delay", str(TYPE_DELAY_MILLISECONDS), text)
+        # text starting with a dash would read as an option
+        xdotool("type", "--delay", str(TYPE_DELAY_MILLISECONDS), "--", text)
         time.sleep(INPUT_SETTLE_SECONDS)
 
     def press(self, chord):
