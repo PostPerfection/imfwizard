@@ -5,7 +5,7 @@ import { open as _open, confirm as tauriConfirm, message as tauriMessage } from 
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
 import { initPreview, loadKeepingTransport, previewSeekOnceLoaded, previewFile, previewDcp, previewTimeline, cancelTimelineRender, watchPreviewTimelinePosition, stopPreview, PREVIEW_SHORTCUTS, isPreviewVisible, setPreviewCrop, setPreviewSubtitleFile, watchPreviewShown } from "../../extern/guikit/src/preview.js";
-import { previewTarget, previewButtonEnabled, sourcePreviewTarget, PREVIEW_KIND_SOURCE } from "./preview-target.js";
+import { previewTarget, previewButtonEnabled, sourcePreviewTarget, PREVIEW_KIND_SOURCE } from "../../extern/guikit/src/preview-target.js";
 import { initPlaylist, addToPlaylist } from "../../extern/guikit/src/playlist.js";
 import { initPlayerControlsPanel } from "../../extern/guikit/src/player-controls-panel.js";
 import { initJobsPanel, refreshJobs, startJobsPolling, stopJobsPolling } from "../../extern/guikit/src/jobs.js";

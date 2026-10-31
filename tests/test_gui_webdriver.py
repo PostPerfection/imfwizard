@@ -1739,7 +1739,12 @@ def test_ticking_and_unticking_play_whole_timeline_swaps_the_preview_at_the_play
         lambda: shows_source_at(session, second.name, SWAP_SOURCE_SECONDS),
         PREVIEW_TIMEOUT_SECONDS,
     )
-    assert editor_playhead_frame(session) == SWAP_PLAYHEAD_FRAME
+    # the editor playhead follows the preview's position reports, which land after the load
+    wait_until(
+        "the editor playhead never came back to the second clip's source frame",
+        lambda: editor_playhead_frame(session) == SWAP_PLAYHEAD_FRAME,
+        REACTION_TIMEOUT_SECONDS,
+    )
     assert_transport_holds(session, paused=True)
 
     session.execute(PREVIEW_PLAY_PAUSE)

@@ -46,6 +46,14 @@ return [box.left + box.width / 2, box.top + box.height / 2];
 """
 
 
+READ_ELEMENT = """
+const [css, name, kind] = arguments;
+const element = document.querySelector(css);
+if (!element) throw new Error(`no element matches ${css}`);
+return kind === "attribute" ? element.getAttribute(name) : element[name];
+"""
+
+
 class WebDriverError(RuntimeError):
     pass
 
@@ -132,20 +140,15 @@ class Session:
             return None
         return element_handle(found)
 
-    def element(self, css):
-        found = self.find(css)
-        if found is None:
-            raise AssertionError(f"no element matches {css}")
-        return found
-
+    # one script per read, since a page re-render between a find and a read leaves a stale handle
     def text(self, css):
-        return self.call("GET", f"/element/{self.element(css)}/text")
+        return self.execute(READ_ELEMENT, css, "innerText", "property")
 
     def property(self, css, name):
-        return self.call("GET", f"/element/{self.element(css)}/property/{name}")
+        return self.execute(READ_ELEMENT, css, name, "property")
 
     def attribute(self, css, name):
-        return self.call("GET", f"/element/{self.element(css)}/attribute/{name}")
+        return self.execute(READ_ELEMENT, css, name, "attribute")
 
     def execute(self, script, *arguments):
         return self.call("POST", "/execute/sync", {"script": script, "args": list(arguments)})
