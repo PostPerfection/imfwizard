@@ -97,8 +97,8 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -150,7 +150,7 @@ jobs:
 
       - name: Install patchelf (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y patchelf
+        run: sudo apt-get -o Acquire::Retries=5 install -y patchelf
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -275,8 +275,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev patchelf
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev patchelf
           cargo install cargo-deb
 
       - uses: PostPerfection/ffmpeg-mpv-builds@v1.0.0
@@ -332,7 +332,7 @@ jobs:
           dpkg-deb -f "$package" Depends
           dpkg-deb -c "$package"
           dpkg-deb -c "$package" | grep -F ./usr/share/doc/imfwizard/THIRD-PARTY-LICENSES-ffmpeg-mpv.txt
-          sudo apt-get install -y "$package"
+          sudo apt-get -o Acquire::Retries=5 install -y "$package"
           env -u LD_LIBRARY_PATH imfwizard --version | grep -F "${{ needs.version.outputs.project_version }}"
           env -u LD_LIBRARY_PATH imfwizard --help >/dev/null
           env -u LD_LIBRARY_PATH ldd /usr/bin/imfwizard
@@ -342,7 +342,7 @@ jobs:
           done
           # the runner already has every library the package depends on, a clean image does not
           docker run --rm -v "$package:/tmp/imfwizard.deb:ro" ubuntu:24.04 bash -euo pipefail -c \
-            'apt-get update && apt-get install -y --no-install-recommends /tmp/imfwizard.deb && imfwizard --version'
+            'apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y --no-install-recommends /tmp/imfwizard.deb && imfwizard --version'
 
       - name: Upload .deb package
         uses: actions/upload-artifact@v4
@@ -397,8 +397,8 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libarchive-tools xvfb xdotool
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y cmake pkg-config libxml2-dev libssl-dev libxerces-c-dev libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm libarchive-tools xvfb xdotool
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -623,7 +623,7 @@ jobs:
               exit 1
             fi
           done
-          sudo apt-get install -y "$deb"
+          sudo apt-get -o Acquire::Retries=5 install -y "$deb"
           check_binaries /usr/bin/imfwizard /usr/bin/imfwizard-gui
           for library in libmpv.so.2 libavcodec.so.62
           do
