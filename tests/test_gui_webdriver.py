@@ -219,6 +219,8 @@ def application_environment(root):
     runtime.mkdir(mode=0o700, exist_ok=True)
     environment.pop("DBUS_SESSION_BUS_ADDRESS", None)
     environment["XDG_RUNTIME_DIR"] = str(runtime)
+    # gsettings writes through dconf over the session bus, and logs a warning per write without one
+    environment["GSETTINGS_BACKEND"] = "memory"
     environment["IMFWIZARD_GUI_JOBS_FILE"] = str(root / "gui-jobs.jsonl")
     return environment
 
@@ -378,6 +380,7 @@ def window(tmp_path):
     opened = open_window(application_environment(tmp_path), tmp_path / "driver.log")
     yield opened
     # pytest shows this only when the test failed
+    print(f"status: {status_text(opened.session)!r}")
     print(opened.output())
     opened.close()
 
