@@ -2388,6 +2388,7 @@ dependencies = [
  "asdcplib",
  "base64 0.22.1",
  "chrono",
+ "clap",
  "cmac",
  "cosmic-text",
  "cpal",

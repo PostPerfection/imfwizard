@@ -1002,7 +1002,7 @@ mod tests {
             &picture,
             24,
             over,
-            crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS,
             &directory.path().join("out"),
         )
         .expect_err("a bitrate over the DCI limit has to be refused");

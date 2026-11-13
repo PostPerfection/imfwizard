@@ -1350,14 +1350,6 @@ fn log_to(log_file: &Arc<Mutex<std::fs::File>>, msg: &str) {
 
 const SECONDS_PER_MINUTE: u64 = 60;
 
-fn encode_threads_status(encode_threads: u32) -> String {
-    let count = postkit::grok_encoder::encode_thread_count(encode_threads);
-    if encode_threads == imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS {
-        return format!("{count} (automatic)");
-    }
-    count.to_string()
-}
-
 /// One `[TIMING]` line for the job log, sitting alongside the `[ENCODE]` and
 /// `[PACKAGE]` lines the same stage writes.
 fn format_stage_timing(stage: &str, duration: std::time::Duration) -> String {
@@ -1488,13 +1480,16 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     );
     log_to(
         &log_file,
-        &format!("Encode threads: {}", encode_threads_status(encode_threads)),
+        &format!(
+            "Encode threads: {}",
+            postkit::job_log::encode_threads_status(encode_threads)
+        ),
     );
     log_to(
         &log_file,
         &format!(
             "Picture findings: {}",
-            if detect_picture_findings { "on" } else { "off" }
+            postkit::job_log::picture_findings_status(detect_picture_findings)
         ),
     );
     log_to(
@@ -1503,10 +1498,7 @@ fn run_job(app: &AppHandle, job: &JobConfig) -> Result<String, String> {
     );
     log_to(
         &log_file,
-        &format!(
-            "Started: {}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
-        ),
+        &format!("Started: {}", postkit::job_log::log_timestamp()),
     );
 
     for hint in &job.hints {
@@ -2144,10 +2136,9 @@ fn composition_sound_files(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_timeline_package, composition_sound_files, compression_of, encode_threads_status,
-        format_encode_breakdown, format_stage_timing, job_config_of, timeline_imp_of,
-        timeline_preview_load, verification_log, verify_package, CompositionInput, SourceSettings,
-        SubmitRequest,
+        build_timeline_package, composition_sound_files, compression_of, format_encode_breakdown,
+        format_stage_timing, job_config_of, timeline_imp_of, timeline_preview_load,
+        verification_log, verify_package, CompositionInput, SourceSettings, SubmitRequest,
     };
     use postkit::timeline::{Clip, ClipSound, SoundTrack, Timeline, TIMELINE_FORMAT_VERSION};
     use std::path::{Path, PathBuf};
@@ -2480,15 +2471,6 @@ mod tests {
             format_stage_timing("total", Duration::from_secs(3600)),
             "[TIMING] total took 60m0s"
         );
-    }
-
-    #[test]
-    fn the_thread_count_says_when_it_was_chosen_automatically() {
-        assert_eq!(encode_threads_status(2), "2");
-        let automatic =
-            encode_threads_status(imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS);
-        assert!(automatic.ends_with(" (automatic)"), "{automatic}");
-        assert_ne!(automatic, "0 (automatic)");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS;
 use postkit::preferences::PrefsMigration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,7 +8,6 @@ use std::path::{Path, PathBuf};
 
 pub const CURRENT_PREFERENCES_VERSION: u32 = 2;
 const FIRST_MIGRATION_VERSION: u32 = 2;
-pub const AUTOMATIC_ENCODE_THREADS: u32 = 0;
 const SNAKE_CASE_RENAMES: [(&str, &str); 14] = [
     ("default_app_profile", "profile"),
     ("creator_name", "creator"),

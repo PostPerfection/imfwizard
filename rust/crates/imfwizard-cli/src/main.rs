@@ -1097,32 +1097,7 @@ enum Commands {
     },
 
     /// Build an IMP from every master that lands in a watched folder
-    Watch {
-        /// Directory to watch for masters
-        dir: PathBuf,
-
-        /// Directory each package is written to, under the master's file stem
-        #[arg(short, long)]
-        output: PathBuf,
-
-        /// POST a JSON notification to this URL when a package is built or fails
-        #[arg(long)]
-        webhook_url: Option<String>,
-
-        /// Seconds between polls
-        #[arg(
-            long,
-            default_value_t = postkit::watch::DEFAULT_POLL_INTERVAL_SECONDS,
-            value_parser = clap::value_parser!(u64).range(
-                postkit::watch::MINIMUM_POLL_INTERVAL_SECONDS..
-            )
-        )]
-        interval: u64,
-
-        /// Flags passed to `create` for every package, after a `--` separator
-        #[arg(last = true)]
-        create_arguments: Vec<String>,
-    },
+    Watch(postkit::watch::WatchArgs),
 
     /// List delivery profiles
     Profiles,
@@ -3026,24 +3001,9 @@ fn run() {
             }
         }
 
-        Commands::Watch {
-            dir,
-            output,
-            webhook_url,
-            interval,
-            create_arguments,
-        } => {
-            let command = postkit::watch::WatchCommand {
-                watch_dir: &dir,
-                output_dir: &output,
-                interval: std::time::Duration::from_secs(interval),
-                subtitle_extension: "ttml",
-                create_arguments: &create_arguments,
-                webhook_url,
-                webhook_event_prefix: "imp",
-            };
-            let watched = postkit::watch::watch_directory(&command, |stem| {
-                let package_dir = output.join(stem);
+        Commands::Watch(watch) => {
+            let watched = postkit::watch::watch_directory(&watch.command("ttml", "imp"), |stem| {
+                let package_dir = watch.output.join(stem);
                 Ok(postkit::watch::PackageTarget {
                     output_argument: package_dir.clone(),
                     package_dir,

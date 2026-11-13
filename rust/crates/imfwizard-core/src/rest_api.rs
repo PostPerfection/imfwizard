@@ -33,7 +33,7 @@ impl Default for ApiConfig {
             host: "127.0.0.1".into(),
             port: 8081,
             api_key: None,
-            encode_threads: crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            encode_threads: postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS,
             jobs_file: postkit::job_queue::jobs_path(
                 JOBS_FILE_VARIABLE,
                 crate::store::data_dir().join(JOBS_FILE_NAME),

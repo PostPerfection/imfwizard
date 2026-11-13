@@ -175,7 +175,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(true));
         run_worker(
             queue.clone(),
-            crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS,
             stop,
         );
     }
@@ -186,7 +186,7 @@ mod tests {
         // actually invokes validation rather than dropping the job.
         let error = execute_job(
             &validate_job(1),
-            crate::preferences::AUTOMATIC_ENCODE_THREADS,
+            postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS,
             &Arc::default(),
         )
         .unwrap_err();

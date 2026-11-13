@@ -33,7 +33,7 @@ fn serve_on(jobs_file: &Path) -> SocketAddr {
         host: "127.0.0.1".into(),
         port: 0,
         api_key: Some(API_KEY.into()),
-        encode_threads: imfwizard_core::preferences::AUTOMATIC_ENCODE_THREADS,
+        encode_threads: postkit::grok_encoder::AUTOMATIC_ENCODE_THREADS,
         jobs_file: jobs_file.to_path_buf(),
     };
     let (server, listener) = bind_server(&config).unwrap();
