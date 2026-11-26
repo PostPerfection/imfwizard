@@ -50,6 +50,7 @@ import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
 import { initLoudnessPanel, initLoudnessToolPanel, optionalNumber } from "../../extern/guikit/src/loudness-panel.js";
+import { runWithProgress } from "../../extern/guikit/src/sidecar-progress.js";
 import { audioMapTable } from "../../extern/guikit/src/audio-map-matrix.js";
 import { PROJECT_BUTTON_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
@@ -1380,8 +1381,8 @@ document.getElementById("tc-start")?.addEventListener("click", async () => {
   const format = document.getElementById("tc-format").value;
   const box = document.getElementById("tc-results");
   box.classList.add("visible"); box.textContent = "Transcoding...";
-  const cmd = Command.sidecar("imfwizard", ["transcode", "-i", input, "-o", output]);
-  const result = await cmd.execute();
+  const args = ["transcode", "-i", input, "-o", output, "--progress"];
+  const result = await runWithProgress(Command.sidecar("imfwizard", args), ({ text }) => { box.textContent = text; });
   box.textContent = result.code === 0 ? "✓ Done\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 
@@ -1412,8 +1413,8 @@ document.getElementById("bi-start")?.addEventListener("click", async () => {
   const box = document.getElementById("bi-results");
   box.classList.add("visible");
   box.textContent = "Burning subtitles...";
-  const cmd = Command.sidecar("imfwizard", ["burn-in", "-i", video, "-s", subs, "-o", output]);
-  const result = await cmd.execute();
+  const args = ["burn-in", "-i", video, "-s", subs, "-o", output, "--progress"];
+  const result = await runWithProgress(Command.sidecar("imfwizard", args), ({ text }) => { box.textContent = text; });
   box.textContent = result.code === 0 ? "✓ Done\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
 });
 

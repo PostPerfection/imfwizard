@@ -76,7 +76,7 @@ pub fn execute_job(
                 cancel: cancel.clone(),
                 ..Default::default()
             };
-            let r = postkit::transcode::transcode(&opts);
+            let r = postkit::transcode::transcode(&opts, |_| {});
             if r.success { Ok(()) } else { Err(r.error) }
         }
         JobType::Validate => {

@@ -1006,6 +1006,10 @@ enum Commands {
         /// Video codec
         #[arg(short, long, default_value = "libx264")]
         codec: String,
+
+        /// Print `progress transcode <done> <total>` lines to stderr, counting microseconds
+        #[arg(long)]
+        progress: bool,
     },
 
     /// Convert subtitles to TTML for IMF
@@ -1165,6 +1169,10 @@ enum Commands {
         /// Output video file
         #[arg(short, long)]
         output: String,
+
+        /// Print `progress burnin <done> <total>` lines to stderr, counting microseconds
+        #[arg(long)]
+        progress: bool,
     },
 
     /// Show IMP metadata
@@ -2843,6 +2851,7 @@ fn run() {
             input,
             output,
             codec,
+            progress,
         } => {
             let opts = postkit::transcode::TranscodeOptions {
                 input,
@@ -2850,7 +2859,16 @@ fn run() {
                 codec,
                 ..Default::default()
             };
-            let result = postkit::transcode::transcode(&opts);
+            let mut progress_lines = progress.then(postkit::progress_lines::ProgressLines::default);
+            let result = postkit::transcode::transcode(&opts, |report| {
+                if let Some(progress_lines) = &mut progress_lines {
+                    progress_lines.print(
+                        "transcode",
+                        report.done_microseconds,
+                        report.total_microseconds,
+                    );
+                }
+            });
             if result.success {
                 println!("Transcode complete: {}", result.output.display());
             } else {
@@ -3168,6 +3186,7 @@ fn run() {
             input,
             subtitles,
             output,
+            progress,
         } => {
             let opts = postkit::burnin::BurninOptions {
                 input: PathBuf::from(&input),
@@ -3175,7 +3194,17 @@ fn run() {
                 subtitle_file: Some(PathBuf::from(&subtitles)),
                 ..Default::default()
             };
-            match postkit::burnin::burnin(&opts) {
+            let mut progress_lines = progress.then(postkit::progress_lines::ProgressLines::default);
+            let burnt = postkit::burnin::burnin(&opts, |report| {
+                if let Some(progress_lines) = &mut progress_lines {
+                    progress_lines.print(
+                        "burnin",
+                        report.done_microseconds,
+                        report.total_microseconds,
+                    );
+                }
+            });
+            match burnt {
                 Ok(()) => println!("Burned subtitles into: {output}"),
                 Err(e) => {
                     eprintln!("Error: {e}");

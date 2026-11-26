@@ -116,6 +116,30 @@ fn transcode_writes_the_codec_it_was_given() {
     }
 }
 
+#[test]
+fn transcode_with_progress_prints_lines_up_to_the_whole_clip() {
+    let dir = TempDir::new().unwrap();
+    let clip = source_clip(dir.path());
+    let output = dir.path().join("out.mkv");
+
+    let run = cmd()
+        .args(["transcode", "-i", &clip.to_string_lossy()])
+        .args(["-o", &output.to_string_lossy(), "-c", "ffv1", "--progress"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.status.success(), "{stderr}");
+    let (done, total) = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("progress transcode "))
+        .map(|counts| counts.split_once(' ').unwrap())
+        .next_back()
+        .expect("no progress line printed");
+    assert_ne!(total, "0");
+    assert_eq!(done, total, "{stderr}");
+}
+
 /// A codec ffmpeg does not know fails the command in ffmpeg's own words rather
 /// than leaving a half written file behind as a success.
 #[test]
