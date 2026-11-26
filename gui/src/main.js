@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Command } from "@tauri-apps/plugin-shell";
@@ -1164,7 +1164,7 @@ function hasPicture() {
 }
 
 initLoudnessPanel({
-  measureSound: () => invoke("measure_sound", { request: currentJobRequest() }),
+  measureSound: (onProgress) => invoke("measure_sound", { request: currentJobRequest(), progress: new Channel(onProgress) }),
   soundMissing: () => (hasPicture() || firstSoundAsset(activeTimeline(), assetById) ? null : "Import a video or sound asset first"),
 });
 

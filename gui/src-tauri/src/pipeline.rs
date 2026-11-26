@@ -1,3 +1,4 @@
+use postkit::loudness::SoundMeasurementProgress;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1014,6 +1015,7 @@ const AUDIO_LOG_PREFIX: &str = "[AUDIO] ";
 pub async fn measure_sound(
     app: AppHandle,
     request: SubmitRequest,
+    progress: tauri::ipc::Channel<SoundMeasurementProgress>,
 ) -> Result<postkit::loudness::SoundMeasurement, String> {
     let scratch_parent = app
         .path()
@@ -1022,7 +1024,11 @@ pub async fn measure_sound(
         .join(SOUND_MEASUREMENT_DIRECTORY);
     tokio::task::spawn_blocking(move || {
         let job = job_config_of(0, request)?;
-        measure_job_sound(&job, &scratch_parent)
+        measure_job_sound(&job, &scratch_parent, |shown| {
+            if let Err(error) = progress.send(shown) {
+                eprintln!("[measure] {error}");
+            }
+        })
     })
     .await
     .map_err(|e| format!("the sound measurement stopped: {e}"))?
@@ -1032,6 +1038,7 @@ pub async fn measure_sound(
 fn measure_job_sound(
     job: &JobConfig,
     scratch_parent: &Path,
+    on_progress: impl Fn(SoundMeasurementProgress),
 ) -> Result<postkit::loudness::SoundMeasurement, String> {
     std::fs::create_dir_all(scratch_parent).map_err(|e| e.to_string())?;
     let scratch = tempfile::tempdir_in(scratch_parent).map_err(|e| e.to_string())?;
@@ -1039,6 +1046,9 @@ fn measure_job_sound(
     let log = |line: &str| {
         if let Some(step) = line.strip_prefix(AUDIO_LOG_PREFIX) {
             steps.borrow_mut().push(step.to_string());
+            on_progress(SoundMeasurementProgress::Step {
+                text: step.to_string(),
+            });
         }
     };
     let kept = match job.multi_clip_timeline() {
@@ -1075,6 +1085,7 @@ fn measure_job_sound(
         &delivered,
         steps.into_inner(),
         imfwizard_core::imp::channel_names(channels, job.audio_map.is_some()),
+        |percent| on_progress(SoundMeasurementProgress::Measuring { percent }),
     )
 }
 
@@ -2824,7 +2835,7 @@ mod tests {
         .unwrap();
         let scratch_parent = directory.join("scratch");
 
-        let measured = super::measure_job_sound(&job, &scratch_parent).unwrap();
+        let measured = super::measure_job_sound(&job, &scratch_parent, |_| {}).unwrap();
 
         assert!(
             (measured.delivered.integrated_lufs - measured.before.integrated_lufs - GAIN_DB).abs()
