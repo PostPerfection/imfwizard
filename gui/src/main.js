@@ -49,7 +49,7 @@ import { initShortcuts } from "../../extern/guikit/src/shortcuts.js";
 import { rememberFinishedBuild, finishedBuildRequest, forgetFinishedBuild } from "../../extern/guikit/src/finished-builds.js";
 import { THEME_SHORTCUT, POST_BUILD_SHORTCUTS, sidebarViewShortcuts } from "../../extern/guikit/src/shared-shortcuts.js";
 import { escapeHtml } from "../../extern/guikit/src/html.js";
-import { initLoudnessPanel, optionalNumber } from "../../extern/guikit/src/loudness-panel.js";
+import { initLoudnessPanel, initLoudnessToolPanel, optionalNumber } from "../../extern/guikit/src/loudness-panel.js";
 import { audioMapTable } from "../../extern/guikit/src/audio-map-matrix.js";
 import { PROJECT_BUTTON_SHORTCUTS } from "./shortcut-bindings.js";
 import { showHintsDialog } from "./hints-dialog.js";
@@ -1390,14 +1390,8 @@ document.getElementById("loud-browse")?.addEventListener("click", async () => {
   const f = await open({ directory: false }); if (f) { document.getElementById("loud-input").value = f; checkToolsReady(); }
 });
 
-document.getElementById("loud-measure")?.addEventListener("click", async () => {
-  const input = document.getElementById("loud-input").value;
-  const box = document.getElementById("loud-results");
-  box.classList.add("visible");
-  box.textContent = "Measuring loudness...";
-  const cmd = Command.sidecar("imfwizard", ["loudness", input]);
-  const result = await cmd.execute();
-  box.textContent = result.code === 0 ? "✓ Loudness Results\n\n" + result.stdout : "✗ Failed\n\n" + (result.stderr || result.stdout);
+initLoudnessToolPanel({
+  measureSoundFile: (sound, onPercent) => invoke("measure_sound_file", { sound, progress: new Channel(onPercent) }),
 });
 
 // === Tools: Burn-In ===

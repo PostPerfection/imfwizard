@@ -100,6 +100,7 @@ pub fn run() {
             guikit::preview::player_controls::preview_loaded_picture,
             guikit::source_length::picture_source_length,
             guikit::source_raster::picture_source_raster,
+            guikit::sound_file_levels::measure_sound_file,
             guikit::gpu::set_gpu,
             component_versions,
             pipeline::validate_imp,
